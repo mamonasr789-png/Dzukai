@@ -8,8 +8,13 @@ import ProductCard from "@/components/ProductCard";
 import ThemeToggle from "@/components/ThemeToggle";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { featuredProducts } from "@/lib/data";
+import { useCartStore } from "@/lib/store";
+import { useT } from "@/lib/i18n";
 
 export default function HomePage() {
+  const lang = useCartStore((s) => s.lang);
+  const tr = useT(lang);
+
   return (
     <div className="flex flex-col">
       {/* Header */}
@@ -26,7 +31,7 @@ export default function HomePage() {
           </div>
           <div>
             <span className="font-black text-base tracking-tight leading-tight block">Dzūkų Ainiai</span>
-            <span className="text-muted-foreground text-[10px] font-medium">Alaus Restoranas · Alytus</span>
+            <span className="text-muted-foreground text-[10px] font-medium">{tr.restaurant_subtitle}</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -48,14 +53,11 @@ export default function HomePage() {
         <div className="absolute bottom-0 left-0 right-0 p-5">
           <p className="text-white/70 text-xs font-medium tracking-widest uppercase mb-1">Alytus, Lietuva</p>
           <h1 className="text-white text-3xl font-black tracking-tight leading-tight mb-3">
-            Dzūkų<br />Alaus Restoranas
+            Dzūkų<br />{lang === "en" ? "Beer Restaurant" : lang === "ru" ? "Пивной Ресторан" : "Alaus Restoranas"}
           </h1>
           <Link href="/menu">
-            <Button
-              size="sm"
-              className="rounded-full bg-white text-black hover:bg-white/90 font-semibold gap-1.5 shadow-lg"
-            >
-              Žiūrėti meniu <ArrowRight size={14} strokeWidth={2.5} />
+            <Button size="sm" className="rounded-full bg-white text-black hover:bg-white/90 font-semibold gap-1.5 shadow-lg">
+              {lang === "en" ? "View menu" : lang === "ru" ? "Смотреть меню" : "Žiūrėti meniu"} <ArrowRight size={14} strokeWidth={2.5} />
             </Button>
           </Link>
         </div>
@@ -64,9 +66,9 @@ export default function HomePage() {
       {/* Featured */}
       <section className="mt-6 px-4">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-bold text-lg">Rekomenduojame</h2>
+          <h2 className="font-bold text-lg">{tr.recommended}</h2>
           <Link href="/menu" className="text-primary text-sm font-medium">
-            Visi patiekalai
+            {lang === "en" ? "All dishes" : lang === "ru" ? "Все блюда" : "Visi patiekalai"}
           </Link>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -78,24 +80,24 @@ export default function HomePage() {
 
       {/* Beer Banner */}
       <Link href="/menu?cat=alus" className="block mx-4 mt-6 mb-2">
-      <section className="rounded-3xl overflow-hidden relative h-36 active:scale-[0.98] transition-transform">
-        <Image
-          src="https://images.unsplash.com/photo-1608270586620-248524c67de9?w=800&q=80"
-          alt="Dzūkų craft beer"
-          fill
-          className="object-cover"
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-amber-900/90 to-amber-700/50" />
-        <div className="absolute inset-0 flex flex-col justify-center px-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Beer size={16} className="text-amber-300" />
-            <p className="text-amber-300 text-xs font-semibold tracking-widest uppercase">Savos daryklos alus</p>
+        <section className="rounded-3xl overflow-hidden relative h-36 active:scale-[0.98] transition-transform">
+          <Image
+            src="https://images.unsplash.com/photo-1608270586620-248524c67de9?w=800&q=80"
+            alt="Dzūkų craft beer"
+            fill
+            className="object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-amber-900/90 to-amber-700/50" />
+          <div className="absolute inset-0 flex flex-col justify-center px-5">
+            <div className="flex items-center gap-2 mb-1">
+              <Beer size={16} className="text-amber-300" />
+              <p className="text-amber-300 text-xs font-semibold tracking-widest uppercase">{tr.beer_label}</p>
+            </div>
+            <h3 className="text-white text-xl font-black leading-tight" style={{ whiteSpace: "pre-line" }}>
+              {tr.beer_title}
+            </h3>
           </div>
-          <h3 className="text-white text-xl font-black leading-tight">
-            6 rūšių<br />Craft alus 🍺
-          </h3>
-        </div>
-      </section>
+        </section>
       </Link>
     </div>
   );

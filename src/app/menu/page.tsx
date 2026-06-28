@@ -9,7 +9,8 @@ import {
 } from "lucide-react";
 import { categories, products, Product, Category } from "@/lib/data";
 import { useCartStore } from "@/lib/store";
-import { useT } from "@/lib/i18n";
+import { useT, categoryLabels } from "@/lib/i18n";
+import { productTranslations, badgeTranslations } from "@/lib/product-translations";
 import ThemeToggle from "@/components/ThemeToggle";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import QuantitySelector from "@/components/QuantitySelector";
@@ -17,22 +18,36 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
+function tProduct(id: string, lang: string, field: "name" | "description", fallback: string) {
+  if (lang === "lt") return fallback;
+  const l = lang as "en" | "ru";
+  return productTranslations[l]?.[id]?.[field] ?? fallback;
+}
+
+function tBadge(badge: string, lang: string) {
+  if (lang === "lt") return badge;
+  return badgeTranslations[lang as "en" | "ru"]?.[badge] ?? badge;
+}
+
 function ProductRow({ product, onOpen }: { product: Product; onOpen: () => void }) {
   const { addItem, items, lang } = useCartStore();
   const tr = useT(lang);
   const inCart = items.find((i) => i.product.id === product.id);
   const qty = inCart?.quantity ?? 0;
   const hasPrice = product.price > 0;
+  const name = tProduct(product.id, lang, "name", product.name);
+  const desc = tProduct(product.id, lang, "description", product.description);
+  const badge = product.badge ? tBadge(product.badge, lang) : null;
 
   return (
     <div className="flex gap-3 bg-card border border-border/40 rounded-2xl p-3 shadow-sm active:scale-[0.985] transition-transform">
       <button onClick={onOpen} className="flex-1 min-w-0 flex flex-col gap-0.5 text-left">
-        {product.badge && (
-          <span className="text-[10px] font-bold text-primary uppercase tracking-wide">{product.badge}</span>
+        {badge && (
+          <span className="text-[10px] font-bold text-primary uppercase tracking-wide">{badge}</span>
         )}
-        <p className="font-semibold text-sm leading-snug line-clamp-2">{product.name}</p>
-        {product.description ? (
-          <p className="text-muted-foreground text-xs leading-snug line-clamp-1 mt-0.5">{product.description}</p>
+        <p className="font-semibold text-sm leading-snug line-clamp-2">{name}</p>
+        {desc ? (
+          <p className="text-muted-foreground text-xs leading-snug line-clamp-1 mt-0.5">{desc}</p>
         ) : product.priceNote ? (
           <p className="text-muted-foreground text-xs mt-0.5">{product.priceNote}</p>
         ) : null}
@@ -77,6 +92,9 @@ function ProductSheet({ product, open, onClose }: { product: Product | null; ope
 
   if (!product) return null;
   const hasPrice = product.price > 0;
+  const name = tProduct(product.id, lang, "name", product.name);
+  const desc = tProduct(product.id, lang, "description", product.description);
+  const badge = product.badge ? tBadge(product.badge, lang) : null;
 
   const handleAdd = () => {
     addItem(product, qty);
@@ -101,13 +119,14 @@ function ProductSheet({ product, open, onClose }: { product: Product | null; ope
         </div>
         <div className="px-5 pt-4 pb-8">
           <div className="flex items-start justify-between gap-3">
-            <h2 className="font-black text-xl leading-tight flex-1">{product.name}</h2>
+            <h2 className="font-black text-xl leading-tight flex-1">{name}</h2>
             <span className="font-black text-xl text-primary shrink-0 pt-0.5">
               {hasPrice ? `${product.price.toFixed(2)} €` : tr.ask_price}
             </span>
           </div>
           {product.priceNote && <p className="text-xs text-muted-foreground mt-1 font-medium">{product.priceNote}</p>}
-          {product.description && <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{product.description}</p>}
+          {desc && <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{desc}</p>}
+          {badge && <span className="mt-1 inline-block text-[10px] font-bold text-primary uppercase tracking-wide">{badge}</span>}
           {product.ingredients.length > 0 && (
             <div className="mt-4">
               <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">{tr.ingredients}</p>
@@ -327,7 +346,7 @@ function MenuScreen() {
                   )}
                 >
                   <span>{cat.emoji}</span>
-                  {cat.label}
+                  {categoryLabels[lang][cat.id] ?? cat.label}
                 </button>
               ))}
               <div className="w-6 shrink-0" aria-hidden />

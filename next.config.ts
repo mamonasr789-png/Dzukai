@@ -6,14 +6,9 @@ const nextConfig: NextConfig = {
   },
   images: {
     remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "images.unsplash.com",
-      },
-      {
-        protocol: "https",
-        hostname: "www.dzukuainiai.lt",
-      },
+      { protocol: "https", hostname: "images.unsplash.com" },
+      { protocol: "https", hostname: "www.dzukuainiai.lt" },
+      { protocol: "https", hostname: "image.pollinations.ai" },
     ],
   },
 };
