@@ -1,0 +1,558 @@
+{
+  "restaurant": "Dzūkų Ainiai — Alaus Restoranas",
+  "address": "Vilniaus g. 35, Alytus",
+  "phone": "(0-601) 90888",
+  "source": "https://www.dzukuainiai.lt/meniu-restoranas/",
+  "categories": [
+    {
+      "id": "uzkandziai",
+      "name": "Užkandžiai",
+      "items": [
+        { "name": "Silkė su marinuotais svogūnais ir karštomis bulvėmis", "price": 6.20 },
+        { "name": "Silkė su keptomis daržovėmis", "price": 6.20 },
+        { "name": "Silkė su miško grybais ir bulvėmis", "price": 7.20 },
+        { "name": "Jautienos karpačio", "price": 14.90 },
+        { "name": "Tuno karpačio", "price": 14.50 }
+      ]
+    },
+    {
+      "id": "salotos",
+      "name": "Salotos",
+      "items": [
+        { "name": "Keptų burokėlių salotos su sūriu fetos sūriu", "price": 8.80 },
+        { "name": "Cezario salotos su grilyje kepta vištiena", "price": 10.50 },
+        { "name": "Cezario salotos su krevetėmis", "price": 11.50 },
+        { "name": "Salotos su Burrata sūriu ir Serano kumpiu", "price": 14.50 },
+        { "name": "Graikiškos salotos", "price": 10.90 },
+        { "name": "Salotos su antiena", "price": 14.90 },
+        { "name": "Salotos su tuno filė ir šilauogėmis", "price": 14.50 }
+      ]
+    },
+    {
+      "id": "sriubos",
+      "name": "Sriubos",
+      "items": [
+        { "name": "Šaltibarščiai", "price": 4.90 },
+        { "name": "Kopūstienė su baravykais", "price": 5.90 },
+        { "name": "Aštri \"Čili\" sriuba", "price": 6.90 },
+        { "name": "Tom Yum sriuba", "price": 14.90 }
+      ]
+    },
+    {
+      "id": "lietiniai",
+      "name": "Lietiniai blynai",
+      "items": [
+        { "name": "Lietiniai su varške", "price_small": 5.80, "price_large": 7.90 },
+        { "name": "Lietiniai su bananais", "price_small": 5.80, "price_large": 7.90 },
+        { "name": "Lietiniai su kumpiu ir sūriu", "price_small": 6.80, "price_large": 9.00 }
+      ]
+    },
+    {
+      "id": "koldumai",
+      "name": "Koldūnai",
+      "items": [
+        { "name": "Mūsų gamybos koldūnai su varške ir špinatais", "price": 9.90 },
+        { "name": "Mūsų gamybos koldūnai su vištiena ir pievagrybiais", "price": 10.90 },
+        { "name": "Mūsų gamybos koldūnai su aviena", "price": 14.50 },
+        { "name": "Gyoza koldūnai su aviena", "price": 14.90 }
+      ]
+    },
+    {
+      "id": "wok-makaronai",
+      "name": "Wok makaronai",
+      "items": [
+        { "name": "Wok makaronai su vištiena", "price": 11.50 },
+        { "name": "Wok makaronai su jautiena", "price": 12.90 },
+        { "name": "Wok makaronai su antiena", "price": 13.50 },
+        { "name": "Wok makaronai su jūros gėrybėmis", "price": 13.50 }
+      ]
+    },
+    {
+      "id": "wok-ryziai",
+      "name": "Wok ryžiai",
+      "items": [
+        { "name": "Wok ryžiai su vištiena", "price": 11.50 },
+        { "name": "Wok ryžiai su jautiena", "price": 12.90 },
+        { "name": "Wok ryžiai su antiena", "price": 13.50 },
+        { "name": "Wok ryžiai su jūros gėrybėmis", "price": 13.30 }
+      ]
+    },
+    {
+      "id": "bulviniai",
+      "name": "Lietuviški bulviniai patiekalai",
+      "items": [
+        { "name": "Didžkukuliai su mėsa", "price_small": 7.50, "price_large": 9.90 },
+        { "name": "Apkepinti didžkukuliai", "price_small": 7.50, "price_large": 9.90 },
+        { "name": "Žemaičių blynai", "price_small": 7.50, "price_large": 9.90 },
+        { "name": "Bulviniai blynai", "price": 9.90 },
+        { "name": "Bulviniai blynai su varške ir šonine", "price": 13.50 },
+        { "name": "Bulviniai blynai su varške ir lašiša", "price": 13.50 }
+      ]
+    },
+    {
+      "id": "bulvines-bandos",
+      "name": "Bulvinės bandos",
+      "items": [
+        { "name": "Bulvinės bandos su spirgučiais ir grietine", "price": 10.50 },
+        { "name": "Bulvinės bandos su baravykų padažu", "price": 11.50 },
+        { "name": "Bulvinės bandos su varške ir šonine", "price": 11.90 },
+        { "name": "Bulvinės bandos su varške ir lašiša", "price": 14.00 }
+      ]
+    },
+    {
+      "id": "picos-klasikines",
+      "name": "Itališkos picos, keptos malkinėje krosnyje — Klasikinės",
+      "items": [
+        { "name": "Margarita", "price": 9.00 },
+        { "name": "Vaikiška pica", "price": 11.50 },
+        { "name": "Keturių sūrių", "price": 9.90 },
+        { "name": "Perlenkta", "price": 10.50 },
+        { "name": "Vegetariška", "price": 10.90 },
+        { "name": "Chačapuri", "price": 14.90 },
+        { "name": "Chačapuri su faršu", "price": 16.90 },
+        { "name": "Su saliamiu ir Chalapos pipirais", "price": 10.90 },
+        { "name": "Su saliamiu ir pievagrybiais", "price": 11.50 },
+        { "name": "Su šonine ir svogūnais", "price": 11.00 },
+        { "name": "Su faršu", "price": 11.00 },
+        { "name": "Su vištiena, pievagrybiais", "price": 11.00 },
+        { "name": "Su saulėje džiovintais pomidorais", "price": 11.00 },
+        { "name": "Su kumpiu ir šonine", "price": 12.00 },
+        { "name": "Su Pepperoni", "price": 12.00 },
+        { "name": "Su Pepperoni aštri", "price": 12.50 },
+        { "name": "Su plėšyta jautiena", "price": 13.00 },
+        { "name": "Su vytintu kumpiu", "price": 14.00 },
+        { "name": "Su tuno filė", "price": 13.50 },
+        { "name": "Su traškia šonine", "price": 14.00 },
+        { "name": "Su kumpiu ir pievagrybiais", "price": 12.50 },
+        { "name": "Pica mėsos mėgėjams", "price": 13.00 },
+        { "name": "Su faršu ir kaparėliais", "price": 14.90 }
+      ]
+    },
+    {
+      "id": "picos-bianca",
+      "name": "Picos Bianca",
+      "items": [
+        { "name": "Pica Panouzzo", "price": 13.00 },
+        { "name": "Su vištiena ir kariu", "price": 11.00 },
+        { "name": "Vegetariška Bianca pica", "price": 10.90 },
+        { "name": "Su vytintu kumpiu ir karamelizuotais svogūnais", "price": 14.00 },
+        { "name": "Su kumpeliu ir triufelių padažu", "price": 13.00 }
+      ]
+    },
+    {
+      "id": "grilinis",
+      "name": "Grilinių patiekalų rinkiniai",
+      "items": [
+        { "name": "Grilinių patiekalų padėklas Nr. 1 (6 asmenims)", "price": 85.00 },
+        { "name": "Grilinių patiekalų padėklas Nr. 2 (6 asmenims)", "price": 80.00 },
+        { "name": "Grilinių žuvų padėklas (5 asmenims)", "price": 75.00 },
+        { "name": "Grilinių patiekalų ir bulvinių patiekalų padėklas (4 asmenims)", "price": 55.00 }
+      ]
+    },
+    {
+      "id": "vistiena",
+      "name": "Vištienos patiekalai",
+      "items": [
+        { "name": "Glazūruoti vištienos sparneliai (BBQ arba aštrūs Buffalo)", "price": 14.90 },
+        { "name": "Vištienos šašlykas", "price_small": 10.90, "price_large": 14.90 },
+        { "name": "Vištienos Vienos šnicelis", "price": 16.50 },
+        { "name": "Vištienos kebabas", "price": 16.50 },
+        { "name": "Vištienos filė", "price": 15.50 },
+        { "name": "Glazūruota vištienos filė (BBQ arba aštri Buffalo)", "price": 15.90 },
+        { "name": "Antienos krūtinėlė su kriauše ir pelėsiniu sūriu", "price": 21.00 },
+        { "name": "Grilyje keptas viščiukas", "price_small": 15.00, "price_large": 26.00 },
+        { "name": "Glazūruotas grilyje keptas viščiukas (BBQ arba aštrus Buffalo)", "price_small": 16.00, "price_large": 27.00 }
+      ]
+    },
+    {
+      "id": "kiauliena",
+      "name": "Kiaulienos patiekalai",
+      "items": [
+        { "name": "BBQ glazūruotos kiaulienos šoninės juostelės", "price": 13.90 },
+        { "name": "Kiaulienos Vienos šnicelis", "price": 16.60 },
+        { "name": "Aštrus kiaulienos šašlykas", "price_small": 11.90, "price_large": 15.90 },
+        { "name": "Kaukazietiškas kiaulienos šašlykas", "price_small": 11.90, "price_large": 15.90 },
+        { "name": "Kiaulienos šoninė", "price": 16.90 },
+        { "name": "Kiaulienos išpjova", "price": 16.90 },
+        { "name": "Kiaulienos sprandinės kepsnys", "price": 16.90 },
+        { "name": "Kiaulienos Tomahawk", "price": 22.00 },
+        { "name": "BBQ glazūruoti kiaulienos šonkauliai", "price": 21.90 },
+        { "name": "Lėtai kepta traški kiauliena Porchetta", "price": 16.90 }
+      ]
+    },
+    {
+      "id": "jautiena-aviena",
+      "name": "Jautienos, avienos patiekalai",
+      "items": [
+        { "name": "Jautienos antrekotas (Argentina)", "price": 29.90 },
+        { "name": "Jautienos antrekotas Surf and Turf (Argentina)", "price": 31.90 },
+        { "name": "Avienos kebabas", "price": 18.00 },
+        { "name": "Ėrienos karka su traiškyta bulve ir raugintais kopūstais", "price": 22.00 }
+      ]
+    },
+    {
+      "id": "zuvis",
+      "name": "Žuvies patiekalai",
+      "items": [
+        { "name": "Skumbrė", "price": 17.90 },
+        { "name": "Menkės kepsnys", "price": 17.90 },
+        { "name": "Grilyje keptos krevetės", "price": 18.50 },
+        { "name": "Jūros ešerys", "price": 19.90 },
+        { "name": "Lašišos kepsnys", "price": 20.90 },
+        { "name": "Tuno kepsnys", "price": 23.90 },
+        { "name": "Aštuonkojis su ananasu", "price": 27.90 }
+      ]
+    },
+    {
+      "id": "vaikiskas",
+      "name": "Vaikiškas meniu",
+      "items": [
+        { "name": "Gruzdintos bulvytės su pomidorų padažu", "price": 7.00 },
+        { "name": "Lietiniai blyneliai su vyšnių padažu", "price": 7.00 },
+        { "name": "Traškios vištienos juostelės su gruzdintomis bulvytėmis ir šviežiomis daržovėmis", "price": 11.90 }
+      ]
+    },
+    {
+      "id": "prie-alaus-vyno",
+      "name": "Užkandžiai prie alaus, vyno",
+      "items": [
+        { "name": "Kepta duona su česnaku", "price": 7.00 },
+        { "name": "Kepta duona su karštu sūriu", "price": 8.50 },
+        { "name": "Alyvuogės 100 g", "price": 3.90 },
+        { "name": "Grilyje keptas Kamambero sūris su braškėmis ir šilauogėmis", "price": 9.90 },
+        { "name": "Užkandis su Burrata sūriu", "price": 10.90 },
+        { "name": "Užkandėlė prie vyno", "price": 18.00 },
+        { "name": "Šiltų užkandžių padėklas", "price": 22.00 },
+        { "name": "Užkanda prie alaus (2 asmenims)", "price": 16.00 },
+        { "name": "Užkanda prie alaus (4 asmenims)", "price": 27.00 },
+        { "name": "Skrudintos mocarelos lazdelės 100 g", "price": 3.90 },
+        { "name": "Traškūs kalmarų žiedai 100 g", "price": 3.90 },
+        { "name": "Traškus jalapeno užkandis 100 g", "price": 3.90 },
+        { "name": "Traškūs svogūnų žiedai 100 g", "price": 3.90 },
+        { "name": "Traškios sūrio spurgytės 200 g", "price": 7.50 },
+        { "name": "Padažas pasirinkti", "price": 2.50 }
+      ]
+    },
+    {
+      "id": "desertai",
+      "name": "Desertai",
+      "items": [
+        { "name": "Napoleonas", "price": 5.90 },
+        { "name": "Rikotos sūrio pyragas", "price": 5.90 },
+        { "name": "Austriškas obuolių pyragas su vaniliniu padažu", "price": 5.90 },
+        { "name": "Morengų pyragas Pavlova", "price": 8.90 },
+        { "name": "Šokoladinis braunis su mūsų gamybos ledais", "price": 7.50 },
+        { "name": "Vaniliniai ledai su įvairių skonių padažu", "price": 6.00 },
+        { "name": "Vaniliniai ledai su alaus sirupu ir duonos traškučiais", "price": 6.50 },
+        { "name": "Citrininis šerbetas", "price": 6.90 },
+        { "name": "Kokosiniai ledai", "price": 6.90 }
+      ]
+    },
+    {
+      "id": "limonadai",
+      "name": "Mūsų gamybos limonadai, kokteiliai",
+      "note": "0,3 l / 1 l",
+      "items": [
+        { "name": "Kokosų – žemuogių limonadas", "price_03l": 4.00, "price_1l": 9.90 },
+        { "name": "Greipfrutų limonadas", "price_03l": 4.00, "price_1l": 9.90 },
+        { "name": "Pasiflorų limonadas", "price_03l": 4.00, "price_1l": 9.90 },
+        { "name": "Citrusinių vaisių limonadas", "price_03l": 4.00, "price_1l": 9.90 },
+        { "name": "Kokteilis ŠALTUKAS", "price": 5.50 },
+        { "name": "Kokteilis VYNUOGIUKAS", "price": 5.50 },
+        { "name": "Pieniški kokteiliai (vanilinis, šokoladinis, braškinis)", "price": 5.50 },
+        { "name": "Trintų vaisių kokteilis", "price": 5.50 },
+        { "name": "Tirštas ledų kokteilis", "price": 7.90 },
+        { "name": "Žaliasis kokteilis", "price": 5.50 },
+        { "name": "Gaivusis persikų – mangų gėrimas (1 l)", "price": 9.90 },
+        { "name": "Gaivusis mėlynių – gervuogių gėrimas (1 l)", "price": 9.90 },
+        { "name": "Šviežiai spaustos sultys — apelsinų / greipfrutų / obuolių / morkų (0,2 l)", "price": 5.50 }
+      ]
+    },
+    {
+      "id": "nealko-alus",
+      "name": "Nealkoholinis alus ir sidras",
+      "items": [
+        { "name": "Clausthaler Pale Lager, Grapefruit, Unfiltered Dry Hopped 0,5% (0,33 l)", "price": 4.20 },
+        { "name": "Paulaner Weisbier Alkoholfree 0,0% (0,5 l)", "price": 4.90 },
+        { "name": "Tinginio pantis sidras Alkoholfree 0,5% (0,33 l)", "price": 4.80 }
+      ]
+    },
+    {
+      "id": "kava-arbata",
+      "name": "Gėrimai — kava, arbata",
+      "items": [
+        { "name": "Espresso", "price": 2.50 },
+        { "name": "Juoda kava", "price": 2.50 },
+        { "name": "Kava su pienu", "price": 3.00 },
+        { "name": "Latte", "price": 3.70 },
+        { "name": "Cappuccino", "price": 3.50 },
+        { "name": "Matcha", "price": 4.90 },
+        { "name": "Plikoma arbata", "price": 3.50 },
+        { "name": "Šaltalankių arbata (šilta / šalta)", "price": 3.50 },
+        { "name": "Svarainių arbata", "price": 3.50 },
+        { "name": "Šaltalankių arbata su imbieru", "price": 3.50 },
+        { "name": "Aviečių arbata", "price": 3.50 },
+        { "name": "Pasiflorų arbata", "price": 3.50 }
+      ]
+    },
+    {
+      "id": "gaivieji",
+      "name": "Gaivieji gėrimai",
+      "items": [
+        { "name": "Vandens ąsotis (su citrusiniais vaisiais)", "price": 2.00 },
+        { "name": "Dzūkų alaus restorano gazuotas vanduo (0,5 l)", "price": 2.00 },
+        { "name": "Mineralinis vanduo (0,33 l)", "price": 2.50 },
+        { "name": "Sultys (0,2 l)", "price": 2.50 },
+        { "name": "Sprite, Coca Cola, Coca Cola Light, Fanta, Schweppes (0,25 l)", "price": 2.90 },
+        { "name": "Pilstoma Gira (0,3 l / 0,5 l)", "price_03l": 3.50, "price_05l": 4.50 },
+        { "name": "Energinis gėrimas Red Bull (0,25 l)", "price": 3.50 },
+        { "name": "Acala (fermentuota arbata) (0,75 l)", "price": 15.00 }
+      ]
+    },
+    {
+      "id": "alus-darykla",
+      "name": "Dzūkų alaus darykla",
+      "note": "0,3 l / 0,5 l / 1 l",
+      "items": [
+        { "name": "Čystas 5%", "price_03l": 3.90, "price_05l": 5.40, "price_1l": 7.90 },
+        { "name": "Šposas 5,5%", "price_03l": 4.00, "price_05l": 5.50, "price_1l": 8.10 },
+        { "name": "Kviecinis 4,5%", "price_03l": 4.00, "price_05l": 5.50, "price_1l": 8.10 },
+        { "name": "Razumnas 6,3%", "price_03l": 4.10, "price_05l": 5.60, "price_1l": 8.30 },
+        { "name": "Spakainas 5,4%", "price_03l": 4.10, "price_05l": 5.60, "price_1l": 8.30 },
+        { "name": "Slyvinis Porteris 7,2%", "price_03l": 4.10, "price_05l": 5.60, "price_1l": 8.30 },
+        { "name": "Sezoninis alus", "price": null, "note": "Teiraukitės padavėjo" },
+        { "name": "Alaus degustacija", "price": 14.00 }
+      ]
+    },
+    {
+      "id": "sidras",
+      "name": "Sidras",
+      "items": [
+        { "name": "Tinginio pantis sidras 4,5% (0,33 l)", "price": 4.80 },
+        { "name": "Sidras pilstomas (0,3 l / 0,5 l)", "price_03l": 5.00, "price_05l": 6.50 }
+      ]
+    },
+    {
+      "id": "alus-kokteiliai",
+      "name": "Alaus, sidro kokteiliai",
+      "items": [
+        { "name": "Braciukas", "price": 9.50 },
+        { "name": "Kodėl gi ne?", "price": 9.50 },
+        { "name": "Gyvatės kirtis", "price": 9.50 },
+        { "name": "Galimai", "price": 9.50 },
+        { "name": "Balta pieva", "price": 9.50 }
+      ]
+    },
+    {
+      "id": "kokteiliai-alko",
+      "name": "Kokteiliai — alkoholiniai",
+      "items": [
+        { "name": "Gaivusis Bravoras", "price": 10.50 },
+        { "name": "Gin / Tonic", "price": 10.50 },
+        { "name": "Whiskey Sour", "price": 10.50 },
+        { "name": "Akimirka", "price": 10.50 },
+        { "name": "Rožinis šūvis", "price": 10.50 },
+        { "name": "Aviečių bučinys", "price": 10.50 },
+        { "name": "Mango bučinys", "price": 10.50 },
+        { "name": "Aperol Spritz", "price": 10.50 },
+        { "name": "Braškinis Mojito", "price": 10.50 },
+        { "name": "Cuba Libre", "price": 10.50 },
+        { "name": "Porn Star Martini", "price": 10.50 },
+        { "name": "Marabella Tropicano", "price": 10.50 },
+        { "name": "Mai-Tai", "price": 10.50 },
+        { "name": "Mango Spritz", "price": 10.50 },
+        { "name": "Svaigulys", "price": 10.50 },
+        { "name": "Espresso Martini", "price": 10.50 },
+        { "name": "Kokteilis Naujiena", "price": 10.50 }
+      ]
+    },
+    {
+      "id": "kokteiliai-nealko",
+      "name": "Kokteiliai — nealkoholiniai",
+      "items": [
+        { "name": "Mojito (nealkoholinis)", "price": 9.50 },
+        { "name": "Mai Tai (nealkoholinis)", "price": 9.50 },
+        { "name": "Aperol Spritz (nealkoholinis)", "price": 9.50 }
+      ]
+    },
+    {
+      "id": "degtiné",
+      "name": "Stiprieji gėrimai — Degtinė (40 ml)",
+      "items": [
+        { "name": "Originali lietuviška auksinė", "price": 3.70 },
+        { "name": "Finlandia", "price": 4.10 },
+        { "name": "Stumbras Premium Organic", "price": 4.50 },
+        { "name": "Apynio krištolinis", "price": 5.50 },
+        { "name": "Grey Goose", "price": 6.50 }
+      ]
+    },
+    {
+      "id": "brendis",
+      "name": "Stiprieji gėrimai — Brendis (40 ml)",
+      "items": [
+        { "name": "J.P. Chanet XO", "price": 4.00 },
+        { "name": "Torres 5", "price": 4.00 }
+      ]
+    },
+    {
+      "id": "konjakas",
+      "name": "Stiprieji gėrimai — Konjakas (40 ml)",
+      "items": [
+        { "name": "Martell VSOP", "price": 7.00 }
+      ]
+    },
+    {
+      "id": "viskis",
+      "name": "Stiprieji gėrimai — Viskis (40 ml)",
+      "items": [
+        { "name": "Jameson (Airija)", "price": 5.60 },
+        { "name": "Proper No Twelve (Airija)", "price": 5.60 },
+        { "name": "Shankey's Whip Irish Whiskey Liquer (Airija)", "price": 5.60 },
+        { "name": "Jack Daniel's (JAV)", "price": 5.60 },
+        { "name": "Monkey Shoulder (Škotija)", "price": 6.60 },
+        { "name": "Chivas Regal 12 (Škotija)", "price": 6.60 },
+        { "name": "Nikka All Malt (Japonija)", "price": 6.60 },
+        { "name": "Ledaig 10yo Isle of Mull Single Malt (Škotija)", "price": 8.10 }
+      ]
+    },
+    {
+      "id": "tekila",
+      "name": "Stiprieji gėrimai — Tekila (40 ml)",
+      "items": [
+        { "name": "Jose Cuervo Traditional Silver", "price": 5.20 },
+        { "name": "Jose Cuervo Traditional Reposado", "price": 5.20 },
+        { "name": "Don Julio Reposado", "price": 7.60 },
+        { "name": "Don Julio Blanco", "price": 7.60 }
+      ]
+    },
+    {
+      "id": "trauktine",
+      "name": "Stiprieji gėrimai — Trauktinė (40 ml)",
+      "items": [
+        { "name": "Raudonos devynerios", "price": 4.60 },
+        { "name": "Žalios devynerios", "price": 4.60 },
+        { "name": "Pelynas", "price": 4.60 }
+      ]
+    },
+    {
+      "id": "likeriai",
+      "name": "Stiprieji gėrimai — Likeris (40 ml)",
+      "items": [
+        { "name": "Jagermeister", "price": 5.00 },
+        { "name": "Baileys Irish Cream", "price": 5.00 }
+      ]
+    },
+    {
+      "id": "romas",
+      "name": "Stiprieji gėrimai — Romas (40 ml)",
+      "items": [
+        { "name": "Angostura Premium White Reserva", "price": 5.00 },
+        { "name": "Angostura Gold 5 YO", "price": 5.00 },
+        { "name": "Kraken Black Spiced", "price": 6.00 }
+      ]
+    },
+    {
+      "id": "dzinas",
+      "name": "Stiprieji gėrimai — Džinas (40 ml)",
+      "items": [
+        { "name": "Hendrix", "price": 6.70 },
+        { "name": "Tanqueray London Dry", "price": 5.70 }
+      ]
+    },
+    {
+      "id": "midus",
+      "name": "Stiprieji gėrimai — Lietuviškas midus (40 ml)",
+      "items": [
+        { "name": "Suktinis", "price": 4.60 }
+      ]
+    },
+    {
+      "id": "sampanas",
+      "name": "Šampanas",
+      "items": [
+        { "name": "Moutard Grande Cuvée Brut (butelis)", "price": 55.00 },
+        { "name": "Moët-Chandon Brut Imperial (butelis)", "price": 70.00 }
+      ]
+    },
+    {
+      "id": "putojantis-vynas",
+      "name": "Putojantis vynas",
+      "note": "150 ml / butelis",
+      "items": [
+        { "name": "Alita", "price_150ml": 6.50, "price_bottle": 27.00 },
+        { "name": "Valdo Etichetta Nera Prosecco D.O.C", "price_150ml": 7.00, "price_bottle": 32.00 },
+        { "name": "Salasar Cremant De Limoux Brut (butelis)", "price": 36.00 },
+        { "name": "Anna Codorniu Blanc De Blac Brut Cava D.O. — Ispanija (butelis)", "price": 39.00 }
+      ]
+    },
+    {
+      "id": "nealko-vynas",
+      "name": "Pilstomas nealkoholinis vynas",
+      "note": "150 ml",
+      "items": [
+        { "name": "Nealkoholinis vynas", "price": 6.30 },
+        { "name": "Karštas nealkoholinis vynas", "price": 6.90 }
+      ]
+    },
+    {
+      "id": "pilstomas-vynas",
+      "name": "Pilstomas vynas",
+      "note": "150 ml",
+      "items": [
+        { "name": "Vynas svečias", "price": 6.90 },
+        { "name": "Gluhwein", "price": 6.90 },
+        { "name": "St. Urbans Hof Rieslig OBA — Vokietija, baltas, pusiau saldus", "price": 6.90 },
+        { "name": "Kindzmarauli — Sakartvelas, raudonas, pusiau saldus", "price": 6.90 },
+        { "name": "Carmelle Sauvignon Blanc Comte Tolosan I.G.P — Prancūzija, baltas, sausas", "price": 6.90 },
+        { "name": "Carmelle Malbec Comte Tolosan I.G.P — Prancūzija, raudonas, sausas", "price": 6.90 }
+      ]
+    },
+    {
+      "id": "butelinis-vynas-prancuzija",
+      "name": "Butelinis vynas — Prancūzija",
+      "items": [
+        { "name": "Chateau De Fesles Rose D'Anjou", "price": 32.00 },
+        { "name": "Klipfel, Pinot Gris", "price": 38.00 },
+        { "name": "E. Guigal Cotes Du Rhone A.C.", "price": 44.00 },
+        { "name": "Laroche Chablis", "price": 55.00 }
+      ]
+    },
+    {
+      "id": "butelinis-vynas-italija",
+      "name": "Butelinis vynas — Italija",
+      "items": [
+        { "name": "Il Pumo, Primitivo, Puglia I.G.P", "price": 27.00 },
+        { "name": "Remole Rosso Toscana IGT", "price": 31.00 },
+        { "name": "Pomino Bianco DOC", "price": 40.00 },
+        { "name": "Pomino Pinot Nero DOC", "price": 52.00 },
+        { "name": "Attems Pinot Grigio", "price": 40.00 },
+        { "name": "Attems Ribolla Gialla", "price": 40.00 },
+        { "name": "Attems Sauvignon Blanc", "price": 40.00 },
+        { "name": "Nipozzano Chianti Rufina Riserva DOCG", "price": 52.00 },
+        { "name": "Castel Ciocondo Campo Ai Sassi Rosso Di Montalcino DOC", "price": 55.00 }
+      ]
+    },
+    {
+      "id": "butelinis-vynas-ispanija",
+      "name": "Butelinis vynas — Ispanija",
+      "items": [
+        { "name": "El Coto 875, Chardonnay, Fermentado En Barrica Rioja D.O.C.", "price": 43.00 }
+      ]
+    },
+    {
+      "id": "butelinis-vynas-cile",
+      "name": "Butelinis vynas — Čilė",
+      "items": [
+        { "name": "Ventisquero Reserva Chardonnay", "price": 28.00 },
+        { "name": "Ventisquero Reserva Pinot Noir", "price": 28.00 }
+      ]
+    },
+    {
+      "id": "butelinis-vynas-argentina",
+      "name": "Butelinis vynas — Argentina",
+      "items": [
+        { "name": "Bodega Catena Zapata Malbec", "price": 43.00 }
+      ]
+    }
+  ]
+}
