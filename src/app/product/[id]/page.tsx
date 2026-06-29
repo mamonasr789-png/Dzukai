@@ -41,7 +41,7 @@ export default function ProductPage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <div className="relative h-80 w-full">
+      <div className="relative h-56 w-full">
         <Image src={product.image} alt={product.name} fill className="object-cover" priority />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/10 to-transparent" />
         <button

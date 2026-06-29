@@ -105,14 +105,15 @@ function ProductSheet({ product, open, onClose }: { product: Product | null; ope
   return (
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
       <SheetContent side="bottom" showCloseButton={false} className="p-0 rounded-t-3xl max-h-[92vh] overflow-y-auto border-0 gap-0">
+        <div className="max-w-lg mx-auto w-full relative">
         <div className="flex justify-center pt-3 pb-0 shrink-0">
           <div className="w-10 h-1 rounded-full bg-border" />
         </div>
         <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-full bg-secondary flex items-center justify-center z-10">
           <X size={15} className="text-muted-foreground" />
         </button>
-        <div className="relative mx-4 mt-3 rounded-2xl overflow-hidden bg-muted shrink-0 aspect-[16/9]">
-          <Image src={product.image} alt={product.name} fill className="object-cover object-center" sizes="(max-width: 512px) 100vw, 512px" priority />
+        <div className="relative mx-4 mt-3 rounded-2xl overflow-hidden bg-muted shrink-0 h-52">
+          <Image src={product.image} alt={product.name} fill className="object-cover object-center" sizes="512px" priority />
           {product.badge && (
             <Badge className="absolute top-3 left-3 bg-primary text-primary-foreground border-0 shadow">{product.badge}</Badge>
           )}
@@ -158,6 +159,7 @@ function ProductSheet({ product, open, onClose }: { product: Product | null; ope
               </button>
             </div>
           )}
+        </div>
         </div>
       </SheetContent>
     </Sheet>

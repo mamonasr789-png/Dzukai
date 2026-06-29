@@ -1,0 +1,154 @@
+/**
+ * Menu search engine — finds products by various criteria.
+ * NEVER invents products. Only returns items that exist in data.ts.
+ */
+
+import { products as allProducts } from "../data.ts";
+import type { Product, Category } from "../data.ts";
+import { normalizeText } from "./synonyms.ts";
+
+export { allProducts };
+
+/** Get all products in a category or list of categories */
+export function byCategory(cats: Category | Category[]): Product[] {
+  const catSet = new Set(Array.isArray(cats) ? cats : [cats]);
+  return allProducts.filter((p) => catSet.has(p.category));
+}
+
+/** Get food categories only (not drinks, desserts) */
+export const FOOD_CATEGORIES: Category[] = [
+  "uzkandziai", "salotos", "sriubos", "lietiniai", "koldumai",
+  "wok", "bulviniai", "picos", "grilinis", "vistiena",
+  "kiauliena", "jautiena", "zuvis", "vaikiskas", "prie-alaus",
+];
+
+/** Drink categories */
+export const DRINK_CATEGORIES: Category[] = [
+  "alus", "vynas", "kokteiliai", "alus-kokteiliai", "limonadai",
+  "gerimai", "nealko-alus", "sidras", "sampanas", "stiprieji", "kava",
+];
+
+/** Dessert categories */
+export const DESSERT_CATEGORIES: Category[] = ["desertai"];
+
+/** Main course categories */
+export const MAIN_CATEGORIES: Category[] = [
+  "vistiena", "kiauliena", "jautiena", "zuvis",
+  "picos", "wok", "bulviniai", "grilinis",
+];
+
+/** Starter categories */
+export const STARTER_CATEGORIES: Category[] = ["uzkandziai", "salotos", "sriubos", "prie-alaus"];
+
+/** Map protein preference to food categories */
+export function categoriesForProtein(protein: string): Category[] {
+  const map: Record<string, Category[]> = {
+    chicken: ["vistiena"],
+    pork:    ["kiauliena", "grilinis"],
+    beef:    ["jautiena", "grilinis"],
+    fish:    ["zuvis"],
+    lamb:    ["jautiena"],
+  };
+  return map[protein] ?? MAIN_CATEGORIES;
+}
+
+/** Free-text search across name, description, ingredients */
+export function textSearch(query: string, pool: Product[] = allProducts): Product[] {
+  const terms = normalizeText(query).split(/\s+/).filter((t) => t.length > 2);
+  if (!terms.length) return [];
+
+  return pool.filter((p) => {
+    const haystack = normalizeText([p.name, p.description, ...p.ingredients].join(" "));
+    return terms.some((t) => haystack.includes(t));
+  });
+}
+
+/** Find a specific product by ID */
+export function findById(id: string): Product | undefined {
+  return allProducts.find((p) => p.id === id);
+}
+
+/** Find product(s) whose name best matches user input */
+export function findByName(query: string): Product[] {
+  const q = normalizeText(query);
+  const exact = allProducts.filter((p) => normalizeText(p.name) === q);
+  if (exact.length) return exact;
+
+  const partial = allProducts.filter((p) => normalizeText(p.name).includes(q));
+  if (partial.length) return partial;
+
+  // Fuzzy: any word from query in name
+  const words = q.split(/\s+/).filter((w) => w.length > 3);
+  return allProducts.filter((p) => {
+    const name = normalizeText(p.name);
+    return words.some((w) => name.includes(w));
+  });
+}
+
+/** Find a dish from conversational references, including common inflected names. */
+export function findDishReference(query: string): Product | undefined {
+  const normalized = normalizeText(query);
+  const aliases: [RegExp, string][] = [
+    [/\b(bbq|barbekiu).*(sonkaul|ribs)/i, "ki9"],
+    [/\bsonkaul/i, "ki9"],
+    [/\bkiaulienos?\s+sonin/i, "ki5"],
+    [/\bsonin/i, "ki5"],
+    [/\blasis/i, "z5"],
+    [/\bbulvin(?:iai|iu|iu)?\s+blyn/i, "b4"],
+    [/\bdidzkukul/i, "b1"],
+    [/\bcepelin/i, "b1"],
+    [/\bvistien/i, "v5"],
+    [/\bzuv/i, "z5"],
+    [/\bsalot/i, "s2"],
+    [/\bpic|pizza/i, "p1"],
+  ];
+
+  for (const [pattern, id] of aliases) {
+    if (pattern.test(normalized)) return findById(id);
+  }
+
+  const byNameMatches = findByName(normalized);
+  if (byNameMatches.length > 0) return byNameMatches[0];
+  return undefined;
+}
+
+/** Get all products priced within [min, max] */
+export function byPriceRange(min: number, max: number, pool: Product[] = allProducts): Product[] {
+  return pool.filter((p) => p.price >= min && p.price <= max);
+}
+
+/** Get products available for a specific allergen constraint */
+export function withoutAllergen(allergen: string, pool: Product[] = allProducts): Product[] {
+  return pool.filter((p) => !p.allergens.includes(allergen));
+}
+
+/** Shuffle array (deterministic seed not needed — random rotation is desired) */
+export function shuffle<T>(arr: T[]): T[] {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/** Pick n items from pool, preferring items not in excludeIds */
+export function pickFresh(
+  pool: Product[],
+  n: number,
+  excludeIds: string[]
+): { items: Product[]; poolExhausted: boolean } {
+  const excludeSet = new Set(excludeIds);
+  const fresh = pool.filter((p) => !excludeSet.has(p.id));
+
+  if (fresh.length >= n) {
+    return { items: shuffle(fresh).slice(0, n), poolExhausted: false };
+  }
+  if (fresh.length > 0) {
+    // Use what's left plus some from excluded to fill up to n
+    const extra = shuffle(pool.filter((p) => excludeSet.has(p.id))).slice(0, n - fresh.length);
+    return { items: shuffle([...fresh, ...extra]).slice(0, n), poolExhausted: false };
+  }
+  // Pool exhausted — reset and show from full pool
+  return { items: shuffle(pool).slice(0, n), poolExhausted: true };
+}

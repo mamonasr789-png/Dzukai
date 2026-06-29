@@ -7,6 +7,12 @@ import { Plus } from "lucide-react";
 import { Product } from "@/lib/data";
 import { useCartStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { productTranslations, badgeTranslations } from "@/lib/product-translations";
+
+function tProduct(id: string, lang: string, field: "name" | "description", fallback: string) {
+  if (lang === "lt") return fallback;
+  return productTranslations[lang as "en" | "ru"]?.[id]?.[field] ?? fallback;
+}
 
 interface Props {
   product: Product;
@@ -15,6 +21,10 @@ interface Props {
 
 export default function ProductCard({ product, compact = false }: Props) {
   const addItem = useCartStore((s) => s.addItem);
+  const lang = useCartStore((s) => s.lang);
+  const name = tProduct(product.id, lang, "name", product.name);
+  const desc = tProduct(product.id, lang, "description", product.description);
+  const badge = product.badge ? (badgeTranslations[lang as "en" | "ru"]?.[product.badge] ?? product.badge) : null;
 
   return (
     <div
@@ -37,9 +47,9 @@ export default function ProductCard({ product, compact = false }: Props) {
             className="object-cover transition-transform duration-500 group-hover:scale-105"
             sizes={compact ? "96px" : "(max-width: 768px) 50vw, 33vw"}
           />
-          {product.badge && !compact && (
+          {badge && !compact && (
             <Badge className="absolute top-2 left-2 bg-primary text-primary-foreground text-[10px] font-semibold border-0 shadow">
-              {product.badge}
+              {badge}
             </Badge>
           )}
         </div>
@@ -53,11 +63,11 @@ export default function ProductCard({ product, compact = false }: Props) {
               compact ? "text-sm" : "text-base"
             )}
           >
-            {product.name}
+            {name}
           </h3>
         </Link>
         <p className={cn("text-muted-foreground line-clamp-2 leading-snug", compact ? "text-xs" : "text-xs mt-0.5")}>
-          {product.description}
+          {desc}
         </p>
         <div className={cn("flex items-center justify-between", compact ? "mt-auto pt-2" : "mt-2")}>
           <span className={cn("font-bold text-foreground", compact ? "text-sm" : "text-base")}>
