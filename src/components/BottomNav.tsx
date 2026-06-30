@@ -13,6 +13,12 @@ export default function BottomNav() {
   const lang = useCartStore((s) => s.lang);
   const tr = useT(lang);
 
+  if (
+    pathname.startsWith("/kitchen") ||
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/waiter")
+  ) return null;
+
   const navItems = [
     { href: "/", label: tr.nav_home, icon: Home },
     { href: "/menu", label: tr.nav_menu, icon: UtensilsCrossed },

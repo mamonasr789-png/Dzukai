@@ -1,46 +1,31 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import {
-  Trash2, ShoppingBag, ArrowLeft, CheckCircle, UtensilsCrossed,
-} from "lucide-react";
+import { Trash2, ShoppingBag, ArrowLeft, UtensilsCrossed, Utensils, Zap, Bell, Receipt, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import QuantitySelector from "@/components/QuantitySelector";
 import { useCartStore } from "@/lib/store";
 import { useT } from "@/lib/i18n";
+import { createOrder, type ServingPreference } from "@/lib/orders";
+import { type TableSession, getActiveSession, addOrderToSession, updateSessionStatus } from "@/lib/tableSession";
+import { createUniqueTask } from "@/lib/waiterTasks";
 
 export default function CartPage() {
   const { items, removeItem, updateQuantity, totalPrice, totalItems, clearCart, tableNumber, lang } =
     useCartStore();
   const tr = useT(lang);
-  const [submitted, setSubmitted] = useState(false);
+  const router = useRouter();
+  const [serving, setServing] = useState<ServingPreference>("together");
   const total = totalPrice();
   const count = totalItems();
 
-  if (submitted) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
-        <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center mb-5">
-          <CheckCircle size={44} className="text-primary" />
-        </div>
-        <h2 className="font-black text-2xl">{tr.order_success_title}</h2>
-        {tableNumber && (
-          <p className="text-muted-foreground text-sm mt-2">
-            {tr.table_label} Nr. <span className="font-bold text-foreground">{tableNumber}</span>
-          </p>
-        )}
-        <p className="text-muted-foreground text-sm mt-2 mb-8 max-w-xs">{tr.order_success_sub}</p>
-        <Link href="/menu">
-          <Button className="rounded-full px-8 h-12 font-bold">{tr.back_to_menu}</Button>
-        </Link>
-      </div>
-    );
-  }
-
   if (items.length === 0) {
+    const session = typeof window !== "undefined" ? getActiveSession() : null;
+    if (session) return <ActiveSessionState session={session} />;
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
         <div className="w-24 h-24 rounded-full bg-secondary flex items-center justify-center mb-5">
@@ -56,8 +41,21 @@ export default function CartPage() {
   }
 
   const handleSubmit = () => {
+    const order = createOrder({
+      tableNumber,
+      items: items.map(({ product, quantity }) => ({
+        productId: product.id,
+        name: product.name,
+        price: product.price,
+        quantity,
+      })),
+      total,
+      language: lang,
+      servingPreference: serving,
+    });
+    addOrderToSession(order.id, tableNumber);
     clearCart();
-    setSubmitted(true);
+    router.push(`/order?id=${order.id}`);
   };
 
   const dishLabel = count === 1 ? tr.dish1 : tr.dish234;
@@ -80,6 +78,7 @@ export default function CartPage() {
         <UtensilsCrossed size={20} className="text-muted-foreground shrink-0" />
       </header>
 
+      {/* Cart items */}
       <div className="flex flex-col gap-2.5 px-4 mt-4">
         {items.map(({ product, quantity }) => (
           <div key={product.id} className="flex gap-3 bg-card border border-border/40 rounded-2xl p-3 shadow-sm">
@@ -111,6 +110,7 @@ export default function CartPage() {
         ))}
       </div>
 
+      {/* Summary */}
       <div className="px-4 mt-4">
         <div className="bg-card border border-border/40 rounded-2xl p-4 shadow-sm">
           <h3 className="font-bold text-sm mb-3">{tr.summary}</h3>
@@ -130,12 +130,173 @@ export default function CartPage() {
         </div>
       </div>
 
+      {/* Serving preference */}
       <div className="px-4 mt-4">
-        <Button onClick={handleSubmit} className="w-full rounded-2xl h-14 text-base font-bold gap-2 shadow-lg shadow-primary/20">
+        <div className="bg-card border border-border/40 rounded-2xl p-4 shadow-sm">
+          <h3 className="font-bold text-sm mb-3">Patiekimo būdas</h3>
+          <div className="flex flex-col gap-2">
+            <ServingOption
+              value="together"
+              selected={serving}
+              icon={<Utensils size={17} />}
+              label="Atnešti viską kartu"
+              onSelect={setServing}
+            />
+            <ServingOption
+              value="as_ready"
+              selected={serving}
+              icon={<Zap size={17} />}
+              label="Atnešti vos tik patiekalas paruoštas"
+              onSelect={setServing}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Submit */}
+      <div className="px-4 mt-4">
+        <Button
+          onClick={handleSubmit}
+          className="w-full rounded-2xl h-14 text-base font-bold gap-2 shadow-lg shadow-primary/20"
+        >
           {tr.submit_order} · {total.toFixed(2)} €
         </Button>
         <p className="text-center text-muted-foreground text-xs mt-3">{tr.order_note}</p>
       </div>
     </div>
+  );
+}
+
+// ── Active session empty state ─────────────────────────────────────────────────
+
+function ActiveSessionState({ session }: { session: TableSession }) {
+  type ActionFeedback = "waiter_sent" | "bill_sent" | null;
+  const [feedback, setFeedback] = useState<ActionFeedback>(null);
+
+  const anchorOrderId = session.orderIds[session.orderIds.length - 1] ?? "unknown";
+
+  const handleCallWaiter = () => {
+    createUniqueTask(`session:${session.id}:waiter_called`, {
+      type: "waiter_called",
+      orderId: anchorOrderId,
+      tableNumber: session.tableNumber,
+    });
+    setFeedback("waiter_sent");
+  };
+
+  const handleRequestBill = () => {
+    updateSessionStatus("BILL_REQUESTED");
+    createUniqueTask(`session:${session.id}:bill_requested`, {
+      type: "bill_requested",
+      orderId: anchorOrderId,
+      tableNumber: session.tableNumber,
+    });
+    setFeedback("bill_sent");
+  };
+
+  const isBillRequested = session.status === "BILL_REQUESTED" || feedback === "bill_sent";
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
+      <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center mb-5">
+        <UtensilsCrossed size={36} className="text-primary" />
+      </div>
+
+      <h2 className="font-black text-xl">Turite aktyvų užsakymą</h2>
+      <p className="text-muted-foreground text-sm mt-1 mb-1">
+        Galite sekti būseną arba užsisakyti papildomai.
+      </p>
+      {session.tableNumber && (
+        <p className="text-xs text-muted-foreground mb-2">
+          Stalas Nr. <span className="font-bold text-foreground">{session.tableNumber}</span>
+          {" · "}
+          {session.orderIds.length}{" "}
+          {session.orderIds.length === 1 ? "užsakymas" : "užsakymai"}
+        </p>
+      )}
+
+      {isBillRequested && (
+        <div className="w-full max-w-xs bg-emerald-500/10 border border-emerald-500/30 rounded-2xl px-4 py-3 mb-4 flex items-center gap-2">
+          <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+          <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400 text-left">
+            Sąskaita paprašyta. Padavėjas netrukus prieis.
+          </p>
+        </div>
+      )}
+
+      {feedback === "waiter_sent" && (
+        <div className="w-full max-w-xs bg-blue-500/10 border border-blue-500/30 rounded-2xl px-4 py-3 mb-4 flex items-center gap-2">
+          <CheckCircle2 size={16} className="text-blue-500 shrink-0" />
+          <p className="text-sm font-medium text-blue-600 dark:text-blue-400 text-left">
+            Padavėjas informuotas. Netrukus prieis.
+          </p>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2.5 w-full max-w-xs mt-2">
+        <Link href="/order" className="w-full">
+          <Button className="w-full rounded-2xl h-12 font-bold">
+            Sekti užsakymą
+          </Button>
+        </Link>
+
+        <Link href="/menu" className="w-full">
+          <Button variant="outline" className="w-full rounded-2xl h-12 font-bold">
+            Užsisakyti papildomai
+          </Button>
+        </Link>
+
+        <button
+          onClick={handleCallWaiter}
+          disabled={feedback === "waiter_sent"}
+          className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Bell size={15} />
+          Kviesti padavėją
+        </button>
+
+        <button
+          onClick={handleRequestBill}
+          disabled={isBillRequested}
+          className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Receipt size={15} />
+          Paprašyti sąskaitos
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ServingOption({
+  value,
+  selected,
+  icon,
+  label,
+  onSelect,
+}: {
+  value: ServingPreference;
+  selected: ServingPreference;
+  icon: React.ReactNode;
+  label: string;
+  onSelect: (v: ServingPreference) => void;
+}) {
+  const active = value === selected;
+  return (
+    <button
+      onClick={() => onSelect(value)}
+      className={`flex items-center gap-3 w-full rounded-xl px-4 py-3 border text-left transition-colors
+        ${active
+          ? "border-primary/60 bg-primary/8 text-foreground"
+          : "border-border/40 bg-transparent text-muted-foreground hover:border-border hover:text-foreground"}`}
+    >
+      {/* Radio dot */}
+      <span className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors
+        ${active ? "border-primary" : "border-muted-foreground/40"}`}>
+        {active && <span className="w-2 h-2 rounded-full bg-primary" />}
+      </span>
+      <span className={`shrink-0 ${active ? "text-primary" : ""}`}>{icon}</span>
+      <span className="text-sm font-medium leading-snug">{label}</span>
+    </button>
   );
 }

@@ -1,0 +1,18 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+
+export default function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isKitchen = pathname.startsWith("/kitchen");
+  const isAdmin = pathname.startsWith("/admin");
+  const isWaiter = pathname.startsWith("/waiter");
+
+  if (isKitchen || isAdmin || isWaiter) {
+    return <>{children}</>;
+  }
+
+  return (
+    <main className="max-w-lg mx-auto min-h-screen pb-24">{children}</main>
+  );
+}
