@@ -58,6 +58,7 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
   NEW: "Naujas",
   PREPARING: "Gaminamas",
   READY: "Paruoštas",
+  DELIVERING: "Neša padavėjas",
   COMPLETED: "Įvykdytas",
   CANCELLED: "Atšauktas",
 };
@@ -66,6 +67,7 @@ const STATUS_BADGE_LIGHT: Record<OrderStatus, string> = {
   NEW: "bg-amber-100 text-amber-700 border border-amber-300",
   PREPARING: "bg-blue-100 text-blue-700 border border-blue-300",
   READY: "bg-green-100 text-green-700 border border-green-300",
+  DELIVERING: "bg-purple-100 text-purple-700 border border-purple-300",
   COMPLETED: "bg-gray-100 text-gray-500 border border-gray-200",
   CANCELLED: "bg-red-100 text-red-600 border border-red-200",
 };
@@ -74,6 +76,7 @@ const STATUS_BADGE_DARK: Record<OrderStatus, string> = {
   NEW: "bg-amber-500/20 text-amber-300 border border-amber-500/30",
   PREPARING: "bg-blue-500/20 text-blue-300 border border-blue-500/30",
   READY: "bg-green-500/20 text-green-300 border border-green-500/30",
+  DELIVERING: "bg-purple-500/20 text-purple-300 border border-purple-500/30",
   COMPLETED: "bg-secondary text-muted-foreground border border-border/30",
   CANCELLED: "bg-destructive/20 text-destructive border border-destructive/30",
 };
@@ -82,6 +85,7 @@ const CARD_BORDER_LIGHT: Record<OrderStatus, string> = {
   NEW: "border-amber-300 bg-amber-50",
   PREPARING: "border-blue-300 bg-blue-50",
   READY: "border-green-400 bg-green-50",
+  DELIVERING: "border-purple-300 bg-purple-50",
   COMPLETED: "border-gray-200 bg-gray-50",
   CANCELLED: "border-red-200 bg-red-50",
 };
@@ -90,6 +94,7 @@ const CARD_BORDER_DARK: Record<OrderStatus, string> = {
   NEW: "border-amber-500/40 bg-amber-500/5",
   PREPARING: "border-blue-500/40 bg-blue-500/5",
   READY: "border-green-500/40 bg-green-500/10",
+  DELIVERING: "border-purple-500/30 bg-purple-500/5",
   COMPLETED: "border-border/30 bg-card/30",
   CANCELLED: "border-destructive/30 bg-destructive/5",
 };
@@ -98,14 +103,17 @@ const STATUS_ICON_SM: Record<OrderStatus, React.ReactNode> = {
   NEW: <Clock size={13} />,
   PREPARING: <ChefHat size={13} />,
   READY: <Bell size={13} />,
+  DELIVERING: <UtensilsCrossed size={13} />,
   COMPLETED: <CheckCircle2 size={13} />,
   CANCELLED: <XCircle size={13} />,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// Kitchen is responsible for NEW → PREPARING → READY only.
+// DELIVERING and beyond are waiter territory.
 const ACTIVE_STATUSES: OrderStatus[] = ["NEW", "PREPARING", "READY"];
-const DONE_STATUSES: OrderStatus[] = ["COMPLETED", "CANCELLED"];
+const DONE_STATUSES: OrderStatus[] = ["DELIVERING", "COMPLETED", "CANCELLED"];
 
 function isActive(o: Order): boolean {
   // An order is active if it has its own active status OR has any active item
@@ -407,12 +415,13 @@ function ServingBadge({ preference, theme }: { preference: ServingPreference; th
 function ItemRow({ orderId, item, theme }: { orderId: string; item: OrderItem; theme: KitchenTheme }) {
   const status = item.itemStatus ?? "NEW";
   const badge = theme === "dark" ? STATUS_BADGE_DARK[status] : STATUS_BADGE_LIGHT[status];
-  const isDone = status === "COMPLETED" || status === "CANCELLED";
+  // Kitchen's job ends at READY. DELIVERING and beyond are waiter territory.
+  const isDone = status === "COMPLETED" || status === "CANCELLED" || status === "DELIVERING";
 
   const advance = () => {
     if (status === "NEW") updateItemStatus(orderId, item.productId, "PREPARING");
     else if (status === "PREPARING") updateItemStatus(orderId, item.productId, "READY");
-    else if (status === "READY") updateItemStatus(orderId, item.productId, "COMPLETED");
+    // No action for READY — waiter takes over from here
   };
 
   const cancel = () => updateItemStatus(orderId, item.productId, "CANCELLED");
@@ -420,13 +429,11 @@ function ItemRow({ orderId, item, theme }: { orderId: string; item: OrderItem; t
   const actionLabel: Partial<Record<OrderStatus, string>> = {
     NEW: "Pradėti",
     PREPARING: "Paruošta",
-    READY: "Baigti",
   };
 
   const actionColor: Record<string, string> = {
     NEW: "bg-blue-600 hover:bg-blue-700 text-white",
     PREPARING: "bg-green-600 hover:bg-green-700 text-white",
-    READY: "bg-primary hover:bg-primary/90 text-primary-foreground",
   };
 
   return (

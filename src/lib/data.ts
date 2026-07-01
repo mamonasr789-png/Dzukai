@@ -132,6 +132,7 @@ const IMG = {
   schnitzel:      u("photo-1606755962773-d324e0a13086"),
   chickenKebab:   u("photo-1599974579688-8dbdd335c77f"),
   chicken:        u("photo-1598103442097-8b74394b95c1"),
+  chickenFilletFixed: u("photo-1762631934518-f75e233413ca"),
   chickenGlazed:  u("photo-1527477396000-e27163b481c2"),
   duckBreast:     u("photo-1534422298391-e4f8c172dddb"),
   halfChicken:    u("photo-1604908176997-125f25cc6f3d"),
@@ -149,6 +150,7 @@ const IMG = {
   steak:          u("photo-1558030006-450675393462"),
   steakSurf:      u("photo-1558030006-450675393462"),
   lamb:           u("photo-1602524205858-0fce8d027b3e"),
+  lambKebabFixed: u("photo-1771285119408-04cca3b35036"),
   lambRack:       u("photo-1558030006-450675393462"),
   // Fish
   mackerel:       u("photo-1519708227418-c8fd9a32b7a2"),
@@ -162,6 +164,7 @@ const IMG = {
   kids:           u("photo-1562802378-063ec186a863"),
   fries:          u("photo-1573080496219-bb080dd4f877"),
   kidsBlynai:     u("photo-1562802378-063ec186a863"),
+  kidsChickenTenders: u("photo-1758578484486-74373f45b0b7"),
   // Beer snacks
   bread:          u("photo-1509440159596-0249088772ff"),
   cheeseToast:    u("photo-1509440159596-0249088772ff"),
@@ -170,8 +173,11 @@ const IMG = {
   snackPlatter:   u("photo-1555939594-58d7cb561ad1"),
   mozzarellaSticks: u("photo-1573080496219-bb080dd4f877"),
   calamari:       u("photo-1565680018434-b513d5e5fd47"),
+  calamariFixed:  u("photo-1675377668870-baf9b35763f9"),
   jalapeno:       u("photo-1565299624946-b28f40a0ae38"),
+  jalapenoFixed:  u("photo-1561438883-3b98f4f6393d"),
   onionRings:     u("photo-1573080496219-bb080dd4f877"),
+  sauceBowl:      u("photo-1572233052800-1394192b5404"),
   cheese:         u("photo-1486297678162-eb2a19b0a32d"),
   // Desserts
   napoleon:       u("photo-1578985545062-69928b1d9587"),
@@ -191,6 +197,7 @@ const IMG = {
   coffee:         u("photo-1461023058943-07fcbe16d735"),
   tea:            u("photo-1556679343-c7306c1976bc"),
   water:          u("photo-1548839140-29a749e1cf4d"),
+  kvass:          u("photo-1582762843356-c58f2a78dc7c"),
   juice:          u("photo-1621506289937-a8e4df240d0b"),
   softdrink:      u("photo-1622483767028-3f66f32aef97"),
   beer:           u("photo-1608270586620-248524c67de9"),
@@ -206,6 +213,8 @@ const IMG = {
   spirits:        u("photo-1569529465841-dfecdab7503b"),
   cider:          u("photo-1558642891-54be180ea339"),
   nonAlcBeer:     u("photo-1608270586620-248524c67de9"),
+  coldBorscht:    u("photo-1648726445011-9fbf3a5ddb90"),
+  chiliSoupFixed: u("photo-1666819632298-fe15dc7d4c34"),
 };
 
 const _rawProducts: Product[] = [
@@ -226,9 +235,9 @@ const _rawProducts: Product[] = [
   { id: "s7", name: "Salotos su tuno filė ir šilauogėmis", description: "Šviežio tuno filė salotos su šilauogėmis ir lengvu citriniu padažu.", price: 14.50, image: IMG.tunaSalad, category: "salotos", ingredients: ["Tuno filė", "Šilauogės", "Mišrūs lapai", "Citrina"], allergens: ["Žuvis"] },
 
   // SRIUBOS
-  { id: "sr1", name: "Šaltibarščiai", description: "Tradicinė lietuviška šalta burokėlių sriuba su agurkais, kiaušiniais ir grietine.", price: 4.90, image: IMG.soup, category: "sriubos", ingredients: ["Burokėliai", "Agurkai", "Kiaušiniai", "Grietinė", "Krapai"], allergens: ["Pienas", "Kiaušiniai"], badge: "Tradicinis", featured: true },
+  { id: "sr1", name: "Šaltibarščiai", description: "Tradicinė lietuviška šalta burokėlių sriuba su agurkais, kiaušiniais ir grietine.", price: 4.90, image: IMG.coldBorscht, category: "sriubos", ingredients: ["Burokėliai", "Agurkai", "Kiaušiniai", "Grietinė", "Krapai"], allergens: ["Pienas", "Kiaušiniai"], badge: "Tradicinis", featured: true },
   { id: "sr2", name: "Kopūstienė su baravykais", description: "Šilta kopūstų sriuba su miško baravykais ir šaknelėmis.", price: 5.90, image: IMG.sriuba, category: "sriubos", ingredients: ["Kopūstai", "Baravykai", "Morkos", "Svogūnai"], allergens: [] },
-  { id: "sr3", name: "Aštri \"Čili\" sriuba", description: "Jautienos ir pupelių čili sriuba su rūkytais pipirais ir grietine.", price: 6.90, image: IMG.chiliSoup, category: "sriubos", ingredients: ["Jautiena", "Pupelės", "Čili", "Pomidorai"], allergens: ["Pienas"] },
+  { id: "sr3", name: "Aštri \"Čili\" sriuba", description: "Jautienos ir pupelių čili sriuba su rūkytais pipirais ir grietine.", price: 6.90, image: IMG.chiliSoupFixed, category: "sriubos", ingredients: ["Jautiena", "Pupelės", "Čili", "Pomidorai"], allergens: ["Pienas"] },
   { id: "sr4", name: "Tom Yum sriuba", description: "Tailandietiška aštri ir rūgšti krevetių sriuba su pievagrybiais, citrinžole ir kokosų pienu.", price: 14.90, image: IMG.tomyum, category: "sriubos", ingredients: ["Krevetės", "Pievagrybiai", "Citrinžolė", "Čili", "Kokosų pienas"], allergens: ["Vėžiagyviai"] },
 
   // LIETINIAI BLYNAI
@@ -303,10 +312,10 @@ const _rawProducts: Product[] = [
 
   // VIŠTIENA
   { id: "v1", name: "Glazūruoti vištienos sparneliai (BBQ arba aštrūs Buffalo)", description: "Lėtai kepti sparneliai glazūruoti BBQ arba aštriu Buffalo padažu su Blue cheese dip.", price: 14.90, image: IMG.wings, category: "vistiena", ingredients: ["Vištienos sparneliai", "BBQ padažas", "Blue cheese dip"], allergens: ["Pienas", "Soja"], badge: "Populiaru", featured: true },
-  { id: "v2", name: "Vištienos šašlykas", description: "Marinuotas vištienos šlaunelių šašlykas ant grotelių.", price: 10.90, priceNote: "Mažas 10,90 € / Didelis 14,90 €", image: IMG.chickenShashlik, category: "vistiena", ingredients: ["Vištienos šlaunelės", "Paprika", "Česnakai", "Citrina"], allergens: [] },
+  { id: "v2", name: "Vištienos šašlykas", description: "Marinuotas vištienos šlaunelių šašlykas ant grotelių.", price: 10.90, priceNote: "Mažas 10,90 € / Didelis 14,90 €", image: IMG.chickenKebab, category: "vistiena", ingredients: ["Vištienos šlaunelės", "Paprika", "Česnakai", "Citrina"], allergens: [] },
   { id: "v3", name: "Vištienos Vienos šnicelis", description: "Tradicinis Vienos stiliaus vištienos šnicelis su bulvių koše.", price: 16.50, image: IMG.schnitzel, category: "vistiena", ingredients: ["Vištiena", "Džiūvėsėliai", "Kiaušiniai", "Bulvių košė", "Citrina"], allergens: ["Glitimas", "Pienas", "Kiaušiniai"] },
   { id: "v4", name: "Vištienos kebabas", description: "Vištienos maltinuko kebabas su jogurto mėtos padažu.", price: 16.50, image: IMG.chickenKebab, category: "vistiena", ingredients: ["Vištiena", "Svogūnai", "Prieskoniai", "Jogurtas", "Mėta"], allergens: ["Pienas"] },
-  { id: "v5", name: "Vištienos filė", description: "Grilyje kepta vištienos filė su sezoninėmis daržovėmis.", price: 15.50, image: IMG.chicken, category: "vistiena", ingredients: ["Vištienos filė", "Sezoninės daržovės", "Žolelės"], allergens: [] },
+  { id: "v5", name: "Vištienos filė", description: "Grilyje kepta vištienos filė su sezoninėmis daržovėmis.", price: 15.50, image: IMG.chickenFilletFixed, category: "vistiena", ingredients: ["Vištienos filė", "Sezoninės daržovės", "Žolelės"], allergens: [] },
   { id: "v6", name: "Glazūruota vištienos filė", description: "Glazūruota vištienos filė su medaus ir sojos padažu.", price: 15.90, image: IMG.chickenGlazed, category: "vistiena", ingredients: ["Vištienos filė", "Medus", "Sojos padažas", "Česnakai"], allergens: ["Soja"] },
   { id: "v7", name: "Antienos krūtinėlė su kriauše ir pelėsiniu sūriu", description: "Rožinė antienos krūtinėlė su karamelizuota kriaušė ir pelėsiniu sūriu.", price: 21.00, image: IMG.duckBreast, category: "vistiena", ingredients: ["Antienos krūtinėlė", "Kriaušė", "Pelėsinis sūris", "Portveinas"], allergens: ["Pienas"], badge: "Šefo pasirinkimas" },
   { id: "v8", name: "Grilyje keptas viščiukas", description: "Pusė arba visas viščiukas, keptas ant grotelių su žolelėmis.", price: 15.00, priceNote: "Pusė 15,00 € / Visas 26,00 €", image: IMG.halfChicken, category: "vistiena", ingredients: ["Viščiukas", "Rozmarinas", "Čiobrelis", "Česnakai"], allergens: [] },
@@ -317,7 +326,7 @@ const _rawProducts: Product[] = [
   { id: "ki2", name: "Kiaulienos Vienos šnicelis", description: "Tradicinis plaktas kiaulienos šnicelis su džiūvėsėliais, citrina ir bulvių koše.", price: 16.60, image: IMG.schnitzelPork, category: "kiauliena", ingredients: ["Kiaulienos sprandinė", "Džiūvėsėliai", "Kiaušiniai", "Bulvių košė", "Citrina"], allergens: ["Glitimas", "Pienas", "Kiaušiniai"] },
   { id: "ki3", name: "Aštrus kiaulienos šašlykas", description: "Aitraus marinato kiaulienos šašlykas ant grotelių.", price: 11.90, priceNote: "Mažas 11,90 € / Didelis 15,90 €", image: IMG.porkShashlik, category: "kiauliena", ingredients: ["Kiauliena", "Čili", "Česnakai", "Paprika"], allergens: [] },
   { id: "ki4", name: "Kaukazietiškas kiaulienos šašlykas", description: "Tradicinių Kaukazo prieskonių marinato kiaulienos šašlykas.", price: 11.90, priceNote: "Mažas 11,90 € / Didelis 15,90 €", image: IMG.porkShashlik, category: "kiauliena", ingredients: ["Kiauliena", "Svogūnai", "Kaukazo prieskoniai"], allergens: [] },
-  { id: "ki5", name: "Kiaulienos šoninė", description: "Kepta kiaulienos šoninė su karamelizuotais obuoliais ir bulvių püre.", price: 16.90, image: IMG.pork, category: "kiauliena", ingredients: ["Kiaulienos šoninė", "Obuoliai", "Bulvių püre"], allergens: ["Pienas"] },
+  { id: "ki5", name: "Kiaulienos šoninė", description: "Kepta kiaulienos šoninė su karamelizuotais obuoliais ir bulvių püre.", price: 16.90, image: IMG.porkBelly, category: "kiauliena", ingredients: ["Kiaulienos šoninė", "Obuoliai", "Bulvių püre"], allergens: ["Pienas"] },
   { id: "ki6", name: "Kiaulienos išpjova", description: "Sultinga kiaulienos išpjova su žolelių padažu ir garnyru.", price: 16.90, image: IMG.porkTenderloin, category: "kiauliena", ingredients: ["Kiaulienos išpjova", "Žolelės", "Česnakai", "Garnyras"], allergens: [] },
   { id: "ki7", name: "Kiaulienos sprandinės kepsnys", description: "Storas kiaulienos sprandinės kepsnys ant grotelių.", price: 16.90, image: IMG.porkNeck, category: "kiauliena", ingredients: ["Kiaulienos sprandinė", "Rozmarinas", "Česnakai"], allergens: [] },
   { id: "ki8", name: "Kiaulienos Tomahawk", description: "Impozantiškas Tomahawk stiliaus kiaulienos kepsnys su garnyru.", price: 22.00, image: IMG.porkTomahawk, category: "kiauliena", ingredients: ["Kiaulienos Tomahawk", "Žolelės", "Česnakai", "Garnyras"], allergens: [], badge: "Šefo pasirinkimas" },
@@ -327,7 +336,7 @@ const _rawProducts: Product[] = [
   // JAUTIENA IR AVIENA
   { id: "ja1", name: "Jautienos antrekotas (Argentina)", description: "300g Argentinos aukščiausios kokybės jautienos antrekotas, keptas pagal norimą kepimo laipsnį, su žolelių sviestu ir garnyru.", price: 29.90, image: IMG.steak, category: "jautiena", ingredients: ["Argentinos jautienos antrekotas", "Žolelių sviestas", "Garnyras"], allergens: ["Pienas"], badge: "Premium", featured: true },
   { id: "ja2", name: "Jautienos antrekotas Surf and Turf", description: "Argentinos jautienos antrekotas su grilyje keptomis krevetėmis.", price: 31.90, image: IMG.steakSurf, category: "jautiena", ingredients: ["Jautienos antrekotas", "Krevetės", "Žolelių sviestas", "Citrina"], allergens: ["Pienas", "Vėžiagyviai"], badge: "Premium" },
-  { id: "ja3", name: "Avienos kebabas", description: "Maltos avienos kebabas su kmynų, kalendrų prieskoniais ir jogurto mėtos padažu.", price: 18.00, image: IMG.lamb, category: "jautiena", ingredients: ["Malta aviena", "Kmynai", "Kalendra", "Jogurtas", "Mėta"], allergens: ["Pienas"] },
+  { id: "ja3", name: "Avienos kebabas", description: "Maltos avienos kebabas su kmynų, kalendrų prieskoniais ir jogurto mėtos padažu.", price: 18.00, image: IMG.lambKebabFixed, category: "jautiena", ingredients: ["Malta aviena", "Kmynai", "Kalendra", "Jogurtas", "Mėta"], allergens: ["Pienas"] },
   { id: "ja4", name: "Ėrienos karka su traiškyta bulve ir raugintais kopūstais", description: "Prancūziškai paruošta ėrienos karka su rozmarino padažu ir tradiciniais lietuviškais garnyrai.", price: 22.00, image: IMG.lambRack, category: "jautiena", ingredients: ["Ėrienos karka", "Rozmarinas", "Česnakai", "Traiškyta bulvė", "Rauginti kopūstai"], allergens: [] },
 
   // ŽUVIS
@@ -341,8 +350,8 @@ const _rawProducts: Product[] = [
 
   // VAIKIŠKAS MENIU
   { id: "vm1", name: "Gruzdintos bulvytės su pomidorų padažu", description: "Auksinės traškios bulvytės su kečupu.", price: 7.00, image: IMG.fries, category: "vaikiskas", ingredients: ["Bulvės", "Kečupas", "Druska"], allergens: [] },
-  { id: "vm2", name: "Lietiniai blyneliai su vyšnių padažu", description: "Ploni minkšti blyneliai su saldžiu vyšnių padažu.", price: 7.00, image: IMG.kidsBlynai, category: "vaikiskas", ingredients: ["Miltai", "Kiaušiniai", "Pienas", "Vyšnių padažas"], allergens: ["Glitimas", "Pienas", "Kiaušiniai"] },
-  { id: "vm3", name: "Traškios vištienos juostelės su gruzdintomis bulvytėmis ir šviežiomis daržovėmis", description: "Vaikams mėgstamos vištienos juostelės su traškiomis bulvytėmis ir daržovėmis.", price: 11.90, image: IMG.kids, category: "vaikiskas", ingredients: ["Vištienos krūtinėlė", "Džiūvėsėliai", "Bulvytės", "Daržovės"], allergens: ["Glitimas", "Kiaušiniai"] },
+  { id: "vm2", name: "Lietiniai blyneliai su vyšnių padažu", description: "Ploni minkšti blyneliai su saldžiu vyšnių padažu.", price: 7.00, image: IMG.kids, category: "vaikiskas", ingredients: ["Miltai", "Kiaušiniai", "Pienas", "Vyšnių padažas"], allergens: ["Glitimas", "Pienas", "Kiaušiniai"] },
+  { id: "vm3", name: "Traškios vištienos juostelės su gruzdintomis bulvytėmis ir šviežiomis daržovėmis", description: "Vaikams mėgstamos vištienos juostelės su traškiomis bulvytėmis ir daržovėmis.", price: 11.90, image: IMG.kidsChickenTenders, category: "vaikiskas", ingredients: ["Vištienos krūtinėlė", "Džiūvėsėliai", "Bulvytės", "Daržovės"], allergens: ["Glitimas", "Kiaušiniai"] },
 
   // UŽKANDŽIAI PRIE ALAUS
   { id: "pa1", name: "Kepta duona su česnaku", description: "Traški kepta juoda duona su česnakų sviestu.", price: 7.00, image: IMG.bread, category: "prie-alaus", ingredients: ["Juoda duona", "Česnakai", "Sviestas"], allergens: ["Glitimas", "Pienas"] },
@@ -355,11 +364,11 @@ const _rawProducts: Product[] = [
   { id: "pa8", name: "Užkanda prie alaus (2 asmenims)", description: "Rinktinių užkandžių rinkinys 2 asmenims prie alaus.", price: 16.00, image: IMG.snackPlatter, category: "prie-alaus", ingredients: ["Kepta duona", "Traškūs užkandžiai", "Padažas"], allergens: ["Glitimas"] },
   { id: "pa9", name: "Užkanda prie alaus (4 asmenims)", description: "Rinktinių užkandžių rinkinys 4 asmenims prie alaus.", price: 27.00, image: IMG.snackPlatter, category: "prie-alaus", ingredients: ["Kepta duona", "Traškūs užkandžiai", "Padažas"], allergens: ["Glitimas"] },
   { id: "pa10", name: "Skrudintos mocarelos lazdelės (100g)", description: "Traškios mocarelos lazdelės su marinara padažu.", price: 3.90, image: IMG.mozzarellaSticks, category: "prie-alaus", ingredients: ["Mocarela", "Džiūvėsėliai", "Marinara padažas"], allergens: ["Glitimas", "Pienas", "Kiaušiniai"] },
-  { id: "pa11", name: "Traškūs kalmarų žiedai (100g)", description: "Traškiai apkepti kalmarų žiedai su aioli.", price: 3.90, image: IMG.calamari, category: "prie-alaus", ingredients: ["Kalmarai", "Džiūvėsėliai", "Aioli"], allergens: ["Glitimas", "Moliuskai", "Kiaušiniai"] },
-  { id: "pa12", name: "Traškus jalapeno užkandis (100g)", description: "Įdaryti jalapeno pipirai, apkepti džiūvėsėliuose.", price: 3.90, image: IMG.jalapeno, category: "prie-alaus", ingredients: ["Jalapeno pipirai", "Sūris", "Džiūvėsėliai"], allergens: ["Glitimas", "Pienas", "Kiaušiniai"] },
+  { id: "pa11", name: "Traškūs kalmarų žiedai (100g)", description: "Traškiai apkepti kalmarų žiedai su aioli.", price: 3.90, image: IMG.calamariFixed, category: "prie-alaus", ingredients: ["Kalmarai", "Džiūvėsėliai", "Aioli"], allergens: ["Glitimas", "Moliuskai", "Kiaušiniai"] },
+  { id: "pa12", name: "Traškus jalapeno užkandis (100g)", description: "Įdaryti jalapeno pipirai, apkepti džiūvėsėliuose.", price: 3.90, image: IMG.jalapenoFixed, category: "prie-alaus", ingredients: ["Jalapeno pipirai", "Sūris", "Džiūvėsėliai"], allergens: ["Glitimas", "Pienas", "Kiaušiniai"] },
   { id: "pa13", name: "Traškūs svogūnų žiedai (100g)", description: "Auksiniai svogūnų žiedai su rančo padažu.", price: 3.90, image: IMG.onionRings, category: "prie-alaus", ingredients: ["Svogūnai", "Tešla", "Rančo padažas"], allergens: ["Glitimas", "Pienas", "Kiaušiniai"] },
   { id: "pa14", name: "Traškios sūrio spurgytės (200g)", description: "Pūkuotos sūrio spurgytės su pomidorų padažu.", price: 7.50, image: IMG.cheese, category: "prie-alaus", ingredients: ["Sūris", "Miltai", "Kiaušiniai"], allergens: ["Glitimas", "Pienas", "Kiaušiniai"] },
-  { id: "pa15", name: "Padažas pasirinkti", description: "Pasirinkite mėgstamą padažą: majonezo, kečupo, BBQ, aioli ar rančo.", price: 2.50, image: IMG.bread, category: "prie-alaus", ingredients: ["Padažas"], allergens: ["Kiaušiniai"] },
+  { id: "pa15", name: "Padažas pasirinkti", description: "Pasirinkite mėgstamą padažą: majonezo, kečupo, BBQ, aioli ar rančo.", price: 2.50, image: IMG.sauceBowl, category: "prie-alaus", ingredients: ["Padažas"], allergens: ["Kiaušiniai"] },
 
   // DESERTAI
   { id: "d1", name: "Napoleonas", description: "Klasikinis sluoksniuoto tešlos Napoleonas su vaniliniu kremu.", price: 5.90, image: IMG.napoleon, category: "desertai", ingredients: ["Sluoksniuota tešla", "Vanilinis kremas", "Cukraus pudra"], allergens: ["Glitimas", "Pienas", "Kiaušiniai"], featured: true, badge: "Tradicinis" },
@@ -413,7 +422,7 @@ const _rawProducts: Product[] = [
   { id: "gg3", name: "Mineralinis vanduo (0,33l)", description: "Natūralus mineralinis vanduo.", price: 2.50, image: IMG.water, category: "gerimai", ingredients: ["Mineralinis vanduo"], allergens: [] },
   { id: "gg4", name: "Sultys (0,2l)", description: "Pasirinkite iš obuolių, apelsinų ar pomidorų sulčių.", price: 2.50, image: IMG.juice, category: "gerimai", ingredients: ["Vaisių sultys"], allergens: [] },
   { id: "gg5", name: "Sprite, Coca Cola, Coca Cola Light, Fanta, Schweppes (0,25l)", description: "Populiarūs gaivieji gėrimai.", price: 2.90, image: IMG.softdrink, category: "gerimai", ingredients: ["Gazuotas vanduo", "Cukrus", "Aromatas"], allergens: [] },
-  { id: "gg6", name: "Pilstoma Gira", description: "Tradicinė lietuviška gira.", price: 3.50, priceNote: "0,3l — 3,50 € / 0,5l — 4,50 €", image: IMG.beer, category: "gerimai", ingredients: ["Ruginė duona", "Mielės", "Vanduo", "Cukrus"], allergens: ["Glitimas"] },
+  { id: "gg6", name: "Pilstoma Gira", description: "Tradicinė lietuviška gira.", price: 3.50, priceNote: "0,3l — 3,50 € / 0,5l — 4,50 €", image: IMG.kvass, category: "gerimai", ingredients: ["Ruginė duona", "Mielės", "Vanduo", "Cukrus"], allergens: ["Glitimas"] },
   { id: "gg7", name: "Red Bull (0,25l)", description: "Energetinis gėrimas.", price: 3.50, image: IMG.softdrink, category: "gerimai", ingredients: ["Taurinas", "Kofeinas", "B grupės vitaminai"], allergens: [] },
   { id: "gg8", name: "ACALA (0,75l)", description: "Premium aukštos kokybės vanduo.", price: 15.00, image: IMG.water, category: "gerimai", ingredients: ["Grynas natūralus vanduo"], allergens: [] },
 

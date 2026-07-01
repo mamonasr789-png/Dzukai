@@ -79,7 +79,6 @@ export const restrictionConcepts: Record<RestrictionConcept, RegExp[]> = {
     /\bmesos\s+nevalgau\b/i,
     /\bnevalgau\s+mesos\b/i,
     /\bnenoriu\s+mesos\b/i,
-    /\bbe\s+(?:jautienos|kiaulienos|vistienos|zuvies)\b/i,
     /\bvalgau\s+tik\s+darzoves\b/i,
     /\bnoriu\s+be\s+mesos\b/i,
     /\b(?:ka|ką)\s+be\s+mesos\b/i,
@@ -188,8 +187,9 @@ export const dislikeKnowledge: DislikeKnowledge[] = [
 
 export const meatStems = [
   "mesa", "jautien", "kiaulien", "vistien", "visciuk", "antien", "avien",
-  "sonin", "kump", "lasin", "sonkaul", "juru geryb", "krevet", "zuv",
+  "erien", "sonin", "kump", "lasin", "sonkaul", "juru geryb", "krevet", "zuv",
   "lasis", "tun", "menk", "silk", "skumbr", "astuunkoj", "moliusk",
+  "fars", "saliam", "pepperoni", "serano", "prosciutto", "ham",
 ];
 
 export const animalProductStems = [

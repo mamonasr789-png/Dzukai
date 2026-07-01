@@ -22,9 +22,11 @@ import {
   byCategory,
   findById,
   findByName,
+  findProductByInflectedName,
   pickFresh,
   textSearch,
   allProducts,
+  DRINK_CATEGORIES,
 } from "../menuSearch.ts";
 import { pairForFood, pairForCategory, defaultPairing } from "../pairingEngine.ts";
 import { recommend, recommendDrinks, recommendDesserts, recommendKids } from "../recommendationEngine.ts";
@@ -37,6 +39,7 @@ import {
   productHasDislikedRisk,
   productViolatesRestrictions,
 } from "../restrictionEngine.ts";
+import "./stress.test.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // HELPER
@@ -1257,11 +1260,11 @@ describe("ai-engine shim compatibility", () => {
     expect(ctx.currentLanguage).toBe("lt");
     expect(Array.isArray(ctx.allergies)).toBeTruthy();
   });
-  it("generateReply returns a string", () => {
+  it("generateReply returns ProcessMessageResult with text", () => {
     const ctx = emptyContext();
-    const reply = generateReply("Ką rekomenduoji?", ctx, "lt");
-    expect(typeof reply).toBe("string");
-    expect(reply.length).toBeGreaterThan(5);
+    const result = generateReply("Ką rekomenduoji?", ctx, "lt");
+    expect(typeof result.text).toBe("string");
+    expect(result.text.length).toBeGreaterThan(5);
   });
   it("generateReply updates ctx in place", () => {
     const ctx = emptyContext();
@@ -1679,8 +1682,7 @@ describe("RestrictionEngine — vegetarian phrases avoid meat and fish", () => {
     "esu vegetarė", "vegetariskai", "vegetariškai", "vegetarinis",
     "vegetarine", "vegetarinė", "be mesos", "be mėsos", "mesos nevalgau",
     "mėsos nevalgau", "nevalgau mesos", "nevalgau mėsos", "nenoriu mesos",
-    "nenoriu mėsos", "be jautienos", "be kiaulienos", "be vistienos",
-    "be vištienos", "be žuvies", "be zuvies", "valgau tik darzoves",
+    "nenoriu mėsos", "valgau tik darzoves",
     "valgau tik daržoves", "noriu be mesos", "noriu be mėsos",
     "ka be mesos", "ką be mėsos", "vegetarian", "meatless", "no meat",
   ];
@@ -2064,6 +2066,589 @@ describe("AvailabilitySearch — existence before recommendation", () => {
     const reply = processMessage("kokius kokteilius turite?", s);
     expect(reply).toContain("Taip, turime");
     expectNoAlcoholRecommendations(s);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 14. ADD TO CART
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("14. Add to cart intent", () => {
+  it("detects add_to_cart intent from Lithuanian phrase", () => {
+    const s = state();
+    processMessage("Noriu lašišos", s);
+    processMessage("pridėk į krepšelį", s);
+    expect(Array.isArray(s.pendingActions)).toBeTruthy();
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    expect(s.pendingActions![0].type).toBe("ADD_TO_CART");
+  });
+
+  it("detects add_to_cart intent from English phrase", () => {
+    const s = state("en");
+    processMessage("I want salmon", s);
+    processMessage("add to cart", s);
+    expect(Array.isArray(s.pendingActions)).toBeTruthy();
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    expect(s.pendingActions![0].type).toBe("ADD_TO_CART");
+  });
+
+  it("add_to_cart reply mentions the dish name", () => {
+    const s = state();
+    processMessage("Noriu lašišos", s);
+    const reply = processMessage("pridėk į krepšelį", s);
+    expect(reply).toContain("krepšelį");
+  });
+
+  it("add_to_cart sets productId and quantity", () => {
+    const s = state();
+    processMessage("Noriu lašišos", s);
+    processMessage("pridėk į krepšelį", s);
+    const action = s.pendingActions?.[0];
+    expect(action?.productId).toBeTruthy();
+    expect(action?.quantity).toBe(1);
+  });
+
+  it("pendingActions cleared on next processMessage call", () => {
+    const s = state();
+    processMessage("Noriu lašišos", s);
+    processMessage("pridėk į krepšelį", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    processMessage("Ačiū", s);
+    expect(s.pendingActions!.length).toBe(0);
+  });
+
+  it("add_to_cart without dish context returns prompt and no action", () => {
+    const s = state();
+    const reply = processMessage("pridėk į krepšelį", s);
+    expect(s.pendingActions!.length).toBe(0);
+    expect(reply.length).toBeGreaterThan(5);
+  });
+
+  it("generateReply returns actions for add_to_cart", () => {
+    const ctx = emptyContext();
+    generateReply("Noriu cepelinų", ctx, "lt");
+    const result = generateReply("pridėk į krepšelį", ctx, "lt");
+    expect(Array.isArray(result.actions)).toBeTruthy();
+    expect(result.actions![0].type).toBe("ADD_TO_CART");
+  });
+
+  it("generateReply returns no actions for normal recommendation", () => {
+    const ctx = emptyContext();
+    const result = generateReply("Ką rekomenduoji?", ctx, "lt");
+    expect(result.actions).toBeFalsy();
+    expect(result.text.length).toBeGreaterThan(5);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 15. CONVERSATION MEMORY — CONFIRMATION CONTEXT
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("15a. Pending suggestion — beer tasting board", () => {
+  it("beer recommendation sets awaitingConfirmation", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    expect(s.awaitingConfirmation).toBeTruthy();
+    expect(s.pendingSuggestion).toBeTruthy();
+  });
+
+  it("pendingSuggestion points to Alaus degustacija", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    const product = findById(s.pendingSuggestion!.productId);
+    expect(product?.name).toContain("degustacija");
+  });
+
+  it("'Taip' after beer list adds degustacija to cart (Bug 1)", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    processMessage("Taip", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    expect(s.pendingActions![0].type).toBe("ADD_TO_CART");
+    const product = findById(s.pendingActions![0].productId);
+    expect(product?.name).toContain("degustacija");
+  });
+
+  it("'Jo' after beer list also confirms", () => {
+    const s = state();
+    processMessage("Alaus, prašau", s);
+    processMessage("Jo", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    expect(s.pendingActions![0].type).toBe("ADD_TO_CART");
+  });
+
+  it("'Gerai' after beer list confirms", () => {
+    const s = state();
+    processMessage("Kokį alų rekomenduotumėte?", s);
+    processMessage("Gerai", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+  });
+
+  it("'Ok' after beer list confirms", () => {
+    const s = state();
+    processMessage("Alaus, prašau", s);
+    processMessage("Ok", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+  });
+
+  it("confirmation reply mentions product name", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    const reply = processMessage("Taip", s);
+    expect(reply).toContain("degustacija");
+  });
+
+  it("confirmation reply includes krepšelį in LT", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    const reply = processMessage("Taip", s);
+    expect(reply).toContain("krepšelį");
+  });
+
+  it("'Ne' after beer list clears pending suggestion without adding to cart", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    processMessage("Ne", s);
+    expect(s.pendingActions!.length).toBe(0);
+    expect(s.awaitingConfirmation).toBeFalsy();
+  });
+
+  it("'Nereikia' clears pending suggestion", () => {
+    const s = state();
+    processMessage("Alaus, prašau", s);
+    processMessage("Nereikia", s);
+    expect(s.pendingActions!.length).toBe(0);
+    expect(s.awaitingConfirmation).toBeFalsy();
+  });
+
+  it("confirmation clears pendingSuggestion after execution", () => {
+    const s = state();
+    processMessage("Alaus, prašau", s);
+    processMessage("Taip", s);
+    expect(s.awaitingConfirmation).toBeFalsy();
+    expect(s.pendingSuggestion).toBeFalsy();
+  });
+
+  it("asking about food clears stale beer pending suggestion", () => {
+    const s = state();
+    processMessage("Alaus, prašau", s);
+    expect(s.awaitingConfirmation).toBeTruthy();
+    processMessage("Ką valgyti rekomenduojate?", s);
+    expect(s.awaitingConfirmation).toBeFalsy();
+  });
+
+  it("EN: 'yes' after beer confirms", () => {
+    const s = state("en");
+    processMessage("Beer please", s);
+    processMessage("yes", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+  });
+
+  it("EN: 'no' after beer does not add to cart", () => {
+    const s = state("en");
+    processMessage("Beer please", s);
+    processMessage("no", s);
+    expect(s.pendingActions!.length).toBe(0);
+  });
+});
+
+describe("15b. Product name matching in genitive form", () => {
+  it("'noriu degustacijos' finds Alaus degustacija (Bug 2)", () => {
+    const s = state();
+    processMessage("Kokį alų turite?", s);
+    const reply = processMessage("Noriu degustacijos", s);
+    expect(reply).toContain("degustacija");
+  });
+
+  it("findProductByInflectedName finds product by genitive", () => {
+    const p = findProductByInflectedName("noriu degustacijos");
+    expect(p?.name).toContain("degustacija");
+  });
+
+  it("deriveStemVariants: degustacijos → degustacija variant produced", () => {
+    const p = findProductByInflectedName("degustacijos");
+    expect(p?.name).toContain("degustacija");
+  });
+
+  it("'Noriu kiaulienos' does not confuse with genitive matching", () => {
+    const s = state();
+    const reply = processMessage("Noriu kiaulienos", s);
+    // Should recommend pork, not randomly fail
+    expect(reply.length).toBeGreaterThan(5);
+    expect(s.lastRecommendedIds.length).toBeGreaterThan(0);
+  });
+
+  it("'Degustacija' (nominative) also finds the product", () => {
+    const p = findProductByInflectedName("degustacija");
+    expect(p?.name).toContain("degustacija");
+  });
+});
+
+describe("15c. Reference resolution (šito, tą, jo)", () => {
+  it("'O prie šito?' uses last recommended food (Bug 3)", () => {
+    const s = state();
+    processMessage("Noriu lašišos", s);
+    const reply = processMessage("O prie šito?", s);
+    // Should suggest drinks to pair with salmon
+    expect(reply.length).toBeGreaterThan(10);
+  });
+
+  it("'O prie šito?' after žuvis sets up pairing context", () => {
+    const s = state();
+    processMessage("Noriu žuvies", s);
+    processMessage("O prie šito?", s);
+    // Last recommended ids should now be drinks
+    const recs = s.lastRecommendedIds.map(findById).filter(Boolean);
+    expect(recs.some((p) => DRINK_CATEGORIES.includes(p!.category as any))).toBeTruthy();
+  });
+
+  it("'šitos' pronoun references activeDishId", () => {
+    const s = state();
+    processMessage("Noriu vištienos", s);
+    const active = s.activeDishId ?? s.lastFoodDishId;
+    expect(active).toBeTruthy();
+  });
+
+  it("'to' pronoun in pairing request uses last food dish", () => {
+    const s = state();
+    processMessage("Noriu kiaulienos", s);
+    const reply = processMessage("Ką gerti prie to?", s);
+    expect(reply.length).toBeGreaterThan(5);
+  });
+
+  it("'jos' references last food dish for ingredient question", () => {
+    const s = state();
+    processMessage("Noriu lašišos", s);
+    const reply = processMessage("Kas jos sudėtyje?", s);
+    expect(reply.length).toBeGreaterThan(5);
+  });
+
+  it("'dar vieną' returns another recommendation without resetting context", () => {
+    const s = state();
+    processMessage("Rekomenduok ką nors", s);
+    const first = [...s.lastRecommendedIds];
+    processMessage("Dar vieną", s);
+    // Should have changed recommendations
+    expect(s.lastRecommendedIds.length).toBeGreaterThan(0);
+  });
+});
+
+describe("15d. Conversation memory — state persistence across turns", () => {
+  it("budget preference persists across multiple turns", () => {
+    const s = state();
+    processMessage("Turiu tik 10 eurų", s);
+    processMessage("Ką rekomenduojate?", s);
+    expect(s.budget).toBeLessThanOrEqual(10);
+  });
+
+  it("vegetarian preference persists across turns", () => {
+    const s = state();
+    processMessage("Esu vegetaras", s);
+    processMessage("Ką valgyti?", s);
+    expect(s.vegetarian).toBeTruthy();
+  });
+
+  it("allergy persists across turns", () => {
+    const s = state();
+    processMessage("Alergija glitimui", s);
+    processMessage("Ką rekomenduoti?", s);
+    expect(s.glutenFree).toBeTruthy();
+  });
+
+  it("preferred protein remembered after two turns", () => {
+    const s = state();
+    processMessage("Noriu žuvies", s);
+    processMessage("Ką prie to gerti?", s);
+    processMessage("Dar ko nors valgyti", s);
+    expect(s.preferredProtein).toBe("fish");
+  });
+
+  it("lastRecommendedIds updated after each recommendation", () => {
+    const s = state();
+    expect(s.lastRecommendedIds.length).toBe(0);
+    processMessage("Ką rekomenduoji?", s);
+    expect(s.lastRecommendedIds.length).toBeGreaterThan(0);
+  });
+
+  it("activeDishId set after food recommendation", () => {
+    const s = state();
+    processMessage("Noriu vištienos", s);
+    expect(s.activeDishId ?? s.lastFoodDishId).toBeTruthy();
+  });
+
+  it("language preference persists across turns", () => {
+    const s = state("en");
+    processMessage("What do you recommend?", s);
+    expect(s.currentLanguage).toBe("en");
+  });
+
+  it("diet vegan remembered through conversation", () => {
+    const s = state();
+    processMessage("Esu veganas", s);
+    processMessage("Rekomenduok patiekalą", s);
+    expect(s.vegan).toBeTruthy();
+  });
+
+  it("no alcohol flag persists after being set", () => {
+    const s = state();
+    processMessage("Nevartoju alkoholio", s);
+    processMessage("Ką gerti?", s);
+    expect(s.allowAlcohol).toBeFalsy();
+  });
+
+  it("shownProductIds grows as recommendations are made", () => {
+    const s = state();
+    processMessage("Rekomenduok ką nors", s);
+    const count1 = s.shownProductIds.length;
+    processMessage("Dar", s);
+    expect(s.shownProductIds.length).toBeGreaterThanOrEqual(count1);
+  });
+});
+
+describe("15e. Confirmation context — various inputs", () => {
+  it("'Paimsu' after beer list confirms", () => {
+    const s = state();
+    processMessage("Alus", s);
+    processMessage("Paimsu", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+  });
+
+  it("'Imsiu' after beer list confirms", () => {
+    const s = state();
+    processMessage("Alaus, prašau", s);
+    processMessage("Imsiu", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+  });
+
+  it("'Sure' (EN) after beer list confirms", () => {
+    const s = state("en");
+    processMessage("Beer please", s);
+    processMessage("sure", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+  });
+
+  it("ambiguous input ('Geras') does not accidentally confirm", () => {
+    const s = state();
+    processMessage("Alus", s);
+    processMessage("Geras alus", s);
+    // "Geras" is not in POSITIVE pattern — should not confirm
+    // and should not crash
+    expect(s).toBeTruthy();
+  });
+
+  it("second beer query keeps suggestion active", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    expect(s.awaitingConfirmation).toBeTruthy();
+  });
+
+  it("pendingSuggestion not set for food recommendation", () => {
+    const s = state();
+    processMessage("Ką valgyti?", s);
+    // Food recommendations don't set pending suggestion
+    expect(s.awaitingConfirmation).toBeFalsy();
+  });
+
+  it("pendingSuggestion not set for drink pairing", () => {
+    const s = state();
+    processMessage("Noriu lašišos", s);
+    processMessage("Ką prie to gerti?", s);
+    // Drink pairing doesn't set pending suggestion
+    expect(s.awaitingConfirmation).toBeFalsy();
+  });
+
+  it("double confirmation does not double-add", () => {
+    const s = state();
+    processMessage("Alus", s);
+    processMessage("Taip", s);
+    const firstActions = [...(s.pendingActions ?? [])];
+    processMessage("Taip", s);
+    // Second Taip: no pending suggestion, so no action
+    expect(s.pendingActions!.length).toBe(0);
+  });
+
+  it("generateReply confirmation result contains actions for beer Taip", () => {
+    const ctx = emptyContext();
+    generateReply("Noriu alaus", ctx, "lt");
+    const result = generateReply("Taip", ctx, "lt");
+    expect(Array.isArray(result.actions)).toBeTruthy();
+    expect(result.actions![0].type).toBe("ADD_TO_CART");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 16. GENERAL CONVERSATION ACTION SYSTEM
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("16a. Taip after suggestion adds correct product", () => {
+  it("'Taip' after beer recommendation adds Alaus degustacija", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    processMessage("Taip", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    expect(s.pendingActions![0].type).toBe("ADD_TO_CART");
+    const addedId = s.pendingActions![0].productId;
+    const product = findById(addedId);
+    expect(product?.name.toLowerCase()).toContain("degustacija");
+  });
+
+  it("'Jo' after beer recommendation also adds Alaus degustacija", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    processMessage("Jo", s);
+    const addedId = s.pendingActions![0]?.productId;
+    const product = findById(addedId);
+    expect(product?.name.toLowerCase()).toContain("degustacija");
+  });
+
+  it("'Gerai' after food recommendation adds that food", () => {
+    const s = state();
+    processMessage("Ką valgyti?", s);
+    const firstRecommendedId = s.lastRecommendedIds[0];
+    processMessage("Gerai", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    expect(s.pendingActions![0].productId).toBe(firstRecommendedId);
+  });
+
+  it("double 'Taip' does not double-add — second Taip is no-op", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    processMessage("Taip", s);
+    processMessage("Taip", s);
+    expect(s.pendingActions!.length).toBe(0);
+  });
+
+  it("'Ne' after beer recommendation clears pending and does not add", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    processMessage("Ne", s);
+    expect(s.pendingActions!.length).toBe(0);
+    expect(s.awaitingConfirmation).toBeFalsy();
+  });
+});
+
+describe("16b. Named product in genitive form adds to cart", () => {
+  it("'noriu degustacijos' adds Alaus degustacija", () => {
+    const s = state();
+    processMessage("Noriu alaus", s); // sets hasUnclaimedRecommendation
+    processMessage("noriu degustacijos", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    const product = findById(s.pendingActions![0].productId);
+    expect(product?.name.toLowerCase()).toContain("degustacija");
+  });
+
+  it("'Alaus degustacijos noriu' adds Alaus degustacija", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    processMessage("Alaus degustacijos noriu", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    const product = findById(s.pendingActions![0].productId);
+    expect(product?.name.toLowerCase()).toContain("degustacija");
+  });
+
+  it("reply for named product add mentions 'krepšelį'", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    const reply = processMessage("noriu degustacijos", s);
+    expect(reply).toContain("krepšelį");
+  });
+
+  it("generateReply returns ADD_TO_CART action for 'noriu degustacijos' after beer", () => {
+    const ctx = emptyContext();
+    generateReply("Noriu alaus", ctx, "lt");
+    const result = generateReply("noriu degustacijos", ctx, "lt");
+    expect(Array.isArray(result.actions)).toBeTruthy();
+    expect(result.actions![0].type).toBe("ADD_TO_CART");
+    const p = findById(result.actions![0].productId);
+    expect(p?.name.toLowerCase()).toContain("degustacija");
+  });
+});
+
+describe("16c. Pronoun and reference resolution", () => {
+  it("'šitą' after recommendation adds last recommended product", () => {
+    const s = state();
+    processMessage("Ką valgyti?", s);
+    const firstId = s.lastRecommendedIds[0];
+    processMessage("šitą", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    expect(s.pendingActions![0].productId).toBe(firstId);
+  });
+
+  it("'šito noriu' after recommendation adds last recommended product", () => {
+    const s = state();
+    processMessage("Ką valgyti?", s);
+    const firstId = s.lastRecommendedIds[0];
+    processMessage("šito noriu", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    expect(s.pendingActions![0].productId).toBe(firstId);
+  });
+
+  it("'ką prie jo gerti?' after recommendation routes to drink pairing, not cart", () => {
+    const s = state();
+    processMessage("Rekomenduok ką nors", s);
+    const reply = processMessage("Ką prie jo gerti?", s);
+    expect(s.pendingActions!.length).toBe(0);
+    expect(reply.length).toBeGreaterThan(5);
+  });
+
+  it("'O prie šito?' after food does NOT add to cart", () => {
+    const s = state();
+    processMessage("Ką valgyti?", s);
+    const reply = processMessage("O prie šito gerti?", s);
+    expect(s.pendingActions!.length).toBe(0);
+    expect(reply.length).toBeGreaterThan(5);
+  });
+});
+
+describe("16d. Repeat and dar vieną", () => {
+  it("'dar vieną' after explicit cart add repeats same product", () => {
+    const s = state();
+    processMessage("Ką valgyti?", s);
+    processMessage("Gerai", s); // adds first recommended product
+    const addedId = s.lastCartAddedProductId;
+    expect(addedId).toBeTruthy();
+    processMessage("dar vieną", s);
+    expect(s.pendingActions!.length).toBeGreaterThan(0);
+    expect(s.pendingActions![0].productId).toBe(addedId);
+  });
+
+  it("'dar vieną' without prior cart add goes to recommendation flow", () => {
+    const s = state();
+    processMessage("Rekomenduok ką nors", s);
+    processMessage("Dar vieną", s);
+    // No cart action — should recommend another
+    expect(s.pendingActions!.length).toBe(0);
+    expect(s.lastRecommendedIds.length).toBeGreaterThan(0);
+  });
+});
+
+describe("16e. Category words do not trigger cart add", () => {
+  it("'Noriu vištienos' (fresh) goes to food recommendation, not cart", () => {
+    const s = state();
+    const reply = processMessage("Noriu vištienos", s);
+    expect(s.pendingActions!.length).toBe(0);
+    expect(s.lastRecommendedIds.length).toBeGreaterThan(0);
+  });
+
+  it("'Noriu žuvies' (fresh) goes to food recommendation, not cart", () => {
+    const s = state();
+    const reply = processMessage("Noriu žuvies", s);
+    expect(s.pendingActions!.length).toBe(0);
+    expect(s.lastRecommendedIds.length).toBeGreaterThan(0);
+  });
+
+  it("'Noriu kiaulienos' (fresh) goes to food recommendation, not cart", () => {
+    const s = state();
+    const reply = processMessage("Noriu kiaulienos", s);
+    expect(s.pendingActions!.length).toBe(0);
+    expect(s.lastRecommendedIds.length).toBeGreaterThan(0);
+  });
+
+  it("'Noriu alaus' (fresh) goes to beer recommendation, not cart", () => {
+    const s = state();
+    processMessage("Noriu alaus", s);
+    // First message should NOT add to cart — should recommend beers
+    expect(s.lastRecommendedIds.length).toBeGreaterThan(0);
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -11,7 +11,7 @@ import QuantitySelector from "@/components/QuantitySelector";
 import { useCartStore } from "@/lib/store";
 import { useT } from "@/lib/i18n";
 import { createOrder, type ServingPreference } from "@/lib/orders";
-import { type TableSession, getActiveSession, addOrderToSession, updateSessionStatus } from "@/lib/tableSession";
+import { type TableSession, getActiveSession, addOrderToSession, updateSessionStatus, subscribeSession } from "@/lib/tableSession";
 import { createUniqueTask } from "@/lib/waiterTasks";
 
 export default function CartPage() {
@@ -20,12 +20,19 @@ export default function CartPage() {
   const tr = useT(lang);
   const router = useRouter();
   const [serving, setServing] = useState<ServingPreference>("together");
+  const [activeSession, setActiveSession] = useState<TableSession | null>(() =>
+    typeof window !== "undefined" ? getActiveSession() : null
+  );
   const total = totalPrice();
   const count = totalItems();
 
+  useEffect(() => {
+    const refresh = () => setActiveSession(getActiveSession());
+    return subscribeSession(refresh);
+  }, []);
+
   if (items.length === 0) {
-    const session = typeof window !== "undefined" ? getActiveSession() : null;
-    if (session) return <ActiveSessionState session={session} />;
+    if (activeSession) return <ActiveSessionState session={activeSession} />;
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
         <div className="w-24 h-24 rounded-full bg-secondary flex items-center justify-center mb-5">
@@ -261,7 +268,7 @@ function ActiveSessionState({ session }: { session: TableSession }) {
           className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Receipt size={15} />
-          Paprašyti sąskaitos
+          Pakviesti padavėją sąskaitai
         </button>
       </div>
     </div>

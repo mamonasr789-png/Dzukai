@@ -38,6 +38,9 @@ export function createState(lang = "lt"): ConversationState {
     wantsFillingFood: false,
     wantsSpicyFood: false,
     currentLanguage: lang,
+    pendingActions: [],
+    awaitingConfirmation: false,
+    hasUnclaimedRecommendation: false,
   };
 }
 
@@ -69,6 +72,10 @@ export function setRecommended(state: ConversationState, ids: string[]): void {
     if (!state.shownProductIds.includes(id)) {
       state.shownProductIds.push(id);
     }
+  }
+  if (ids.length > 0) {
+    state.lastMentionedProductId = ids[0];
+    state.hasUnclaimedRecommendation = true;
   }
 }
 

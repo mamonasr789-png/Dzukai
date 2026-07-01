@@ -18,6 +18,8 @@ const SYNC_EVENT = "dzukai:session";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type SessionStatus = "ACTIVE" | "BILL_REQUESTED" | "PAID" | "CLOSED";
+export type PaymentMethod = "APP" | "WAITER";
+export type PaymentStatus = "UNPAID" | "PAID";
 
 export interface TableSession {
   id: string;
@@ -26,6 +28,8 @@ export interface TableSession {
   status: SessionStatus;
   createdAt: string;
   updatedAt: string;
+  paymentMethod?: PaymentMethod;
+  paymentStatus?: PaymentStatus;
 }
 
 const OPEN_STATUSES: SessionStatus[] = ["ACTIVE", "BILL_REQUESTED"];
@@ -138,6 +142,25 @@ export function closeSession(): void {
   updateSessionStatus("CLOSED");
 }
 
+/**
+ * Mark the active session as PAID and record how payment was made.
+ * Replaces closeSession() for payment flows so analytics can split by method.
+ */
+export function markSessionPaid(method: PaymentMethod): TableSession | null {
+  const sessions = readAll();
+  const idx = sessions.findIndex((s) => OPEN_STATUSES.includes(s.status));
+  if (idx === -1) return null;
+  sessions[idx] = {
+    ...sessions[idx],
+    status: "PAID",
+    paymentMethod: method,
+    paymentStatus: "PAID",
+    updatedAt: now(),
+  };
+  writeAll(sessions);
+  return sessions[idx];
+}
+
 /** Subscribe to session storage changes. Returns unsubscribe fn. */
 export function subscribeSession(callback: () => void): () => void {
   if (typeof window === "undefined") return () => {};
@@ -164,4 +187,26 @@ export function getSessionStats(): { active: number; billRequested: number; tota
     billRequested: sessions.filter((s) => s.status === "BILL_REQUESTED").length,
     total: sessions.length,
   };
+}
+
+export function getPaymentStats(todayOnly = true): {
+  paidInApp: number;
+  paidByWaiter: number;
+  total: number;
+} {
+  let sessions = readAll().filter(
+    (s) => s.status === "PAID" || s.status === "CLOSED"
+  );
+  if (todayOnly) {
+    const today = new Date().toDateString();
+    sessions = sessions.filter(
+      (s) => new Date(s.createdAt).toDateString() === today
+    );
+  }
+  const paidInApp = sessions.filter((s) => s.paymentMethod === "APP").length;
+  // Legacy CLOSED sessions (before paymentMethod was added) count as waiter-paid
+  const paidByWaiter = sessions.filter(
+    (s) => s.paymentMethod === "WAITER" || (!s.paymentMethod && s.status === "CLOSED")
+  ).length;
+  return { paidInApp, paidByWaiter, total: sessions.length };
 }

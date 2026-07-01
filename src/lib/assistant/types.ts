@@ -23,6 +23,7 @@ export type Intent =
   | "opening_hours"
   | "menu_category"
   | "pairing_request"
+  | "add_to_cart"
   | "change_recommendation"
   | "confirmation"
   | "negative_answer"
@@ -121,6 +122,26 @@ export interface ConversationState {
 
   // Language
   currentLanguage: string;
+
+  // Pending cart actions (set by processMessage, read by shim, then cleared)
+  pendingActions?: AssistantAction[];
+
+  // Confirmation context — set when assistant makes a specific suggestion
+  pendingSuggestion?: { productId: string; action: "add_to_cart" };
+  awaitingConfirmation: boolean;
+
+  // General action resolution — tracks last product mentioned/added for follow-up ordering
+  lastMentionedProductId?: string;
+  hasUnclaimedRecommendation: boolean;
+  lastCartAddedProductId?: string;
+}
+
+// ── Cart actions ──────────────────────────────────────────────────────────────
+
+export interface AssistantAction {
+  type: "ADD_TO_CART";
+  productId: string;
+  quantity: number;
 }
 
 // ── Recommendations ───────────────────────────────────────────────────────────

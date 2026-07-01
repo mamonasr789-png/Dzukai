@@ -20,9 +20,9 @@ import {
 } from "@/lib/analytics";
 import {
   ShoppingBag, TrendingUp, Clock, ChefHat, Bell,
-  CheckCircle2, XCircle, BarChart3, RefreshCw, Calendar, Layers, Table2, Receipt,
+  CheckCircle2, XCircle, BarChart3, RefreshCw, Calendar, Layers, Table2, Receipt, Truck, CreditCard,
 } from "lucide-react";
-import { getSessionStats, subscribeSession } from "@/lib/tableSession";
+import { getSessionStats, getPaymentStats, subscribeSession } from "@/lib/tableSession";
 import { resetDemoData } from "@/lib/devReset";
 import { Separator } from "@/components/ui/separator";
 
@@ -36,6 +36,7 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
   NEW: "Naujas",
   PREPARING: "Gaminamas",
   READY: "Paruoštas",
+  DELIVERING: "Neša padavėjas",
   COMPLETED: "Įvykdytas",
   CANCELLED: "Atšauktas",
 };
@@ -44,6 +45,7 @@ const STATUS_DOT: Record<OrderStatus, string> = {
   NEW: "bg-amber-400",
   PREPARING: "bg-blue-400",
   READY: "bg-green-400",
+  DELIVERING: "bg-purple-400",
   COMPLETED: "bg-emerald-500",
   CANCELLED: "bg-red-500",
 };
@@ -69,6 +71,7 @@ export default function AdminPage() {
   const [filter, setFilter] = useState<DateFilter>("today");
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [sessionStats, setSessionStats] = useState({ active: 0, billRequested: 0, total: 0 });
+  const [paymentStats, setPaymentStats] = useState({ paidInApp: 0, paidByWaiter: 0, total: 0 });
   const [spinning, setSpinning] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,6 +97,7 @@ export default function AdminPage() {
   const refreshAll = useCallback(() => {
     setAllOrders(listOrders());
     setSessionStats(getSessionStats());
+    setPaymentStats(getPaymentStats(true));
     setLastRefresh(new Date());
   }, []);
 
@@ -267,6 +271,12 @@ export default function AdminPage() {
               </div>
             </section>
 
+            {/* ── Payments today ── */}
+            <section>
+              <SectionLabel>Mokėjimai šiandien</SectionLabel>
+              <PaymentStats stats={paymentStats} />
+            </section>
+
             {/* ── Popular + Recent ── */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Popular dishes */}
@@ -331,12 +341,13 @@ function KitchenLive({ stats }: { stats: KitchenStats }) {
     { label: "Nauji", value: stats.newCount, icon: <Clock size={15} />, color: "text-amber-400", bg: "bg-amber-400/10 border-amber-400/20" },
     { label: "Gaminami", value: stats.preparingCount, icon: <ChefHat size={15} />, color: "text-blue-400", bg: "bg-blue-400/10 border-blue-400/20" },
     { label: "Paruošti", value: stats.readyCount, icon: <Bell size={15} />, color: "text-green-400", bg: "bg-green-400/10 border-green-400/20" },
+    { label: "Neša padavėjas", value: stats.deliveringCount, icon: <Truck size={15} />, color: "text-purple-400", bg: "bg-purple-400/10 border-purple-400/20" },
     { label: "Įvykdyti", value: stats.completedCount, icon: <CheckCircle2 size={15} />, color: "text-emerald-400", bg: "bg-emerald-400/10 border-emerald-400/20" },
     { label: "Atšaukti", value: stats.cancelledCount, icon: <XCircle size={15} />, color: "text-red-400", bg: "bg-red-400/10 border-red-400/20" },
   ];
 
   return (
-    <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
+    <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
       {items.map(({ label, value, icon, color, bg }) => (
         <div key={label} className={`border rounded-xl p-3 flex flex-col gap-2 ${bg}`}>
           <div className={`flex items-center gap-1.5 ${color}`}>
@@ -433,6 +444,52 @@ function Card({ children, noPad = false }: { children: React.ReactNode; noPad?: 
   return (
     <div className={`bg-white/3 border border-white/8 rounded-2xl overflow-hidden ${noPad ? "" : "p-4"}`}>
       {children}
+    </div>
+  );
+}
+
+function PaymentStats({
+  stats,
+}: {
+  stats: { paidInApp: number; paidByWaiter: number; total: number };
+}) {
+  const total = stats.total || 1; // avoid division by zero
+  const appPct = Math.round((stats.paidInApp / total) * 100);
+  const waiterPct = Math.round((stats.paidByWaiter / total) * 100);
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="border border-white/8 rounded-xl p-4 bg-white/3 flex flex-col gap-2">
+        <div className="flex items-center gap-1.5 text-blue-400">
+          <CreditCard size={14} />
+          <span className="text-[11px] font-semibold uppercase tracking-wide">Programėlėje</span>
+        </div>
+        <div className="flex items-end gap-2">
+          <p className="font-black text-2xl text-blue-400">{stats.paidInApp}</p>
+          {stats.total > 0 && (
+            <p className="text-xs text-white/40 mb-0.5">{appPct}%</p>
+          )}
+        </div>
+      </div>
+      <div className="border border-white/8 rounded-xl p-4 bg-white/3 flex flex-col gap-2">
+        <div className="flex items-center gap-1.5 text-emerald-400">
+          <Receipt size={14} />
+          <span className="text-[11px] font-semibold uppercase tracking-wide">Padavėjas</span>
+        </div>
+        <div className="flex items-end gap-2">
+          <p className="font-black text-2xl text-emerald-400">{stats.paidByWaiter}</p>
+          {stats.total > 0 && (
+            <p className="text-xs text-white/40 mb-0.5">{waiterPct}%</p>
+          )}
+        </div>
+      </div>
+      <div className="border border-white/8 rounded-xl p-4 bg-white/3 flex flex-col gap-2">
+        <div className="flex items-center gap-1.5 text-white/50">
+          <Layers size={14} />
+          <span className="text-[11px] font-semibold uppercase tracking-wide">Iš viso</span>
+        </div>
+        <p className="font-black text-2xl text-white/60">{stats.total}</p>
+      </div>
     </div>
   );
 }

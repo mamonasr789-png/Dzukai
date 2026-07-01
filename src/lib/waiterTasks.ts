@@ -194,6 +194,24 @@ export function deleteTask(id: string): void {
   writeAll(readAll().filter((t) => t.id !== id));
 }
 
+/**
+ * Mark all non-completed tasks for the given order IDs as completed.
+ * Called when a session is closed (payment received) to clean up the task list.
+ */
+export function completeTasksForOrders(orderIds: string[]): void {
+  const idSet = new Set(orderIds);
+  const tasks = readAll();
+  let changed = false;
+  const updated = tasks.map((t) => {
+    if (idSet.has(t.orderId) && t.status !== "completed") {
+      changed = true;
+      return { ...t, status: "completed" as WaiterTaskStatus, updatedAt: now() };
+    }
+    return t;
+  });
+  if (changed) writeAll(updated);
+}
+
 /** Subscribe to waiter task changes. Returns unsubscribe fn. */
 export function subscribeWaiterTasks(callback: () => void): () => void {
   if (typeof window === "undefined") return () => {};

@@ -4,10 +4,16 @@
  */
 
 import { createState, processMessage } from "./assistant/brain.ts";
-import type { ConversationState } from "./assistant/types.ts";
+import type { AssistantAction, ConversationState } from "./assistant/types.ts";
 
 // Re-export ConversationState as WaiterContext for UI compatibility
 export type WaiterContext = ConversationState;
+export type { AssistantAction };
+
+export interface ProcessMessageResult {
+  text: string;
+  actions?: AssistantAction[];
+}
 
 export function emptyContext(lang = "lt"): WaiterContext {
   return createState(lang);
@@ -20,8 +26,12 @@ export function updateContext(_ctx: WaiterContext, _input: string): void {
 
 /**
  * Generate a reply. Mutates ctx in place (state persists via ref in UI).
+ * Returns text + any pending cart actions set by the assistant.
  */
-export function generateReply(input: string, ctx: WaiterContext, lang: string): string {
+export function generateReply(input: string, ctx: WaiterContext, lang: string): ProcessMessageResult {
   ctx.currentLanguage = lang;
-  return processMessage(input, ctx);
+  const text = processMessage(input, ctx);
+  const actions = ctx.pendingActions?.length ? [...ctx.pendingActions] : undefined;
+  ctx.pendingActions = [];
+  return { text, actions };
 }

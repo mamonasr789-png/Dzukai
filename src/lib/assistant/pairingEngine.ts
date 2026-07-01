@@ -163,9 +163,11 @@ export function pairForFood(
   const coffee = allProducts.find((p) => p.id === "k1") ??
                  byCategory("kava").find((p) => p.name.toLowerCase().includes("espresso"));
 
-  const explanation = isSpicy
-    ? (SPICY_PAIRING[`explanation${langKey(state.currentLanguage)}`] ?? SPICY_PAIRING.explanationLt)
-    : (rule?.[`explanation${langKey(state.currentLanguage)}`] ?? rule?.explanationLt ?? genericExplanation(state.currentLanguage));
+  const explanation = isAlcoholRestricted(state)
+    ? nonAlcoholicExplanation(foodProduct.category, state.currentLanguage)
+    : isSpicy
+      ? (SPICY_PAIRING[`explanation${langKey(state.currentLanguage)}`] ?? SPICY_PAIRING.explanationLt)
+      : (rule?.[`explanation${langKey(state.currentLanguage)}`] ?? rule?.explanationLt ?? genericExplanation(state.currentLanguage));
 
   return { drinks, desserts: dessertsPool, explanation };
 }
@@ -190,9 +192,9 @@ export function pairForCategory(
   return {
     drinks,
     desserts: shuffle(dessertPool).slice(0, 2),
-    explanation:
-      rule[`explanation${langKey(state.currentLanguage)}`] ??
-      rule.explanationLt,
+    explanation: isAlcoholRestricted(state)
+      ? nonAlcoholicExplanation(category, state.currentLanguage)
+      : (rule[`explanation${langKey(state.currentLanguage)}`] ?? rule.explanationLt),
   };
 }
 
@@ -259,6 +261,10 @@ function withNonAlcoholFallback(pool: Product[], state: ConversationState): Prod
   ], state);
 }
 
+function isAlcoholRestricted(state: ConversationState): boolean {
+  return state.preferredDrink === "nonAlcoholic" || state.allowAlcohol === false || state.ageGroup === "minor";
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function findRule(product: Product): PairingRule | undefined {
@@ -293,4 +299,37 @@ function genericExplanation(lang: string): string {
     ru: "К этому блюду рекомендую крафтовое пиво или вино.",
   };
   return map[lang] ?? map.lt;
+}
+
+function nonAlcoholicExplanation(category: Category, lang: string): string {
+  const map: Record<string, Record<string, string>> = {
+    zuvis: {
+      lt: "Prie žuvies siūlyčiau gaivų limonadą, mineralinį vandenį arba sultis.",
+      en: "With fish, I'd suggest a refreshing lemonade, sparkling water, or juice.",
+      ru: "К рыбе предложу лимонад, минеральную воду или сок.",
+    },
+    bulviniai: {
+      lt: "Prie bulvinių patiekalų tinka gira, limonadas arba vanduo.",
+      en: "Potato dishes go well with kvass, lemonade, or water.",
+      ru: "К картофельным блюдам подойдут квас, лимонад или вода.",
+    },
+    vistiena: {
+      lt: "Prie vištienos siūlyčiau limonadą, sultis arba vandenį.",
+      en: "With chicken, I'd suggest lemonade, juice, or water.",
+      ru: "К курице предложу лимонад, сок или воду.",
+    },
+    picos: {
+      lt: "Prie picos gerai tinka limonadas, kola arba vanduo.",
+      en: "Pizza goes well with lemonade, cola, or water.",
+      ru: "К пицце хорошо подойдут лимонад, кола или вода.",
+    },
+    default: {
+      lt: "Prie šio patiekalo siūlyčiau nealkoholinį gėrimą — limonadą, sultis ar vandenį.",
+      en: "With this dish, I'd suggest a non-alcoholic drink like lemonade, juice, or water.",
+      ru: "К этому блюду предложу безалкогольный напиток: лимонад, сок или воду.",
+    },
+  };
+
+  const key = category in map ? category : "default";
+  return map[key][lang] ?? map[key].lt;
 }

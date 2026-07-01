@@ -38,11 +38,17 @@ import {
 } from "./pairingEngine.ts";
 import { buildResponse } from "./responseBuilder.ts";
 import { getFullInfo, getHours } from "./knowledgeBase.ts";
-import { findById, findDishReference, FOOD_CATEGORIES, DRINK_CATEGORIES } from "./menuSearch.ts";
+import { findById, findDishReference, findProductByInflectedName, FOOD_CATEGORIES, DRINK_CATEGORIES, allProducts } from "./menuSearch.ts";
 import { normalizeText } from "./synonyms.ts";
 import { isAlcoholicProduct } from "./restrictionEngine.ts";
 import { answerAvailability } from "./availabilitySearch.ts";
-import type { ConversationMode, ConversationState, NLUResult } from "./types.ts";
+import {
+  setPendingSuggestion,
+  clearPendingSuggestion,
+  isConfirmationIntent,
+} from "./confirmationContext.ts";
+import { resolveCartAction } from "./actionResolver.ts";
+import type { AssistantAction, ConversationMode, ConversationState, NLUResult } from "./types.ts";
 import type { Category, Product } from "../data.ts";
 
 export type { ConversationState };
@@ -53,19 +59,41 @@ export { createState };
  * Mutates `state` in place.
  */
 export function processMessage(input: string, state: ConversationState): string {
+  state.pendingActions = [];
+
   const previousRecommendationIds = [...state.lastRecommendedIds];
 
   // 1. Detect intent
   const nlu = detectIntent(input, state);
 
+  // Clear stale pending suggestion when user moves to a new topic or declines
+  if (state.awaitingConfirmation) {
+    if (!isConfirmationIntent(nlu.intent) || nlu.intent === "negative_answer") {
+      clearPendingSuggestion(state);
+    }
+  }
+
   // 2. Determine mode before product search
   const mode = determineConversationMode(nlu, state);
 
-  // 3. Update memory
+  // 3. Update memory (sets preferredProtein, diet flags, etc.)
   const restrictionUpdate = updateMemory(state, nlu);
 
-  // 4. Update language from state
-  //    (memory.updateMemory may have detected language from input)
+  // 4. General cart action resolution — runs AFTER NLU so entities are available.
+  //    Handles: "taip", "noriu degustacijos", "šitą", "dar vieną", etc.
+  const cartResolution = resolveCartAction(
+    nlu.normalizedInput,
+    nlu.entities,
+    state,
+    state.currentLanguage
+  );
+  if (cartResolution) {
+    state.pendingActions = cartResolution.actions;
+    recordTurn(state, "user", input, nlu.intent);
+    recordTurn(state, "assistant", cartResolution.text, undefined, state.lastRecommendedIds);
+    state.currentIntent = nlu.intent;
+    return cartResolution.text;
+  }
 
   // 5. Route by mode and validate category correctness
   const availability = answerAvailability(input, state);
@@ -105,6 +133,10 @@ function route(
   }
   if (nlu.intent === "restaurant_info") {
     return buildResponse({ intent: "restaurant_info", infoText: getFullInfo(state.currentLanguage) }, state);
+  }
+
+  if (nlu.intent === "add_to_cart") {
+    return handleAddToCart(nlu, state);
   }
 
   switch (mode) {
@@ -186,7 +218,7 @@ function handleDessert(state: ConversationState): string {
 
 function handleAllergy(nlu: NLUResult, state: ConversationState): string {
   const specificProduct = findDishForTurn(nlu, state);
-  if (specificProduct && nlu.intent === "allergy_question") {
+  if (specificProduct && nlu.intent === "allergy_question" && isSpecificDishSafetyQuestion(nlu.normalizedInput)) {
     state.lastFoodDishId = specificProduct.id;
     return buildResponse({ intent: "allergy_question", specificProduct }, state);
   }
@@ -221,7 +253,13 @@ function handleMenuSearch(nlu: NLUResult, state: ConversationState): string {
     const result = recommendDrinks(state, drinkType);
     setRecommended(state, result.products.map((p) => p.id));
     const intent = drinkType === "beer" ? "beer_recommendation" : drinkType === "wine" ? "wine_recommendation" : drinkType === "cocktail" ? "cocktail_recommendation" : "drink_recommendation";
-    return buildResponse({ intent, result }, state);
+    const reply = buildResponse({ intent, result }, state);
+    // Beer response tail always suggests the tasting board — track it for confirmation
+    if (drinkType === "beer" || intent === "beer_recommendation") {
+      const tasting = allProducts.find((p) => normalizeText(p.name).includes("degustacija"));
+      if (tasting) setPendingSuggestion(state, tasting.id);
+    }
+    return reply;
   }
   return handleFoodRecommendation(nlu, state);
 }
@@ -246,7 +284,48 @@ function handleChildren(state: ConversationState): string {
   return buildResponse({ intent: "kids_menu", result }, state);
 }
 
+function handleAddToCart(nlu: NLUResult, state: ConversationState): string {
+  // Try context dish, then explicit name match (any category allowed for cart)
+  const dish = findDishForTurn(nlu, state) ?? findProductByInflectedName(nlu.normalizedInput);
+  const lang = state.currentLanguage;
+  if (!dish) {
+    return lang === "en"
+      ? "Which item would you like to add to your cart?"
+      : lang === "ru"
+      ? "Какой товар добавить в корзину?"
+      : "Kurį patiekalą norėtumėte pridėti į krepšelį?";
+  }
+  if (FOOD_CATEGORIES.includes(dish.category as Category)) {
+    state.lastFoodDishId = dish.id;
+    state.activeDishId = dish.id;
+  }
+  state.lastMentionedProductId = dish.id;
+  state.lastCartAddedProductId = dish.id;
+  state.hasUnclaimedRecommendation = false;
+  const action: AssistantAction = { type: "ADD_TO_CART", productId: dish.id, quantity: 1 };
+  state.pendingActions = [action];
+  return lang === "en"
+    ? `**${dish.name}** has been added to your cart! 🛒`
+    : lang === "ru"
+    ? `**${dish.name}** добавлен в корзину! 🛒`
+    : `**${dish.name}** pridėta į krepšelį! 🛒`;
+}
+
 function handleFollowUp(nlu: NLUResult, state: ConversationState): string {
+  // Try explicit product name first (handles genitive forms like "noriu degustacijos")
+  const namedProduct = findProductByInflectedName(nlu.normalizedInput);
+  if (namedProduct) {
+    setRecommended(state, [namedProduct.id]);
+    if (FOOD_CATEGORIES.includes(namedProduct.category as Category)) {
+      state.lastFoodDishId = namedProduct.id;
+      state.activeDishId = namedProduct.id;
+    }
+    return buildResponse({
+      intent: "food_recommendation",
+      result: { products: [namedProduct], poolExhausted: false },
+    }, state);
+  }
+
   const selectedFromContext = findSelectionFromLastRecommendations(nlu.normalizedInput, state);
   if (selectedFromContext) {
     state.selectedDishId = selectedFromContext.id;
@@ -402,6 +481,10 @@ function normalizeDrinkType(nlu: NLUResult): string | undefined {
   if (/\b(vand|water)\b/i.test(text)) return "water";
   if (/\b(gaiv|cola|coca|sprite|fanta|soft)\b/i.test(text)) return "soft";
   return undefined;
+}
+
+function isSpecificDishSafetyQuestion(input: string): boolean {
+  return /\b(ar|ar yra|yra|turi|sudet|sudety|ingredient|alergen|is ko|kas yra)\b/i.test(input);
 }
 
 function lastRecommendationsAreDrinks(state: ConversationState): boolean {

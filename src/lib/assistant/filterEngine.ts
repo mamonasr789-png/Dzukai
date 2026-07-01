@@ -13,6 +13,7 @@ import { productViolatesRestrictions } from "./restrictionEngine.ts";
 const MEAT_INGREDIENTS = [
   "jautiena", "kiauliena", "aviena", "vištiena", "antiena",
   "kumpio", "šoninė", "lašiniai", "kumpis", "mėsa",
+  "ėriena", "faršas", "saliamis", "pepperoni", "serano", "prosciutto", "ham",
   "beef", "pork", "chicken", "lamb", "meat",
 ];
 

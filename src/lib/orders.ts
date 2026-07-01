@@ -15,11 +15,12 @@ const SYNC_EVENT = "dzukai:order";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type OrderStatus = "NEW" | "PREPARING" | "READY" | "COMPLETED" | "CANCELLED";
+export type OrderStatus = "NEW" | "PREPARING" | "READY" | "DELIVERING" | "COMPLETED" | "CANCELLED";
 
 /**
  * "together"  — Bring all dishes at once. Order becomes READY only when
  *               every non-cancelled item is individually READY.
+ *               Waiter then accepts → all items DELIVERING → COMPLETED.
  * "as_ready"  — Bring each dish the moment it's ready. Order becomes READY
  *               as soon as any item reaches READY status.
  */
@@ -49,6 +50,8 @@ export interface Order {
    * Optional for backward compat — old orders default to "together".
    */
   servingPreference?: ServingPreference;
+  /** Set to true when customer pays for this specific order (single-order scope). */
+  isPaid?: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -67,17 +70,23 @@ function broadcast(): void {
 /**
  * Derive the customer-visible order status from its items.
  *
+ * Lifecycle per item: NEW → PREPARING → READY → DELIVERING → COMPLETED
+ * Kitchen stops at READY. Waiter drives DELIVERING → COMPLETED.
+ *
+ * Shared rules (run before preference split):
+ *   all CANCELLED            → CANCELLED
+ *   all active COMPLETED     → COMPLETED
+ *   all active DELIVERING/COMPLETED → DELIVERING
+ *
  * "together" rules:
- *   READY only when ALL active items are READY or COMPLETED.
- *   While waiting for remaining items, shows PREPARING (not READY).
+ *   all active READY/DELIVERING/COMPLETED → READY (kitchen done, waiter on the way)
+ *   any PREPARING/READY/DELIVERING active → PREPARING
+ *   else → NEW
  *
  * "as_ready" rules:
- *   READY as soon as any item is READY.
- *
- * Shared rules (both modes):
- *   all CANCELLED → CANCELLED
- *   all COMPLETED (active) → COMPLETED
- *   any PREPARING (and preference "as_ready", no READY) → PREPARING
+ *   any DELIVERING (and no READY left) → DELIVERING
+ *   any READY → READY
+ *   any PREPARING → PREPARING
  *   else → NEW
  */
 export function deriveOrderStatus(
@@ -90,15 +99,14 @@ export function deriveOrderStatus(
   const active = statuses.filter((s) => s !== "CANCELLED");
   if (active.length === 0) return "CANCELLED";
   if (active.every((s) => s === "COMPLETED")) return "COMPLETED";
+  if (active.every((s) => s === "DELIVERING" || s === "COMPLETED")) return "DELIVERING";
 
   if (preference === "together") {
-    // All active items must be READY (or COMPLETED) before order is READY
-    if (active.every((s) => s === "READY" || s === "COMPLETED")) return "READY";
-    // Any item started or already ready but waiting for others → PREPARING
-    if (active.some((s) => s === "PREPARING" || s === "READY")) return "PREPARING";
+    if (active.every((s) => s === "READY" || s === "DELIVERING" || s === "COMPLETED")) return "READY";
+    if (active.some((s) => s === "PREPARING" || s === "READY" || s === "DELIVERING")) return "PREPARING";
     return "NEW";
   } else {
-    // as_ready: first READY item surfaces immediately
+    if (active.some((s) => s === "DELIVERING") && !active.some((s) => s === "READY")) return "DELIVERING";
     if (active.some((s) => s === "READY")) return "READY";
     if (active.some((s) => s === "PREPARING")) return "PREPARING";
     return "NEW";
@@ -210,7 +218,57 @@ export function updateOrderStatus(id: string, status: OrderStatus): Order | unde
   return orders[idx];
 }
 
-const ACTIVE_STATUSES: OrderStatus[] = ["NEW", "PREPARING", "READY"];
+/**
+ * Waiter accepts delivery — move specified items from READY → DELIVERING.
+ * If productIds is empty, transitions all READY items in the order.
+ */
+export function startItemsDelivery(orderId: string, productIds: string[]): Order | undefined {
+  const orders = readAll();
+  const idx = orders.findIndex((o) => o.id === orderId);
+  if (idx === -1) return undefined;
+
+  const order = normalizeOrder(orders[idx]);
+  const targets = new Set(productIds.length ? productIds : order.items.map((i) => i.productId));
+  const updatedItems = order.items.map((i) =>
+    targets.has(i.productId) && (i.itemStatus ?? "NEW") === "READY"
+      ? { ...i, itemStatus: "DELIVERING" as OrderStatus }
+      : i
+  );
+  orders[idx] = {
+    ...order,
+    items: updatedItems,
+    status: deriveOrderStatus(updatedItems, order.servingPreference),
+  };
+  writeAll(orders);
+  return orders[idx];
+}
+
+/**
+ * Waiter delivered — move specified items from DELIVERING → COMPLETED.
+ * If productIds is empty, transitions all DELIVERING items in the order.
+ */
+export function completeItemsDelivery(orderId: string, productIds: string[]): Order | undefined {
+  const orders = readAll();
+  const idx = orders.findIndex((o) => o.id === orderId);
+  if (idx === -1) return undefined;
+
+  const order = normalizeOrder(orders[idx]);
+  const targets = new Set(productIds.length ? productIds : order.items.map((i) => i.productId));
+  const updatedItems = order.items.map((i) =>
+    targets.has(i.productId) && (i.itemStatus ?? "NEW") === "DELIVERING"
+      ? { ...i, itemStatus: "COMPLETED" as OrderStatus }
+      : i
+  );
+  orders[idx] = {
+    ...order,
+    items: updatedItems,
+    status: deriveOrderStatus(updatedItems, order.servingPreference),
+  };
+  writeAll(orders);
+  return orders[idx];
+}
+
+const ACTIVE_STATUSES: OrderStatus[] = ["NEW", "PREPARING", "READY", "DELIVERING"];
 
 export function getLatestActiveOrder(): Order | undefined {
   const active = readAll()
@@ -222,6 +280,22 @@ export function getLatestActiveOrder(): Order | undefined {
 
 export function deleteOrder(id: string): void {
   writeAll(readAll().filter((o) => o.id !== id));
+}
+
+/** Mark a single order as paid (single-order payment scope). */
+export function markOrderPaid(id: string): Order | undefined {
+  const orders = readAll();
+  const idx = orders.findIndex((o) => o.id === id);
+  if (idx === -1) return undefined;
+  orders[idx] = { ...orders[idx], isPaid: true };
+  writeAll(orders);
+  return orders[idx];
+}
+
+/** Returns true when every order in the list has been paid. */
+export function allOrdersPaid(orderIds: string[]): boolean {
+  const orders = readAll();
+  return orderIds.every((id) => orders.find((o) => o.id === id)?.isPaid === true);
 }
 
 /**
@@ -270,6 +344,7 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
   NEW: "Naujas",
   PREPARING: "Gaminamas",
   READY: "Paruoštas",
+  DELIVERING: "Neša padavėjas",
   COMPLETED: "Įvykdytas",
   CANCELLED: "Atšauktas",
 };
@@ -277,12 +352,13 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
 export const STATUS_MESSAGES: Record<OrderStatus, string> = {
   NEW: "Užsakymas priimtas. Laukimo laikas apie 15 min.",
   PREPARING: "Užsakymas gaminamas. Laukimo laikas apie 10 min.",
-  READY: "Užsakymas paruoštas.",
+  READY: "Užsakymas paruoštas! Padavėjas jau neša.",
+  DELIVERING: "Padavėjas neša jūsų užsakymą. Jau beveik!",
   COMPLETED: "Skanaus!",
   CANCELLED: "Užsakymas atšauktas.",
 };
 
-export const STATUS_ORDER: OrderStatus[] = ["NEW", "PREPARING", "READY", "COMPLETED"];
+export const STATUS_ORDER: OrderStatus[] = ["NEW", "PREPARING", "READY", "DELIVERING", "COMPLETED"];
 
 export const SERVING_LABELS: Record<ServingPreference, { short: string; long: string }> = {
   together: {

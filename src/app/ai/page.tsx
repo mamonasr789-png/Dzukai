@@ -177,6 +177,7 @@ function TypingDots() {
 
 export default function AIPage() {
   const lang = useCartStore((s) => s.lang);
+  const addItem = useCartStore((s) => s.addItem);
   const tr = useT(lang);
 
   const makeGreeting = (): Message => ({
@@ -226,7 +227,16 @@ export default function AIPage() {
       // Simulate natural waiter typing delay (600–900ms)
       const delay = 600 + Math.random() * 300;
       setTimeout(() => {
-        const reply = generateReply(trimmed, ctxRef.current, lang);
+        const { text: reply, actions } = generateReply(trimmed, ctxRef.current, lang);
+        // Auto-execute cart actions
+        let autoAdded = 0;
+        for (const action of actions ?? []) {
+          if (action.type === "ADD_TO_CART") {
+            const product = products.find((p) => p.id === action.productId);
+            if (product) { addItem(product, action.quantity); autoAdded++; }
+          }
+        }
+        if (autoAdded > 0) setCartCount((c) => c + autoAdded);
         const assistantMsg: Message = {
           id: (Date.now() + 1).toString(),
           role: "assistant",
@@ -238,7 +248,7 @@ export default function AIPage() {
         setTimeout(() => inputRef.current?.focus(), 50);
       }, delay);
     },
-    [typing, lang]
+    [typing, lang, addItem]
   );
 
   const reset = () => {

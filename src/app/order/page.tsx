@@ -1,9 +1,12 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { CheckCircle2, Clock, ChefHat, Bell, XCircle, UtensilsCrossed, Utensils, Zap } from "lucide-react";
+import {
+  CheckCircle2, Clock, ChefHat, Bell, XCircle,
+  UtensilsCrossed, Utensils, Zap, Truck, CreditCard, Receipt,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -11,6 +14,8 @@ import {
   type OrderStatus,
   getOrder,
   getLatestActiveOrder,
+  markOrderPaid,
+  allOrdersPaid,
   subscribeOrders,
   STATUS_MESSAGES,
   STATUS_ORDER,
@@ -20,12 +25,20 @@ import {
   type TableSession,
   getActiveSession,
   subscribeSession,
+  updateSessionStatus,
+  markSessionPaid,
 } from "@/lib/tableSession";
+import { createUniqueTask, completeTasksForOrders, subscribeWaiterTasks } from "@/lib/waiterTasks";
+import { clearCartStorage } from "@/lib/store";
+import { processPayment } from "@/lib/payment";
+
+// ── Status display maps ───────────────────────────────────────────────────────
 
 const STATUS_ICON: Record<OrderStatus, React.ReactNode> = {
   NEW: <Clock size={28} className="text-amber-400" />,
   PREPARING: <ChefHat size={28} className="text-blue-400" />,
   READY: <Bell size={28} className="text-green-400" />,
+  DELIVERING: <Truck size={28} className="text-purple-400" />,
   COMPLETED: <CheckCircle2 size={28} className="text-green-500" />,
   CANCELLED: <XCircle size={28} className="text-destructive" />,
 };
@@ -34,6 +47,7 @@ const STATUS_ICON_SM: Record<OrderStatus, React.ReactNode> = {
   NEW: <Clock size={12} className="text-amber-400" />,
   PREPARING: <ChefHat size={12} className="text-blue-400" />,
   READY: <Bell size={12} className="text-green-400" />,
+  DELIVERING: <Truck size={12} className="text-purple-400" />,
   COMPLETED: <CheckCircle2 size={12} className="text-green-500" />,
   CANCELLED: <XCircle size={12} className="text-destructive" />,
 };
@@ -42,6 +56,7 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
   NEW: "Naujas",
   PREPARING: "Gaminamas",
   READY: "Paruoštas",
+  DELIVERING: "Neša padavėjas",
   COMPLETED: "Įvykdytas",
   CANCELLED: "Atšauktas",
 };
@@ -50,6 +65,7 @@ const STATUS_COLOR: Record<OrderStatus, string> = {
   NEW: "text-amber-400",
   PREPARING: "text-blue-400",
   READY: "text-green-400",
+  DELIVERING: "text-purple-400",
   COMPLETED: "text-green-500",
   CANCELLED: "text-destructive",
 };
@@ -58,6 +74,7 @@ const ITEM_BADGE: Record<OrderStatus, string> = {
   NEW: "bg-amber-500/10 text-amber-400",
   PREPARING: "bg-blue-500/10 text-blue-400",
   READY: "bg-green-500/10 text-green-400",
+  DELIVERING: "bg-purple-500/10 text-purple-400",
   COMPLETED: "bg-secondary text-muted-foreground",
   CANCELLED: "bg-destructive/10 text-destructive",
 };
@@ -66,37 +83,184 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("lt-LT", { hour: "2-digit", minute: "2-digit" });
 }
 
+// ── Main content ──────────────────────────────────────────────────────────────
+
 function OrderContent() {
+  const router = useRouter();
   const params = useSearchParams();
   const id = params.get("id");
+
   const [order, setOrder] = useState<Order | null | undefined>(undefined);
   const [session, setSession] = useState<TableSession | null>(null);
   const [sessionOrders, setSessionOrders] = useState<Order[]>([]);
+  const [sessionEnded, setSessionEnded] = useState(false);
+  const hadSessionRef = useRef(false);
 
-  useEffect(() => {
-    const refresh = () => {
-      if (id) {
-        setOrder(getOrder(id) ?? null);
-        return;
-      }
-      const s = getActiveSession();
-      setSession(s);
+  // Payment state
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
+  const [billCalledFeedback, setBillCalledFeedback] = useState(false);
+
+  // Keep a ref to the latest id so subscription callbacks never capture
+  // a stale value from the initial render closure.
+  const idRef = useRef(id);
+  idRef.current = id;
+
+  // Defined in the render body so it always closes over the latest setState
+  // functions (stable) and reads idRef.current at call time (fresh).
+  const doRefresh = () => {
+    const currentId = idRef.current;
+
+    // Always read session — payment card needs it even on the ?id= view.
+    const s = getActiveSession();
+    if (hadSessionRef.current && !s) {
+      setSessionEnded(true);
+      return;
+    }
+    if (s) hadSessionRef.current = true;
+    setSession(s);
+
+    if (currentId) {
+      setOrder(getOrder(currentId) ?? null);
+      // When the session contains multiple orders (customer ordered again),
+      // populate sessionOrders so the action card total covers the full session.
       if (s && s.orderIds.length > 1) {
-        // Multi-order session: load all orders, show session view
         const orders = s.orderIds.map((oid) => getOrder(oid)).filter(Boolean) as Order[];
         setSessionOrders(orders);
-        setOrder(null); // signals "show session view"
-      } else if (s && s.orderIds.length === 1) {
-        setOrder(getOrder(s.orderIds[0]) ?? null);
       } else {
-        setOrder(getLatestActiveOrder() ?? null);
+        setSessionOrders([]);
       }
-    };
-    refresh();
-    const unsubOrders = subscribeOrders(refresh);
-    const unsubSession = subscribeSession(refresh);
-    return () => { unsubOrders(); unsubSession(); };
+      return;
+    }
+
+    if (s && s.orderIds.length > 1) {
+      const orders = s.orderIds.map((oid) => getOrder(oid)).filter(Boolean) as Order[];
+      setSessionOrders(orders);
+      setOrder(null);
+    } else if (s && s.orderIds.length === 1) {
+      setSessionOrders([]);
+      setOrder(getOrder(s.orderIds[0]) ?? null);
+    } else {
+      setSessionOrders([]);
+      setOrder(getLatestActiveOrder() ?? null);
+    }
+  };
+
+  // refreshRef always points to the latest doRefresh — subscription callbacks
+  // call through this ref so they never hold a stale version.
+  const refreshRef = useRef(doRefresh);
+  refreshRef.current = doRefresh;
+
+  // Re-read data when id changes (session → specific order view and vice-versa).
+  // Subscriptions are NOT torn down — only the initial data fetch repeats.
+  useEffect(() => {
+    doRefresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Stable subscriptions — registered once on mount, never re-registered.
+  // Covers orders + session + waiter-tasks (all three can signal a state change
+  // the customer cares about). visibilitychange / focus are fallback catches
+  // for the case where a cross-tab storage event was missed while the tab was
+  // backgrounded or the browser throttled the listener.
+  useEffect(() => {
+    const reload = () => refreshRef.current();
+    reload(); // initial read on mount
+
+    const unsubOrders = subscribeOrders(reload);
+    const unsubSession = subscribeSession(reload);
+    const unsubTasks = subscribeWaiterTasks(reload);
+
+    const onVisible = () => { if (document.visibilityState === "visible") reload(); };
+    const onFocus = () => reload();
+
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      unsubOrders();
+      unsubSession();
+      unsubTasks();
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Derived payment helpers (safe to compute before early returns)
+  const allOrders = sessionOrders.length > 0 ? sessionOrders : (order ? [order] : []);
+
+  // Payment scope: single-order when ?id= is set, full session otherwise.
+  // Single-order scope only counts unpaid orders for the remaining total.
+  const unpaidOrders = allOrders.filter((o) => !o.isPaid);
+  const isSessionScope = !id;
+  // Amount the customer will actually pay now.
+  const payableOrders = isSessionScope ? unpaidOrders : (order && !order.isPaid ? [order] : []);
+  const payableTotal = payableOrders.reduce((s, o) => s + o.total, 0);
+  // Full session total shown in the session view header.
+  const sessionTotal = allOrders.reduce((s, o) => s + o.total, 0);
+
+  const sessionIsOpen =
+    !!session &&
+    session.status !== "PAID" &&
+    session.status !== "CLOSED";
+
+  // Payment card shown when session is open and there's something left to pay.
+  const isPaymentEligible = sessionIsOpen && payableOrders.length > 0;
+  const isBillRequested = session?.status === "BILL_REQUESTED" || billCalledFeedback;
+
+  // Status used for the payment card hint text (most advanced payable order wins).
+  const STATUS_RANK: Record<OrderStatus, number> = {
+    NEW: 0, PREPARING: 1, READY: 2, DELIVERING: 3, COMPLETED: 4, CANCELLED: -1,
+  };
+  const paymentHintStatus: OrderStatus = payableOrders.reduce<OrderStatus>((best, o) => {
+    return STATUS_RANK[o.status] > STATUS_RANK[best] ? o.status : best;
+  }, "NEW");
+
+  const handleCallWaiter = () => {
+    if (!session || billCalledFeedback) return;
+    const anchorOrderId = session.orderIds[session.orderIds.length - 1];
+    updateSessionStatus("BILL_REQUESTED");
+    createUniqueTask(`session:${session.id}:bill_requested`, {
+      type: "bill_requested",
+      orderId: anchorOrderId,
+      tableNumber: session.tableNumber,
+    });
+    setBillCalledFeedback(true);
+  };
+
+  const handleInAppPayment = async () => {
+    if (!session || paymentProcessing || payableOrders.length === 0) return;
+    setPaymentProcessing(true);
+    const result = await processPayment(payableTotal);
+    if (result.success) {
+      if (isSessionScope) {
+        // Full session payment — close everything.
+        completeTasksForOrders(session.orderIds);
+        markSessionPaid("APP");
+        clearCartStorage();
+      } else if (order) {
+        // Single-order payment — mark only this order paid.
+        markOrderPaid(order.id);
+        // If every order in the session is now paid, close the session too.
+        if (allOrdersPaid(session.orderIds)) {
+          completeTasksForOrders(session.orderIds);
+          markSessionPaid("APP");
+          clearCartStorage();
+        }
+      }
+      setShowPaymentModal(false);
+      setPaymentSuccess(true);
+      setTimeout(() => router.push("/"), 2500);
+    }
+    setPaymentProcessing(false);
+  };
+
+  // ── Early returns ─────────────────────────────────────────────────────────
+
+  if (paymentSuccess) return <PaymentSuccessView />;
+  if (sessionEnded) return <SessionEndedView />;
 
   if (order === undefined) {
     return (
@@ -106,9 +270,29 @@ function OrderContent() {
     );
   }
 
-  // Multi-order session view
   if (!id && !order && session && sessionOrders.length > 1) {
-    return <SessionView session={session} orders={sessionOrders} />;
+    return (
+      <>
+        <SessionView
+          session={session}
+          orders={sessionOrders}
+          isPaymentEligible={isPaymentEligible}
+          sessionTotal={sessionTotal}
+          paymentHintStatus={paymentHintStatus}
+          isBillRequested={!!isBillRequested}
+          onPayInApp={() => setShowPaymentModal(true)}
+          onCallWaiter={handleCallWaiter}
+        />
+        {showPaymentModal && (
+          <PaymentModal
+            total={payableTotal}
+            processing={paymentProcessing}
+            onCancel={() => setShowPaymentModal(false)}
+            onConfirm={handleInAppPayment}
+          />
+        )}
+      </>
+    );
   }
 
   if (!order) {
@@ -128,135 +312,281 @@ function OrderContent() {
     );
   }
 
-  const activeIdx = order.status === "CANCELLED"
-    ? -1
-    : STATUS_ORDER.indexOf(order.status);
-
-  // Check if any items have individual status variation worth showing
+  const activeIdx = order.status === "CANCELLED" ? -1 : STATUS_ORDER.indexOf(order.status);
   const itemStatuses = order.items.map((i) => i.itemStatus ?? order.status);
   const hasItemVariation = new Set(itemStatuses).size > 1;
 
   return (
-    <div className="flex flex-col min-h-screen bg-background pb-10">
-      {/* Header */}
-      <div className="px-4 pt-14 pb-6 border-b border-border/40">
-        <p className="text-xs text-muted-foreground mb-1">Užsakymo numeris</p>
-        <h1 className="font-black text-3xl tracking-tight">#{order.id}</h1>
-        {order.tableNumber && (
-          <p className="text-sm text-muted-foreground mt-1">
-            Stalas Nr. <span className="font-bold text-foreground">{order.tableNumber}</span>
-          </p>
-        )}
-        <p className="text-xs text-muted-foreground mt-1">Užsakyta: {formatTime(order.createdAt)}</p>
-      </div>
+    <>
+      <div className="flex flex-col min-h-screen bg-background pb-10">
+        {/* Header */}
+        <div className="px-4 pt-14 pb-6 border-b border-border/40">
+          <p className="text-xs text-muted-foreground mb-1">Užsakymo numeris</p>
+          <h1 className="font-black text-3xl tracking-tight">#{order.id}</h1>
+          {order.tableNumber && (
+            <p className="text-sm text-muted-foreground mt-1">
+              Stalas Nr. <span className="font-bold text-foreground">{order.tableNumber}</span>
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground mt-1">Užsakyta: {formatTime(order.createdAt)}</p>
+        </div>
 
-      {/* Overall status */}
-      <div className="mx-4 mt-5 bg-card border border-border/40 rounded-2xl p-5 shadow-sm">
-        <div className="flex items-center gap-3 mb-3">
-          {STATUS_ICON[order.status]}
-          <p className={`font-black text-xl ${STATUS_COLOR[order.status]}`}>
-            {STATUS_LABEL[order.status]}
+        {/* Overall status */}
+        <div className="mx-4 mt-5 bg-card border border-border/40 rounded-2xl p-5 shadow-sm">
+          <div className="flex items-center gap-3 mb-3">
+            {STATUS_ICON[order.status]}
+            <p className={`font-black text-xl ${STATUS_COLOR[order.status]}`}>
+              {STATUS_LABEL[order.status]}
+            </p>
+          </div>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {STATUS_MESSAGES[order.status]}
           </p>
         </div>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          {STATUS_MESSAGES[order.status]}
-        </p>
-      </div>
 
-      {/* Serving preference */}
-      {(() => {
-        const pref = order.servingPreference ?? "together";
-        const info = SERVING_LABELS[pref];
-        return (
-          <div className="mx-4 mt-3 bg-card border border-border/40 rounded-2xl px-4 py-3 shadow-sm flex items-start gap-3">
-            <span className="shrink-0 mt-0.5 text-muted-foreground">
-              {pref === "together" ? <Utensils size={16} /> : <Zap size={16} />}
-            </span>
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Patiekimas</p>
-              <p className="text-sm font-semibold text-foreground">{info.short}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{info.long}</p>
+        {/* Serving preference */}
+        {(() => {
+          const pref = order.servingPreference ?? "together";
+          const info = SERVING_LABELS[pref];
+          return (
+            <div className="mx-4 mt-3 bg-card border border-border/40 rounded-2xl px-4 py-3 shadow-sm flex items-start gap-3">
+              <span className="shrink-0 mt-0.5 text-muted-foreground">
+                {pref === "together" ? <Utensils size={16} /> : <Zap size={16} />}
+              </span>
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Patiekimas</p>
+                <p className="text-sm font-semibold text-foreground">{info.short}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{info.long}</p>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Progress timeline */}
+        {order.status !== "CANCELLED" && (
+          <div className="mx-4 mt-4 bg-card border border-border/40 rounded-2xl p-4 shadow-sm">
+            <div className="flex items-end justify-between gap-1">
+              {STATUS_ORDER.map((s, i) => {
+                const done = i <= activeIdx;
+                const active = i === activeIdx;
+                return (
+                  <div key={s} className="flex-1 flex flex-col items-center gap-1.5">
+                    <div
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors
+                        ${active ? "bg-primary text-primary-foreground" : done ? "bg-primary/40 text-primary" : "bg-secondary text-muted-foreground"}`}
+                    >
+                      {i + 1}
+                    </div>
+                    <p className={`text-[10px] text-center leading-tight ${done ? "text-foreground font-semibold" : "text-muted-foreground"}`}>
+                      {STATUS_LABEL[s]}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-3 h-1 bg-secondary rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-700"
+                style={{ width: `${Math.max(0, (activeIdx + 1) / STATUS_ORDER.length) * 100}%` }}
+              />
             </div>
           </div>
-        );
-      })()}
+        )}
 
-      {/* Progress timeline */}
-      {order.status !== "CANCELLED" && (
+        {/* Items */}
         <div className="mx-4 mt-4 bg-card border border-border/40 rounded-2xl p-4 shadow-sm">
-          <div className="flex items-end justify-between gap-1">
-            {STATUS_ORDER.map((s, i) => {
-              const done = i <= activeIdx;
-              const active = i === activeIdx;
+          <h3 className="font-bold text-sm mb-3">Užsakyti patiekalai</h3>
+          <div className="space-y-2.5">
+            {order.items.map((item) => {
+              const itemStatus = item.itemStatus ?? order.status;
               return (
-                <div key={s} className="flex-1 flex flex-col items-center gap-1.5">
-                  <div
-                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors
-                      ${active ? "bg-primary text-primary-foreground" : done ? "bg-primary/40 text-primary" : "bg-secondary text-muted-foreground"}`}
-                  >
-                    {i + 1}
+                <div key={item.productId}>
+                  <div className="flex items-center justify-between gap-2 text-sm">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="truncate text-muted-foreground">
+                        {item.name} × {item.quantity}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-muted-foreground">
+                        {(item.price * item.quantity).toFixed(2)} €
+                      </span>
+                      {hasItemVariation && (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${ITEM_BADGE[itemStatus]}`}>
+                          {STATUS_ICON_SM[itemStatus]}
+                          {STATUS_LABEL[itemStatus]}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <p className={`text-[10px] text-center leading-tight ${done ? "text-foreground font-semibold" : "text-muted-foreground"}`}>
-                    {STATUS_LABEL[s]}
-                  </p>
                 </div>
               );
             })}
-          </div>
-          <div className="mt-3 h-1 bg-secondary rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary rounded-full transition-all duration-700"
-              style={{ width: `${Math.max(0, (activeIdx + 1) / STATUS_ORDER.length) * 100}%` }}
-            />
+            <Separator className="my-1" />
+            <div className="flex justify-between font-bold text-base">
+              <span>Iš viso</span>
+              <span className="text-primary">{order.total.toFixed(2)} €</span>
+            </div>
           </div>
         </div>
+
+        {/* Action card — visible while order is unpaid */}
+        {isPaymentEligible && session && (
+          <ActionCard
+            total={payableTotal}
+            orderStatus={order.status}
+            isBillRequested={!!isBillRequested}
+            onPayInApp={() => setShowPaymentModal(true)}
+            onCallWaiter={handleCallWaiter}
+          />
+        )}
+
+        {/* Actions */}
+        <div className="px-4 mt-6">
+          <Link href="/menu">
+            <Button variant="outline" className="w-full rounded-2xl h-12 font-semibold">
+              Grįžti į meniu
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      {showPaymentModal && (
+        <PaymentModal
+          total={payableTotal}
+          processing={paymentProcessing}
+          onCancel={() => setShowPaymentModal(false)}
+          onConfirm={handleInAppPayment}
+        />
       )}
+    </>
+  );
+}
 
-      {/* Items — show per-item status when they differ */}
-      <div className="mx-4 mt-4 bg-card border border-border/40 rounded-2xl p-4 shadow-sm">
-        <h3 className="font-bold text-sm mb-3">Užsakyti patiekalai</h3>
-        <div className="space-y-2.5">
-          {order.items.map((item) => {
-            const itemStatus = item.itemStatus ?? order.status;
-            return (
-              <div key={item.productId}>
-                <div className="flex items-center justify-between gap-2 text-sm">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="truncate text-muted-foreground">
-                      {item.name} × {item.quantity}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-muted-foreground">
-                      {(item.price * item.quantity).toFixed(2)} €
-                    </span>
-                    {hasItemVariation && (
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${ITEM_BADGE[itemStatus]}`}>
-                        {STATUS_ICON_SM[itemStatus]}
-                        {STATUS_LABEL[itemStatus]}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          <Separator className="my-1" />
-          <div className="flex justify-between font-bold text-base">
-            <span>Iš viso</span>
-            <span className="text-primary">{order.total.toFixed(2)} €</span>
+// ── Payment card ──────────────────────────────────────────────────────────────
+
+function ActionCard({
+  total,
+  orderStatus,
+  isBillRequested,
+  onPayInApp,
+  onCallWaiter,
+}: {
+  total: number;
+  orderStatus: OrderStatus;
+  isBillRequested: boolean;
+  onPayInApp: () => void;
+  onCallWaiter: () => void;
+}) {
+  const hint =
+    orderStatus === "COMPLETED"
+      ? "Ačiū! Galite užsisakyti papildomai arba atsiskaityti."
+      : orderStatus === "READY" || orderStatus === "DELIVERING"
+        ? "Užsakymas jau kelyje. Galite užsisakyti papildomai arba atsiskaityti."
+        : "Galite užsisakyti papildomai arba atsiskaityti bet kada.";
+
+  return (
+    <div className="mx-4 mt-4 bg-card border border-primary/30 rounded-2xl p-5 shadow-sm">
+      <h3 className="font-black text-base mb-1">Ką norite daryti?</h3>
+      <p className="text-xs text-muted-foreground mb-1">{hint}</p>
+      <p className="text-xs text-muted-foreground mb-4">
+        Iš viso: <span className="font-bold text-foreground">{total.toFixed(2)} €</span>
+      </p>
+      <div className="flex flex-col gap-2.5">
+        <Link href="/menu" className="w-full">
+          <button className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 transition-colors">
+            🍽️ Užsisakyti papildomai
+          </button>
+        </Link>
+        <button
+          onClick={onPayInApp}
+          className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors"
+        >
+          💳 Apmokėti programėlėje
+        </button>
+        {isBillRequested ? (
+          <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-3">
+            <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
+            <p className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">
+              Sąskaita paprašyta. Padavėjas netrukus prieis.
+            </p>
           </div>
+        ) : (
+          <button
+            onClick={onCallWaiter}
+            className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors"
+          >
+            👨‍💼 Pakviesti padavėją sąskaitai
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Payment modal ─────────────────────────────────────────────────────────────
+
+function PaymentModal({
+  total,
+  processing,
+  onCancel,
+  onConfirm,
+}: {
+  total: number;
+  processing: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm shadow-xl">
+        <div className="flex items-center justify-center w-14 h-14 rounded-full bg-primary/10 mx-auto mb-4">
+          <CreditCard size={26} className="text-primary" />
+        </div>
+        <h2 className="font-black text-xl text-center mb-1">
+          Apmokėti {total.toFixed(2)} €?
+        </h2>
+        <p className="text-muted-foreground text-sm text-center mb-6">
+          Mokėjimas bus apdorotas saugiai.
+        </p>
+        <div className="flex flex-col gap-2.5">
+          <button
+            onClick={onConfirm}
+            disabled={processing}
+            className="w-full h-12 rounded-2xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
+          >
+            {processing ? (
+              <>
+                <div className="w-4 h-4 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground animate-spin" />
+                Apdorojama...
+              </>
+            ) : (
+              "Apmokėti"
+            )}
+          </button>
+          <button
+            onClick={onCancel}
+            disabled={processing}
+            className="w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors disabled:opacity-50"
+          >
+            Atšaukti
+          </button>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {/* Actions */}
-      <div className="px-4 mt-6">
-        <Link href="/menu">
-          <Button variant="outline" className="w-full rounded-2xl h-12 font-semibold">
-            Grįžti į meniu
-          </Button>
-        </Link>
+// ── Payment success ───────────────────────────────────────────────────────────
+
+function PaymentSuccessView() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
+      <div className="w-24 h-24 rounded-full bg-emerald-500/10 flex items-center justify-center mb-5">
+        <CheckCircle2 size={48} className="text-emerald-500" />
       </div>
+      <h2 className="font-black text-2xl mb-2">Mokėjimas sėkmingas</h2>
+      <p className="text-muted-foreground text-sm">Ačiū už apsilankymą!</p>
     </div>
   );
 }
@@ -270,9 +600,27 @@ const SESSION_STATUS_LABEL: Record<string, string> = {
   CLOSED: "Uždaryta",
 };
 
-function SessionView({ session, orders }: { session: TableSession; orders: Order[] }) {
-  const isBillRequested = session.status === "BILL_REQUESTED";
-  const sessionTotal = orders.reduce((s, o) => s + o.total, 0);
+function SessionView({
+  session,
+  orders,
+  isPaymentEligible,
+  sessionTotal,
+  paymentHintStatus,
+  isBillRequested,
+  onPayInApp,
+  onCallWaiter,
+}: {
+  session: TableSession;
+  orders: Order[];
+  isPaymentEligible: boolean;
+  sessionTotal: number;
+  paymentHintStatus: OrderStatus;
+  isBillRequested: boolean;
+  onPayInApp: () => void;
+  onCallWaiter: () => void;
+}) {
+  // Remaining amount: only unpaid orders. Paid orders are kept in history.
+  const unpaidTotal = orders.filter((o) => !o.isPaid).reduce((s, o) => s + o.total, 0);
 
   return (
     <div className="flex flex-col min-h-screen bg-background pb-10">
@@ -295,14 +643,15 @@ function SessionView({ session, orders }: { session: TableSession; orders: Order
         </div>
       </div>
 
-      {/* Bill requested banner */}
-      {isBillRequested && (
-        <div className="mx-4 mt-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl px-4 py-3 flex items-start gap-3">
-          <CheckCircle2 size={18} className="text-emerald-500 shrink-0 mt-0.5" />
-          <p className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">
-            Sąskaita paprašyta. Padavėjas netrukus prieis.
-          </p>
-        </div>
+      {/* Action card — visible while there are unpaid orders */}
+      {isPaymentEligible && (
+        <ActionCard
+          total={unpaidTotal}
+          orderStatus={paymentHintStatus}
+          isBillRequested={isBillRequested}
+          onPayInApp={onPayInApp}
+          onCallWaiter={onCallWaiter}
+        />
       )}
 
       {/* Orders list */}
@@ -315,15 +664,21 @@ function SessionView({ session, orders }: { session: TableSession; orders: Order
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="font-bold text-sm">#{o.id}</p>
-                  <span className={`text-xs font-semibold ${STATUS_COLOR[o.status]}`}>
-                    {STATUS_LABEL[o.status]}
-                  </span>
+                  {o.isPaid ? (
+                    <span className="text-xs font-semibold text-emerald-500">Apmokėta</span>
+                  ) : (
+                    <span className={`text-xs font-semibold ${STATUS_COLOR[o.status]}`}>
+                      {STATUS_LABEL[o.status]}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {formatTime(o.createdAt)} · {o.items.length} patiekal{o.items.length === 1 ? "as" : "ai"}
                 </p>
               </div>
-              <p className="text-sm font-bold text-primary shrink-0">{o.total.toFixed(2)} €</p>
+              <p className={`text-sm font-bold shrink-0 ${o.isPaid ? "text-muted-foreground line-through" : "text-primary"}`}>
+                {o.total.toFixed(2)} €
+              </p>
             </div>
           </Link>
         ))}
@@ -345,6 +700,27 @@ function SessionView({ session, orders }: { session: TableSession; orders: Order
     </div>
   );
 }
+
+// ── Session ended (waiter paid) ───────────────────────────────────────────────
+
+function SessionEndedView() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
+      <div className="w-20 h-20 rounded-full bg-emerald-500/10 flex items-center justify-center mb-5">
+        <CheckCircle2 size={40} className="text-emerald-500" />
+      </div>
+      <h2 className="font-black text-2xl mb-2">Sesija užbaigta. Ačiū!</h2>
+      <p className="text-muted-foreground text-sm mb-8">
+        Sąskaita apmokėta. Labai džiaugiamės jus matę!
+      </p>
+      <Link href="/menu">
+        <Button className="rounded-full px-8 h-12 font-bold">Grįžti į meniu</Button>
+      </Link>
+    </div>
+  );
+}
+
+// ── Page root ─────────────────────────────────────────────────────────────────
 
 export default function OrderPage() {
   return (

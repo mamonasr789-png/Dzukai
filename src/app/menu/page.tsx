@@ -201,9 +201,11 @@ function MenuScreen() {
   const [query, setQuery] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [headerHeight, setHeaderHeight] = useState(0);
-  const headerRef = useRef<HTMLElement>(null);
   const catScrollRef = useRef<HTMLDivElement>(null);
+  const stickyRef = useRef<HTMLDivElement>(null);
+  const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const scrollingRef = useRef(false);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragState = useRef({ dragging: false, startX: 0, scrollLeft: 0 });
 
   useEffect(() => {
@@ -213,23 +215,44 @@ function MenuScreen() {
     if (cat && categories.find((c) => c.id === cat)) setActiveCategory(cat);
   }, [searchParams, setTableNumber]);
 
+  // Scroll-spy: update active category pill as user scrolls
   useEffect(() => {
-    const measure = () => {
-      if (headerRef.current) setHeaderHeight(headerRef.current.offsetHeight);
+    const handleScroll = () => {
+      if (scrollingRef.current || query) return;
+      const threshold = (stickyRef.current?.offsetHeight ?? 150) + 16;
+      let active: Category = "visi";
+      for (const [catId, el] of sectionRefs.current) {
+        if (el.getBoundingClientRect().top <= threshold) {
+          active = catId as Category;
+        }
+      }
+      setActiveCategory((prev) => (prev === active ? prev : active));
     };
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (headerRef.current) ro.observe(headerRef.current);
-    return () => ro.disconnect();
-  }, []);
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [query]);
 
-  const filtered = query
+  // Keep active pill centred in the category bar when it changes
+  useEffect(() => {
+    if (query) return;
+    const btn = catScrollRef.current?.querySelector(`[data-cat="${activeCategory}"]`) as HTMLElement | null;
+    btn?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+  }, [activeCategory, query]);
+
+  // Products for search mode only
+  const searchResults = query
     ? products.filter(
         (p) =>
           p.name.toLowerCase().includes(query.toLowerCase()) ||
           p.description.toLowerCase().includes(query.toLowerCase())
       )
-    : activeCategory === "visi" ? products : products.filter((p) => p.category === activeCategory);
+    : [];
+
+  // Grouped sections for browse mode
+  const sections = categories
+    .filter((c) => c.id !== "visi")
+    .map((c) => ({ cat: c, items: products.filter((p) => p.category === c.id) }))
+    .filter((s) => s.items.length > 0);
 
   const openSheet = useCallback((product: Product) => {
     setSelectedProduct(product);
@@ -240,69 +263,80 @@ function MenuScreen() {
     if (dragState.current.dragging) { e.preventDefault(); return; }
     setActiveCategory(cat);
     setQuery("");
-    setTimeout(() => {
-      const btn = catScrollRef.current?.querySelector(`[data-cat="${cat}"]`) as HTMLElement;
-      btn?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
-    }, 50);
+
+    // Suppress scroll-spy while animated scroll completes
+    scrollingRef.current = true;
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+
+    if (cat === "visi") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } else {
+      const section = sectionRefs.current.get(cat);
+      if (section) {
+        const offset = (stickyRef.current?.offsetHeight ?? 150) + 8;
+        const top = section.getBoundingClientRect().top + window.scrollY - offset;
+        window.scrollTo({ top, behavior: "smooth" });
+      }
+    }
+
+    scrollTimerRef.current = setTimeout(() => { scrollingRef.current = false; }, 900);
   };
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
 
-      <header ref={headerRef} className="sticky top-0 z-30 bg-background border-b border-border/40">
-        <div className="flex items-center gap-3 px-4 pt-12 pb-2">
-          <Link href="/" className="flex items-center gap-3 flex-1 min-w-0">
-            <div className="w-9 h-9 rounded-xl overflow-hidden bg-white border border-border/30 shrink-0 shadow-sm">
-              <Image
-                src="https://www.dzukuainiai.lt/wp-content/uploads/2020/11/Ainiai-1-2.png"
-                alt="Dzūkų Ainiai"
-                width={36}
-                height={36}
-                className="object-contain w-full h-full"
+      {/* Single sticky unit: header + category bar scroll together */}
+      <div ref={stickyRef} className="sticky top-0 z-30 bg-background border-b border-border/40">
+        <header>
+          <div className="flex items-center gap-3 px-4 pt-12 pb-2">
+            <Link href="/" className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="w-9 h-9 rounded-xl overflow-hidden bg-white border border-border/30 shrink-0 shadow-sm">
+                <Image
+                  src="https://www.dzukuainiai.lt/wp-content/uploads/2020/11/Ainiai-1-2.png"
+                  alt="Dzūkų Ainiai"
+                  width={36}
+                  height={36}
+                  className="object-contain w-full h-full"
+                />
+              </div>
+              <div className="min-w-0">
+                <p className="font-black text-[15px] leading-tight">Dzūkų Ainiai</p>
+                {tableNumber ? (
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="text-[11px] text-muted-foreground">{tr.table_label}</span>
+                    <span className="text-[11px] font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-full leading-tight">{tableNumber}</span>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">{tr.restaurant_subtitle}</p>
+                )}
+              </div>
+            </Link>
+            <LanguageSwitcher />
+            <Link href="/ai" className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center shrink-0">
+              <Bot size={16} className="text-muted-foreground" />
+            </Link>
+            <ThemeToggle />
+          </div>
+          <div className="px-4 pb-3">
+            <div className="flex items-center gap-2.5 bg-secondary rounded-xl px-3.5 py-2.5">
+              <Search size={15} className="text-muted-foreground shrink-0" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={tr.search_placeholder}
+                className="bg-transparent text-sm flex-1 outline-none placeholder:text-muted-foreground"
               />
-            </div>
-            <div className="min-w-0">
-              <p className="font-black text-[15px] leading-tight">Dzūkų Ainiai</p>
-              {tableNumber ? (
-                <div className="flex items-center gap-1 mt-0.5">
-                  <span className="text-[11px] text-muted-foreground">{tr.table_label}</span>
-                  <span className="text-[11px] font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-full leading-tight">{tableNumber}</span>
-                </div>
-              ) : (
-                <p className="text-[11px] text-muted-foreground">{tr.restaurant_subtitle}</p>
+              {query && (
+                <button onClick={() => setQuery("")} className="shrink-0">
+                  <X size={14} className="text-muted-foreground" />
+                </button>
               )}
             </div>
-          </Link>
-          <LanguageSwitcher />
-          <Link href="/ai" className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center shrink-0">
-            <Bot size={16} className="text-muted-foreground" />
-          </Link>
-          <ThemeToggle />
-        </div>
-        <div className="px-4 pb-3">
-          <div className="flex items-center gap-2.5 bg-secondary rounded-xl px-3.5 py-2.5">
-            <Search size={15} className="text-muted-foreground shrink-0" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={tr.search_placeholder}
-              className="bg-transparent text-sm flex-1 outline-none placeholder:text-muted-foreground"
-            />
-            {query && (
-              <button onClick={() => setQuery("")} className="shrink-0">
-                <X size={14} className="text-muted-foreground" />
-              </button>
-            )}
           </div>
-        </div>
-      </header>
+        </header>
 
-      {!query && (
-        <div
-          className="sticky z-20 bg-background border-b border-border/40"
-          style={{ top: headerHeight || 130 }}
-        >
-          <div className="relative">
+        {!query && (
+          <div className="relative border-t border-border/40">
             <div
               ref={catScrollRef}
               className="no-scrollbar flex gap-2 px-4 py-2.5"
@@ -355,22 +389,48 @@ function MenuScreen() {
             </div>
             <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-background to-transparent pointer-events-none" />
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <main className="flex-1 px-4 pt-3 pb-48">
-        {query && (
-          <p className="text-xs text-muted-foreground mb-3">{filtered.length} {tr.results}: „{query}“</p>
-        )}
-        {filtered.length === 0 ? (
-          <div className="text-center py-24 text-muted-foreground">
-            <p className="text-4xl mb-3">🔍</p>
-            <p className="font-semibold">{tr.nothing_found}</p>
-          </div>
+        {query ? (
+          <>
+            <p className="text-xs text-muted-foreground mb-3">
+              {searchResults.length} {tr.results}: „{query}"
+            </p>
+            {searchResults.length === 0 ? (
+              <div className="text-center py-24 text-muted-foreground">
+                <p className="text-4xl mb-3">🔍</p>
+                <p className="font-semibold">{tr.nothing_found}</p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {searchResults.map((product) => (
+                  <ProductRow key={product.id} product={product} onOpen={() => openSheet(product)} />
+                ))}
+              </div>
+            )}
+          </>
         ) : (
-          <div className="flex flex-col gap-2">
-            {filtered.map((product) => (
-              <ProductRow key={product.id} product={product} onOpen={() => openSheet(product)} />
+          <div className="flex flex-col gap-6">
+            {sections.map(({ cat, items }) => (
+              <section
+                key={cat.id}
+                ref={(el) => {
+                  if (el) sectionRefs.current.set(cat.id, el);
+                  else sectionRefs.current.delete(cat.id);
+                }}
+              >
+                <h2 className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-widest px-1 pb-2.5 pt-1">
+                  <span>{cat.emoji}</span>
+                  {categoryLabels[lang][cat.id] ?? cat.label}
+                </h2>
+                <div className="flex flex-col gap-2">
+                  {items.map((product) => (
+                    <ProductRow key={product.id} product={product} onOpen={() => openSheet(product)} />
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         )}

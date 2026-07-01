@@ -66,10 +66,22 @@ const intentRules: IntentRule[] = [
   },
 
   {
+    intent: "add_to_cart",
+    primaryKeywords: [
+      "pridėk į krepšelį", "įdėk į krepšelį", "dėk į krepšelį",
+      "pridėti į krepšelį", "noriu pridėti", "įdėk į krepšelį",
+      "add to cart", "add to my cart", "put in cart",
+      "добавь в корзину", "положи в корзину", "добавить в корзину",
+    ],
+    secondaryKeywords: ["krepšelis", "krepšelį", "cart", "корзина", "pridėti", "įdėti"],
+    minScore: 8,
+  },
+
+  {
     intent: "confirmation",
     primaryKeywords: [
       "noriu to", "noriu šito", "tą", "šitą", "I'll take", "I'll have",
-      "add to cart", "pridėk", "įdėk į krepšelį", "užsisakau",
+      "užsisakau",
     ],
     secondaryKeywords: ["imsiu", "paimsu", "noriu"],
     contextBoost: (s) => (s.lastRecommendedIds.length > 0 ? 5 : 0),

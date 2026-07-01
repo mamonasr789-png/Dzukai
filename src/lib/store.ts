@@ -25,6 +25,24 @@ interface CartStore {
   totalPrice: () => number;
 }
 
+const CART_STORAGE_KEY = "dzukai-cart";
+
+/**
+ * Clear the cart from non-React contexts (e.g. waiter closing a session).
+ * Writes directly to the Zustand persist key so the change survives page reload
+ * and is visible cross-tab via the storage event.
+ */
+export function clearCartStorage(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) ?? "{}");
+    raw.state = { ...(raw.state ?? {}), items: [] };
+    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(raw));
+  } catch {
+    localStorage.removeItem(CART_STORAGE_KEY);
+  }
+}
+
 export const useCartStore = create<CartStore>()(
   persist(
     (set, get) => ({

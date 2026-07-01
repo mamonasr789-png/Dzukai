@@ -77,12 +77,75 @@ export function findByName(query: string): Product[] {
   const partial = allProducts.filter((p) => normalizeText(p.name).includes(q));
   if (partial.length) return partial;
 
+  // Try Lithuanian inflected forms before fuzzy fallback
+  const inflected = findByInflectedName(q);
+  if (inflected) return [inflected];
+
   // Fuzzy: any word from query in name
   const words = q.split(/\s+/).filter((w) => w.length > 3);
   return allProducts.filter((p) => {
     const name = normalizeText(p.name);
     return words.some((w) => name.includes(w));
   });
+}
+
+/**
+ * Derive nominative-like variants from an already-normalized word.
+ * Works on post-normalizeText strings (Lithuanian diacritics already removed).
+ * Conservative — only applies suffixes long enough to be unambiguous.
+ */
+function deriveStemVariants(word: string): string[] {
+  const variants = new Set([word]);
+  // [normalized_suffix, replacement] — applied to post-normalizeText strings
+  const rules: Array<[string, string]> = [
+    ["acijos", "acija"],  // degustacijos → degustacija
+    ["aciju",  "acija"],  // degustaciju (ų→u after normalize) → degustacija
+    ["acijas", "acija"],  // degustacijas → degustacija
+    ["ienos",  "iena"],   // kiaulienos → kiauliena
+    ["ienu",   "iena"],   // ienu (ų→u) → iena
+    ["ienai",  "iena"],   // kiauliena (dative) → kiauliena
+    ["iojas",  "iojus"],  // waiters
+    ["eles",   "ele"],    // taureles → taurele
+    ["uoliu",  "uoliai"], // uoliu (ų→u) → uoliai
+  ];
+  for (const [suffix, replacement] of rules) {
+    if (word.endsWith(suffix)) {
+      variants.add(word.slice(0, -suffix.length) + replacement);
+    }
+  }
+  // Short general suffixes — only when remaining stem is 4+ chars
+  if (word.endsWith("os") && word.length > 6)  variants.add(word.slice(0, -2) + "a");
+  if (word.endsWith("es") && word.length > 6)  variants.add(word.slice(0, -2) + "e");
+  if (word.endsWith("ius") && word.length > 6) variants.add(word.slice(0, -3) + "is");
+  return [...variants];
+}
+
+/**
+ * Find a product whose name matches the query in any Lithuanian grammatical form.
+ * Only considers words with 7+ characters to avoid false positives from short words.
+ * Works on already-normalized input.
+ */
+function findByInflectedName(normalizedQuery: string): Product | undefined {
+  const words = normalizedQuery.split(/\s+/).filter((w) => w.length >= 7);
+  for (const word of words) {
+    const variants = deriveStemVariants(word).filter((v) => v.length >= 5);
+    for (const product of allProducts) {
+      const nameWords = normalizeText(product.name).split(/\s+/);
+      if (variants.some((v) => nameWords.some((nw) => nw === v || nw.startsWith(v)))) {
+        return product;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Public: find a product by its name in any Lithuanian grammatical form.
+ * Useful when user refers to a product in genitive/accusative
+ * (e.g. "noriu degustacijos" → "Alaus degustacija").
+ */
+export function findProductByInflectedName(query: string): Product | undefined {
+  return findByInflectedName(normalizeText(query));
 }
 
 /** Find a dish from conversational references, including common inflected names. */

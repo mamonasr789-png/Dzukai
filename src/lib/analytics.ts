@@ -36,6 +36,7 @@ export interface KitchenStats {
   newCount: number;
   preparingCount: number;
   readyCount: number;
+  deliveringCount: number;
   completedCount: number;
   cancelledCount: number;
   activeCount: number;
@@ -46,15 +47,17 @@ export function getKitchenStats(orders: Order[]): KitchenStats {
   const newCount = byStatus("NEW");
   const preparingCount = byStatus("PREPARING");
   const readyCount = byStatus("READY");
+  const deliveringCount = byStatus("DELIVERING");
   const completedCount = byStatus("COMPLETED");
   const cancelledCount = byStatus("CANCELLED");
   return {
     newCount,
     preparingCount,
     readyCount,
+    deliveringCount,
     completedCount,
     cancelledCount,
-    activeCount: newCount + preparingCount + readyCount,
+    activeCount: newCount + preparingCount + readyCount + deliveringCount,
   };
 }
 
