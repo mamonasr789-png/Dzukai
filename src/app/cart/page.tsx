@@ -20,6 +20,7 @@ export default function CartPage() {
   const tr = useT(lang);
   const router = useRouter();
   const [serving, setServing] = useState<ServingPreference>("together");
+  const [submitting, setSubmitting] = useState(false);
   const [activeSession, setActiveSession] = useState<TableSession | null>(() =>
     typeof window !== "undefined" ? getActiveSession() : null
   );
@@ -48,6 +49,8 @@ export default function CartPage() {
   }
 
   const handleSubmit = () => {
+    if (submitting || items.length === 0) return; // guard against double-tap
+    setSubmitting(true);
     const order = createOrder({
       tableNumber,
       items: items.map(({ product, quantity }) => ({
@@ -60,7 +63,17 @@ export default function CartPage() {
       language: lang,
       servingPreference: serving,
     });
-    addOrderToSession(order.id, tableNumber);
+    const session = addOrderToSession(order.id, tableNumber);
+    // Second+ order in the same session — tell the waiter, otherwise the
+    // additional order arrives silently.
+    if (session.orderIds.length > 1) {
+      createUniqueTask(`order:${order.id}:additional_order`, {
+        type: "additional_order",
+        orderId: order.id,
+        tableNumber: session.tableNumber ?? tableNumber,
+        items: order.items.map((i) => ({ productId: i.productId, name: i.name, quantity: i.quantity })),
+      });
+    }
     clearCart();
     router.push(`/order?id=${order.id}`);
   };
@@ -164,9 +177,10 @@ export default function CartPage() {
       <div className="px-4 mt-4">
         <Button
           onClick={handleSubmit}
+          disabled={submitting}
           className="w-full rounded-2xl h-14 text-base font-bold gap-2 shadow-lg shadow-primary/20"
         >
-          {tr.submit_order} · {total.toFixed(2)} €
+          {submitting ? "Pateikiama…" : `${tr.submit_order} · ${total.toFixed(2)} €`}
         </Button>
         <p className="text-center text-muted-foreground text-xs mt-3">{tr.order_note}</p>
       </div>

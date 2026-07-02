@@ -173,33 +173,86 @@ function TypingDots() {
   );
 }
 
+// ── Session persistence (survives SPA navigation, resets on tab close) ────────
+
+const CHAT_MESSAGES_KEY = "dzukai-chat-messages";
+const CHAT_STATE_KEY    = "dzukai-chat-state";
+
+function saveChat(msgs: Message[], ctx: WaiterContext) {
+  try {
+    sessionStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(msgs));
+    // Omit cartItems (rebuilt each turn from cart store) and pendingActions
+    const { cartItems: _ci, pendingActions: _pa, ...persistable } = ctx;
+    sessionStorage.setItem(CHAT_STATE_KEY, JSON.stringify(persistable));
+  } catch { /* storage full or SSR */ }
+}
+
+function loadChat(): { msgs: Message[] | null; ctx: Partial<WaiterContext> | null } {
+  try {
+    const rawMsgs = sessionStorage.getItem(CHAT_MESSAGES_KEY);
+    const rawCtx  = sessionStorage.getItem(CHAT_STATE_KEY);
+    return {
+      msgs: rawMsgs ? (JSON.parse(rawMsgs) as Message[]) : null,
+      ctx:  rawCtx  ? (JSON.parse(rawCtx)  as Partial<WaiterContext>) : null,
+    };
+  } catch { return { msgs: null, ctx: null }; }
+}
+
+function clearChat() {
+  try {
+    sessionStorage.removeItem(CHAT_MESSAGES_KEY);
+    sessionStorage.removeItem(CHAT_STATE_KEY);
+  } catch { /* ignore */ }
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AIPage() {
   const lang = useCartStore((s) => s.lang);
   const addItem = useCartStore((s) => s.addItem);
+  const removeItem = useCartStore((s) => s.removeItem);
+  const updateQuantity = useCartStore((s) => s.updateQuantity);
+  const clearCartStore = useCartStore((s) => s.clearCart);
   const tr = useT(lang);
 
-  const makeGreeting = (): Message => ({
-    id: "greeting-" + lang,
+  const makeGreeting = (l = lang): Message => ({
+    id: "greeting-" + l,
     role: "assistant",
-    content: GREETING[lang] ?? GREETING.lt,
+    content: GREETING[l] ?? GREETING.lt,
     time: timestamp(),
   });
 
-  const [messages, setMessages] = useState<Message[]>([makeGreeting()]);
+  // Restore chat from sessionStorage on first mount
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const { msgs } = loadChat();
+    return msgs ?? [makeGreeting()];
+  });
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
   const [cartCount, setCartCount] = useState(0);
-  // Session context lives in a ref so it persists across renders without re-renders
-  const ctxRef = useRef<WaiterContext>(emptyContext());
+
+  // Restore conversation state from sessionStorage, falling back to fresh state.
+  // useState with lazy initializer so sessionStorage is only read once on mount.
+  const [initialCtx] = useState<WaiterContext>(() => {
+    const { ctx } = loadChat();
+    const fresh = emptyContext();
+    return ctx ? { ...fresh, ...ctx } : fresh;
+  });
+  const ctxRef = useRef<WaiterContext>(initialCtx);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // When language changes, only reset if the chat was in a different language
   useEffect(() => {
-    setMessages([makeGreeting()]);
-    ctxRef.current = emptyContext();
-    setInput("");
+    const savedLang = ctxRef.current.currentLanguage;
+    if (savedLang && savedLang !== lang) {
+      ctxRef.current = emptyContext(lang);
+      const greeting = makeGreeting(lang);
+      setMessages([greeting]);
+      clearChat();
+      setInput("");
+    }
   }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -221,22 +274,45 @@ export default function AIPage() {
       setInput("");
       setTyping(true);
 
-      // Update session context from this message
       updateContext(ctxRef.current, trimmed);
 
-      // Simulate natural waiter typing delay (600–900ms)
       const delay = 600 + Math.random() * 300;
       setTimeout(() => {
+        // Sync cart into context before each reply
+        ctxRef.current.cartItems = useCartStore.getState().items.map((i) => ({
+          productId: i.product.id,
+          quantity: i.quantity,
+          name: i.product.name,
+          price: i.product.price,
+        }));
+
         const { text: reply, actions } = generateReply(trimmed, ctxRef.current, lang);
-        // Auto-execute cart actions
-        let autoAdded = 0;
+
+        // Execute cart actions returned by the assistant
+        let cartDelta = 0;
         for (const action of actions ?? []) {
           if (action.type === "ADD_TO_CART") {
             const product = products.find((p) => p.id === action.productId);
-            if (product) { addItem(product, action.quantity); autoAdded++; }
+            if (product) { addItem(product, action.quantity); cartDelta++; }
+          } else if (action.type === "REMOVE_FROM_CART") {
+            removeItem(action.productId);
+            cartDelta--;
+          } else if (action.type === "DECREASE_QUANTITY") {
+            const current = useCartStore.getState().items.find(
+              (i) => i.product.id === action.productId
+            );
+            if (current) {
+              if (current.quantity > 1) updateQuantity(action.productId, current.quantity - 1);
+              else { removeItem(action.productId); cartDelta--; }
+            }
+          } else if (action.type === "CLEAR_CART") {
+            clearCartStore();
+            cartDelta = -useCartStore.getState().items.length;
           }
         }
-        if (autoAdded > 0) setCartCount((c) => c + autoAdded);
+        if (cartDelta > 0) setCartCount((c) => c + cartDelta);
+        else if (cartDelta < 0) setCartCount((c) => Math.max(0, c + cartDelta));
+
         const assistantMsg: Message = {
           id: (Date.now() + 1).toString(),
           role: "assistant",
@@ -244,16 +320,22 @@ export default function AIPage() {
           time: timestamp(),
         };
         setTyping(false);
-        setMessages((prev) => [...prev, assistantMsg]);
+        setMessages((prev) => {
+          const next = [...prev, assistantMsg];
+          saveChat(next, ctxRef.current);
+          return next;
+        });
         setTimeout(() => inputRef.current?.focus(), 50);
       }, delay);
     },
-    [typing, lang, addItem]
+    [typing, lang, addItem, removeItem, updateQuantity, clearCartStore]
   );
 
   const reset = () => {
-    ctxRef.current = emptyContext();
-    setMessages([makeGreeting()]);
+    ctxRef.current = emptyContext(lang);
+    const greeting = makeGreeting();
+    setMessages([greeting]);
+    clearChat();
     setInput("");
   };
 

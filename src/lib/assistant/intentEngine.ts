@@ -78,6 +78,43 @@ const intentRules: IntentRule[] = [
   },
 
   {
+    intent: "remove_from_cart",
+    primaryKeywords: [
+      "pašalink", "išimk", "pašalinti", "išimti", "nebenorėčiau",
+      "pašalink iš krepšelio", "išimk iš krepšelio",
+      "remove", "delete from cart", "take out of cart",
+      "убери", "удали", "убрать из корзины",
+    ],
+    secondaryKeywords: ["krepšelis", "krepšelį", "cart", "корзина"],
+    minScore: 6,
+  },
+
+  {
+    intent: "cart_summary",
+    primaryKeywords: [
+      "ką turiu krepšelyje", "krepšelio turinys", "mano krepšelis",
+      "kas krepšelyje", "kiek krepšelyje", "krepšelio santrauka",
+      "show cart", "what's in my cart", "cart summary", "my cart",
+      "моя корзина", "что в корзине", "покажи корзину",
+    ],
+    secondaryKeywords: ["krepšelyje", "krepšelis", "cart"],
+    minScore: 8,
+  },
+
+  {
+    intent: "clear_cart",
+    primaryKeywords: [
+      "išvalyti krepšelį", "išvalykite krepšelį", "ištuštinti krepšelį",
+      "viską ištrinti", "viską pašalinti", "pradėti iš naujo",
+      "išvalyk krepšelį", "ištuštinkite krepšelį",
+      "clear cart", "empty cart", "start over", "reset cart",
+      "очистить корзину", "всё убрать", "начать заново",
+    ],
+    secondaryKeywords: ["krepšelis", "viską", "cart"],
+    minScore: 8,
+  },
+
+  {
     intent: "confirmation",
     primaryKeywords: [
       "noriu to", "noriu šito", "tą", "šitą", "I'll take", "I'll have",
@@ -373,6 +410,46 @@ export function detectIntent(input: string, state: ConversationState): NLUResult
 }
 
 function detectPriorityIntent(normalized: string, state: ConversationState): Intent | null {
+  // Pure greeting — nothing else in the message. Answer like a waiter, don't dump
+  // recommendations.
+  if (/^((nu|na|o|ei|tai)\s+)?(labas|sveiki|sveikas|laba diena|labas vakaras|labas rytas|hello|hi|hey|privet|привет|здравствуйте|добрый день|добрый вечер)[\s!.?]*$/.test(normalized)) {
+    return "greeting";
+  }
+
+  // Opening hours — "ar dirbate pirmadienį?", "iki kelių dirbate?"
+  if (/\b(dirbat|darbo laik|kada atidar|kada uzdar|iki keliu|nuo keliu|kada dirba)/.test(normalized)) {
+    return "opening_hours";
+  }
+
+  // 0. Cart management verbs — must run BEFORE food synonyms so "pašalink lašišą"
+  //    isn't swallowed by the FISH synonym check.
+  if (/\b(pasalink|isimk|pasalinti|isimti|nebenoreciau|nuimk|nuimti|atsauk|atsaukti|atsaukite|uberi|udali)\b/.test(normalized)) {
+    return "remove_from_cart";
+  }
+  if (/\b(isvalyk|isvalykite|istustink|istustinkite)\b.*\b(krepseli|krepsel)\b/.test(normalized)) {
+    return "clear_cart";
+  }
+  // Cart summary — "kas mano krepšelyje?", "parodyk krepšelį", "kiek moku?"
+  if (
+    /krepsel/.test(normalized) &&
+    /(kas|kiek|parodyk|rodyk|mano|turiu|perziuret|santrauka|show|what|покажи|что)/.test(normalized) &&
+    !/(pridek|idek|prideti|ideti|\bdek\b|add)/.test(normalized)
+  ) {
+    return "cart_summary";
+  }
+  if (/\b(kiek (moku|moketi|is viso)|kokia (suma|saskaita)|saskaita prasau)\b/.test(normalized)) {
+    return "cart_summary";
+  }
+
+  // 0.5 Beer snacks — "ką užkąsti prie alaus?" must beat the BEER drink group.
+  if (/(uzkand|uzkas|kasti|valgy)/.test(normalized) && /\b(alaus|alui|alu)\b/.test(normalized)) {
+    return "food_recommendation";
+  }
+
+  // 0.6 Ingredient questions about a specific dish — "iš ko pagamintas tuno karpačio?"
+  //     must beat the FISH/PORK/etc. food-group checks below.
+  if (matchesGroup(normalized, "INGREDIENTS")) return "ingredient_question";
+
   // 1. Drinks always win over food keywords.
   if (matchesGroup(normalized, "DRINK")) return "drink_recommendation";
   if (matchesGroup(normalized, "BEER")) return "beer_recommendation";
@@ -498,6 +575,12 @@ function extractEntities(
   else if (matchesGroup(normalized, "FISH")) entities.protein = "fish";
   else if (matchesGroup(normalized, "LAMB")) entities.protein = "lamb";
 
+  // Beer snacks — "užkąsti prie alaus" is a FOOD request in the prie-alaus category,
+  // not a beer request. Set the category and suppress the beer drinkType below.
+  const isBeerSnackRequest =
+    /(uzkand|uzkas|kasti|valgy)/.test(normalized) && /\b(alaus|alui|alu)\b/.test(normalized);
+  if (isBeerSnackRequest) entities.category = "prie-alaus" as Category;
+
   // Category overrides
   if (matchesGroup(normalized, "PIZZA"))   entities.category = "picos" as Category;
   if (matchesGroup(normalized, "SALAD"))   entities.category = "salotos" as Category;
@@ -509,7 +592,8 @@ function extractEntities(
   if (matchesGroup(normalized, "KIDS"))    entities.category = "vaikiskas" as Category;
 
   // Drink types
-  if (matchesGroup(normalized, "BEER"))     entities.drinkType = "beer";
+  if (isBeerSnackRequest) { /* food request — no drinkType */ }
+  else if (matchesGroup(normalized, "BEER"))     entities.drinkType = "beer";
   else if (matchesGroup(normalized, "WINE")) entities.drinkType = "wine";
   else if (matchesGroup(normalized, "COCKTAIL")) entities.drinkType = "cocktail";
   else if (matchesGroup(normalized, "LEMONADE")) entities.drinkType = "lemonade";

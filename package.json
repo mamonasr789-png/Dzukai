@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types src/lib/assistant/tests/brain.test.ts"
+    "test": "node --experimental-strip-types src/lib/assistant/tests/brain.test.ts && node --experimental-strip-types src/lib/assistant/tests/conversations.test.ts && node --experimental-strip-types src/lib/assistant/tests/keyword-search.test.ts && node --experimental-strip-types src/lib/assistant/tests/waiter-audit.test.ts && node --experimental-strip-types src/lib/tests/storage-flows.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

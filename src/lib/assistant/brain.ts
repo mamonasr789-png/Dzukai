@@ -38,7 +38,7 @@ import {
 } from "./pairingEngine.ts";
 import { buildResponse } from "./responseBuilder.ts";
 import { getFullInfo, getHours } from "./knowledgeBase.ts";
-import { findById, findDishReference, findProductByInflectedName, FOOD_CATEGORIES, DRINK_CATEGORIES, allProducts } from "./menuSearch.ts";
+import { findById, findDishReference, findProductByInflectedName, FOOD_CATEGORIES, DRINK_CATEGORIES, allProducts, categoriesForProtein, byCategory } from "./menuSearch.ts";
 import { normalizeText } from "./synonyms.ts";
 import { isAlcoholicProduct } from "./restrictionEngine.ts";
 import { answerAvailability } from "./availabilitySearch.ts";
@@ -48,6 +48,8 @@ import {
   isConfirmationIntent,
 } from "./confirmationContext.ts";
 import { resolveCartAction } from "./actionResolver.ts";
+import { keywordSearch, pickKeywordResults } from "./keywordSearch.ts";
+import { applyFilters, applyHardFilters } from "./filterEngine.ts";
 import type { AssistantAction, ConversationMode, ConversationState, NLUResult } from "./types.ts";
 import type { Category, Product } from "../data.ts";
 
@@ -113,12 +115,16 @@ export function processMessage(input: string, state: ConversationState): string 
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
+const CART_INTENTS = new Set(["add_to_cart", "remove_from_cart", "cart_summary", "clear_cart", "greeting"]);
+
 function routeWithValidation(
   mode: ConversationMode,
   nlu: NLUResult,
   state: ConversationState
 ): string {
   const reply = route(mode, nlu, state);
+  // Cart intents don't produce food/drink recommendations — skip category validation
+  if (CART_INTENTS.has(nlu.intent)) return reply;
   if (validateResponse(mode, state)) return reply;
   return fallbackForMode(mode, state);
 }
@@ -128,6 +134,14 @@ function route(
   nlu: NLUResult,
   state: ConversationState
 ): string {
+  if (nlu.intent === "greeting") {
+    const lang = state.currentLanguage;
+    return lang === "en"
+      ? "Hello! What are you in the mood for today — something hearty, light, or maybe a drink?"
+      : lang === "ru"
+      ? "Здравствуйте! Что вам сегодня по настроению — сытное, лёгкое или, может, напиток?"
+      : "Sveiki! Ko šiandien norėtumėte — ko nors sotaus, lengvo, o gal gėrimo?";
+  }
   if (nlu.intent === "opening_hours") {
     return buildResponse({ intent: "opening_hours", infoText: getHours(state.currentLanguage) }, state);
   }
@@ -135,15 +149,16 @@ function route(
     return buildResponse({ intent: "restaurant_info", infoText: getFullInfo(state.currentLanguage) }, state);
   }
 
-  if (nlu.intent === "add_to_cart") {
-    return handleAddToCart(nlu, state);
-  }
+  if (nlu.intent === "add_to_cart") return handleAddToCart(nlu, state);
+  if (nlu.intent === "remove_from_cart") return handleRemoveFromCart(nlu, state);
+  if (nlu.intent === "cart_summary") return handleCartSummary(state);
+  if (nlu.intent === "clear_cart") return handleClearCart(state);
 
   switch (mode) {
     case "DRINK_PAIRING":
       return handleDrinkPairing(nlu, state);
     case "DESSERT":
-      return handleDessert(state);
+      return handleDessert(state, nlu.normalizedInput);
     case "ALLERGY":
       return handleAllergy(nlu, state);
     case "INGREDIENTS":
@@ -165,6 +180,7 @@ function route(
 }
 
 function handleFoodRecommendation(nlu: NLUResult, state: ConversationState): string {
+  // ── 1. Selection from context (e.g. "tą pirmą") ─────────────────────────
   if (!nlu.entities.protein && !nlu.entities.category) {
     const selectedFromContext = findSelectionFromLastRecommendations(nlu.normalizedInput, state);
     if (selectedFromContext) {
@@ -175,6 +191,7 @@ function handleFoodRecommendation(nlu: NLUResult, state: ConversationState): str
     }
   }
 
+  // ── 2. Exact dish alias (e.g. "lašiša", "šonkauliai") ───────────────────
   const directDish = findSpecificDishMention(nlu.normalizedInput);
   if (directDish && FOOD_CATEGORIES.includes(directDish.category as Category)) {
     const result = { products: [directDish], poolExhausted: false };
@@ -182,12 +199,71 @@ function handleFoodRecommendation(nlu: NLUResult, state: ConversationState): str
     return buildResponse({ intent: "food_recommendation", result }, state);
   }
 
-  const result = nlu.intent === "popular_dishes"
-    ? recommendPopular(state)
-    : recommend(state, { categoryOverride: nlu.entities.category, requireFresh: true });
+  // ── 3. Popular dishes shortcut ───────────────────────────────────────────
+  if (nlu.intent === "popular_dishes") {
+    const result = recommendPopular(state);
+    setFoodRecommendations(result.products.map((p) => p.id), result.poolExhausted, state, nlu.entities.category);
+    return buildResponse({ intent: "popular_dishes", result }, state);
+  }
 
+  // ── 4. Keyword search (Priority 1–3 of the search strategy) ─────────────
+  // When the user names a category THIS TURN ("ne, vis dėlto picos"), the pool
+  // is locked to that category — stray words must not hijack the search.
+  // Otherwise two-tier: search both the narrowed pool and full pool, use
+  // whichever scores higher ("Gyoza koldūnų su aviena" with protein=lamb still
+  // finds k4 in koldumai because the full pool scores it higher).
+  const narrowPool = nlu.entities.category
+    ? byCategory(nlu.entities.category)
+    : byFoodCategory(state);
+  const narrowResult = keywordSearch(nlu.normalizedInput, narrowPool);
+  const fullResult = !nlu.entities.category && narrowResult.topScore > 0
+    ? keywordSearch(nlu.normalizedInput, byCategory(FOOD_CATEGORIES))
+    : { products: [], topScore: 0, terms: narrowResult.terms };
+  const kwResult = fullResult.topScore > narrowResult.topScore ? fullResult : narrowResult;
+
+  if (kwResult.topScore > 0) {
+    // Apply state constraints (allergens, diet, budget) to the ranked results
+    const filtered = applyFilters(kwResult.products.map((r) => r.product), state);
+    const picked = filtered.length > 0
+      ? pickKeywordResults({ ...kwResult, products: kwResult.products.filter((r) => filtered.includes(r.product)) }, 3, state.lastRecommendedIds)
+      : null;
+
+    if (picked && picked.length > 0) {
+      const result = { products: picked, poolExhausted: false };
+      setFoodRecommendations(picked.map((p) => p.id), false, state, picked[0].category as Category);
+      return buildResponse({ intent: "food_recommendation", result }, state);
+    }
+  }
+
+  // ── 5. Fallback: category-based recommendation ───────────────────────────
+  const result = recommend(state, { categoryOverride: nlu.entities.category, requireFresh: true });
   setFoodRecommendations(result.products.map((p) => p.id), result.poolExhausted, state, nlu.entities.category);
-  return buildResponse({ intent: nlu.intent === "popular_dishes" ? "popular_dishes" : "food_recommendation", result }, state);
+  const reply = buildResponse({ intent: "food_recommendation", result }, state);
+
+  // "Ar turite sushi?" with zero keyword matches — be honest that we don't have it
+  // instead of silently recommending unrelated dishes.
+  if (kwResult.topScore === 0 && /\b(ar\s+)?(turite|turit|yra)\b/.test(nlu.normalizedInput)) {
+    const lang = state.currentLanguage;
+    const sorry =
+      lang === "en"
+        ? "Unfortunately we don't have that on the menu. Maybe one of these instead?"
+        : lang === "ru"
+        ? "К сожалению, этого нет в нашем меню. Может, что-то из этого?"
+        : "Deja, tokio patiekalo mūsų meniu nėra. Gal vietoj to patiktų:";
+    return `${sorry}\n${reply}`;
+  }
+  return reply;
+}
+
+/** All food products under the current protein/category preference (or all food). */
+function byFoodCategory(state: ConversationState): Product[] {
+  if (state.preferredCategory) {
+    return byCategory(state.preferredCategory as Category);
+  }
+  if (state.preferredProtein) {
+    return byCategory(categoriesForProtein(state.preferredProtein));
+  }
+  return byCategory(FOOD_CATEGORIES);
 }
 
 function handleDrinkPairing(nlu: NLUResult, state: ConversationState): string {
@@ -210,14 +286,33 @@ function handleDrinkPairing(nlu: NLUResult, state: ConversationState): string {
   return buildResponse({ intent: "pairing_request", pairing, result: { products: pairing.drinks, poolExhausted: false } }, state);
 }
 
-function handleDessert(state: ConversationState): string {
+function handleDessert(state: ConversationState, input?: string): string {
+  // Try keyword search within desserts first (e.g. "noriu šokoladinio deserto")
+  if (input) {
+    const dessertPool = byCategory("desertai" as Category);
+    const kwResult = keywordSearch(input, dessertPool);
+    if (kwResult.topScore > 0) {
+      const filtered = applyHardFilters(kwResult.products.map((r) => r.product), state);
+      const picked = filtered.length > 0
+        ? pickKeywordResults({ ...kwResult, products: kwResult.products.filter((r) => filtered.includes(r.product)) }, 3, state.lastRecommendedIds)
+        : null;
+      if (picked && picked.length > 0) {
+        const result = { products: picked, poolExhausted: false };
+        setRecommended(state, picked.map((p) => p.id));
+        return buildResponse({ intent: "dessert_recommendation", result }, state);
+      }
+    }
+  }
   const result = recommendDesserts(state);
   setRecommended(state, result.products.map((p) => p.id));
   return buildResponse({ intent: "dessert_recommendation", result }, state);
 }
 
 function handleAllergy(nlu: NLUResult, state: ConversationState): string {
-  const specificProduct = findDishForTurn(nlu, state);
+  // "Turi ką be grybų?" is a FILTER request ("show me mushroom-free options"),
+  // not a safety question about one dish — skip the specific-dish branch.
+  const isFilterRequest = !!nlu.entities.dislike || /\bbe\s+\w+/.test(nlu.normalizedInput);
+  const specificProduct = isFilterRequest ? undefined : findDishForTurn(nlu, state);
   if (specificProduct && nlu.intent === "allergy_question" && isSpecificDishSafetyQuestion(nlu.normalizedInput)) {
     state.lastFoodDishId = specificProduct.id;
     return buildResponse({ intent: "allergy_question", specificProduct }, state);
@@ -244,6 +339,32 @@ function handlePrice(nlu: NLUResult, state: ConversationState): string {
 
 function handleMenuSearch(nlu: NLUResult, state: ConversationState): string {
   const drinkType = normalizeDrinkType(nlu);
+
+  // Keyword search within the relevant drink pool first.
+  // Handles e.g. "noriu alaus degustacijos" → finds the tasting board specifically.
+  const drinkPool = drinkType
+    ? byCategory(drinkTypeToCategories(drinkType))
+    : byCategory(DRINK_CATEGORIES);
+  const kwResult = keywordSearch(nlu.normalizedInput, drinkPool);
+  if (kwResult.topScore > 0) {
+    const filtered = applyHardFilters(kwResult.products.map((r) => r.product), state);
+    const picked = filtered.length > 0
+      ? pickKeywordResults({ ...kwResult, products: kwResult.products.filter((r) => filtered.includes(r.product)) }, 3, state.lastRecommendedIds)
+      : null;
+    if (picked && picked.length > 0) {
+      const result = { products: picked, poolExhausted: false };
+      setRecommended(state, picked.map((p) => p.id));
+      const intent = drinkType === "beer" ? "beer_recommendation" : drinkType === "wine" ? "wine_recommendation" : drinkType === "cocktail" ? "cocktail_recommendation" : "drink_recommendation";
+      // Beer path sets the tasting board as a pending suggestion — unless
+      // alcohol is restricted ("Taip" must never add alcohol then).
+      if ((drinkType === "beer" || intent === "beer_recommendation") && !alcoholRestricted(state)) {
+        const tasting = allProducts.find((p) => normalizeText(p.name).includes("degustacija"));
+        if (tasting) setPendingSuggestion(state, tasting.id);
+      }
+      return buildResponse({ intent, result }, state);
+    }
+  }
+
   if (nlu.intent === "drink_recommendation") {
     const result = recommendDrinks(state, drinkType);
     setRecommended(state, result.products.map((p) => p.id));
@@ -254,14 +375,33 @@ function handleMenuSearch(nlu: NLUResult, state: ConversationState): string {
     setRecommended(state, result.products.map((p) => p.id));
     const intent = drinkType === "beer" ? "beer_recommendation" : drinkType === "wine" ? "wine_recommendation" : drinkType === "cocktail" ? "cocktail_recommendation" : "drink_recommendation";
     const reply = buildResponse({ intent, result }, state);
-    // Beer response tail always suggests the tasting board — track it for confirmation
-    if (drinkType === "beer" || intent === "beer_recommendation") {
+    if ((drinkType === "beer" || intent === "beer_recommendation") && !alcoholRestricted(state)) {
       const tasting = allProducts.find((p) => normalizeText(p.name).includes("degustacija"));
       if (tasting) setPendingSuggestion(state, tasting.id);
     }
     return reply;
   }
   return handleFoodRecommendation(nlu, state);
+}
+
+function alcoholRestricted(state: ConversationState): boolean {
+  return state.allowAlcohol === false || state.ageGroup === "minor" || state.preferredDrink === "nonAlcoholic";
+}
+
+function drinkTypeToCategories(drinkType: string): Category[] {
+  const map: Record<string, Category[]> = {
+    beer:        ["alus"],
+    wine:        ["vynas", "sampanas"],
+    cocktail:    ["kokteiliai", "alus-kokteiliai"],
+    cider:       ["sidras"],
+    lemonade:    ["limonadai"],
+    coffee:      ["kava"],
+    juice:       ["gerimai"],
+    water:       ["gerimai"],
+    soft:        ["gerimai"],
+    nonAlcoholic:["limonadai", "gerimai", "nealko-alus", "kava"],
+  };
+  return map[drinkType] ?? DRINK_CATEGORIES;
 }
 
 function handleBudget(nlu: NLUResult, state: ConversationState): string {
@@ -309,6 +449,74 @@ function handleAddToCart(nlu: NLUResult, state: ConversationState): string {
     : lang === "ru"
     ? `**${dish.name}** добавлен в корзину! 🛒`
     : `**${dish.name}** pridėta į krepšelį! 🛒`;
+}
+
+function handleRemoveFromCart(nlu: NLUResult, state: ConversationState): string {
+  const lang = state.currentLanguage;
+  // Named product wins; fall back to most recently added/mentioned
+  const namedProduct =
+    findDishReference(nlu.normalizedInput) ??
+    findProductByInflectedName(nlu.normalizedInput);
+  const product =
+    namedProduct ??
+    (state.lastCartAddedProductId ? findById(state.lastCartAddedProductId) : undefined) ??
+    (state.lastMentionedProductId ? findById(state.lastMentionedProductId) : undefined);
+
+  if (!product) {
+    return lang === "en"
+      ? "Which item would you like to remove?"
+      : lang === "ru"
+      ? "Что убрать из корзины?"
+      : "Kurį produktą pašalinti iš krepšelio?";
+  }
+
+  state.pendingActions = [{ type: "REMOVE_FROM_CART", productId: product.id }];
+  state.lastCartAddedProductId = undefined;
+
+  return lang === "en"
+    ? `**${product.name}** removed from your cart.`
+    : lang === "ru"
+    ? `**${product.name}** убран из корзины.`
+    : `**${product.name}** pašalintas iš krepšelio.`;
+}
+
+function handleCartSummary(state: ConversationState): string {
+  const lang = state.currentLanguage;
+  const items = state.cartItems ?? [];
+
+  if (items.length === 0) {
+    return lang === "en"
+      ? "Your cart is empty. Want me to recommend something?"
+      : lang === "ru"
+      ? "Ваша корзина пуста. Порекомендовать что-нибудь?"
+      : "Jūsų krepšelis tuščias. Rekomenduoti ką nors?";
+  }
+
+  const total = items.reduce((s, i) => s + i.price * i.quantity, 0);
+  const lines = items.map(
+    (i) => `• **${i.name}** ×${i.quantity} — ${(i.price * i.quantity).toFixed(2)}€`
+  );
+  const header =
+    lang === "en" ? "Your cart:" : lang === "ru" ? "Ваша корзина:" : "Jūsų krepšelyje:";
+  const totalLabel =
+    lang === "en" ? "Total" : lang === "ru" ? "Итого" : "Viso";
+
+  return `${header}\n${lines.join("\n")}\n${totalLabel}: **${total.toFixed(2)}€**`;
+}
+
+function handleClearCart(state: ConversationState): string {
+  const lang = state.currentLanguage;
+  state.pendingActions = [{ type: "CLEAR_CART" }];
+  state.cartItems = [];
+  state.lastCartAddedProductId = undefined;
+  state.lastMentionedProductId = undefined;
+  state.hasUnclaimedRecommendation = false;
+
+  return lang === "en"
+    ? "Cart cleared. Starting fresh — what would you like?"
+    : lang === "ru"
+    ? "Корзина очищена. Начнём заново — что желаете?"
+    : "Krepšelis išvalytas. Pradedame iš naujo — ko norėtumėte?";
 }
 
 function handleFollowUp(nlu: NLUResult, state: ConversationState): string {

@@ -24,10 +24,14 @@ export type Intent =
   | "menu_category"
   | "pairing_request"
   | "add_to_cart"
+  | "remove_from_cart"
+  | "cart_summary"
+  | "clear_cart"
   | "change_recommendation"
   | "confirmation"
   | "negative_answer"
   | "positive_answer"
+  | "greeting"
   | "unknown";
 
 // ── NLU ──────────────────────────────────────────────────────────────────────
@@ -134,14 +138,26 @@ export interface ConversationState {
   lastMentionedProductId?: string;
   hasUnclaimedRecommendation: boolean;
   lastCartAddedProductId?: string;
+
+  // Cart snapshot — populated by UI before each generateReply call
+  cartItems?: CartItemRef[];
 }
 
 // ── Cart actions ──────────────────────────────────────────────────────────────
 
-export interface AssistantAction {
-  type: "ADD_TO_CART";
+export type AssistantAction =
+  | { type: "ADD_TO_CART"; productId: string; quantity: number }
+  | { type: "REMOVE_FROM_CART"; productId: string }
+  | { type: "DECREASE_QUANTITY"; productId: string }
+  | { type: "CLEAR_CART" };
+
+// ── Cart context (set by UI before each generateReply call) ───────────────────
+
+export interface CartItemRef {
   productId: string;
   quantity: number;
+  name: string;
+  price: number;
 }
 
 // ── Recommendations ───────────────────────────────────────────────────────────

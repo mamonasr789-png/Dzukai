@@ -400,7 +400,7 @@ export const synonyms = {
 
   DISLIKE_MUSHROOMS: {
     keywords: [
-      "be grybų", "be grybu", "grybai", "grybų", "nemėgstu grybų", "nemegstu grybu", "nenoriu grybų",
+      "be grybų", "be grybu", "nemėgstu grybų", "nemegstu grybu", "nenoriu grybų",
       "no mushrooms", "without mushrooms",
       "без грибов",
     ],
@@ -408,7 +408,7 @@ export const synonyms = {
 
   DISLIKE_ONION: {
     keywords: [
-      "be svogūnų", "svogūnas", "svogūnų", "nemėgstu svogūnų",
+      "be svogūnų", "be svogunu", "nemėgstu svogūnų",
       "no onions", "without onions",
       "без лука",
     ],

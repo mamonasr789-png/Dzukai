@@ -308,13 +308,43 @@ export const HISTORY_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes — change here 
 export function purgeOldHistory(maxAgeMs = HISTORY_MAX_AGE_MS): number {
   const cutoff = Date.now() - maxAgeMs;
   const all = readAll();
+
+  // Orders referenced by an OPEN (unpaid) table session must never be purged —
+  // deleting them would erase the customer's bill while they're still dining.
+  const protectedIds = getOpenSessionOrderIds();
+
   const kept = all.filter((o) => {
     const done = o.status === "COMPLETED" || o.status === "CANCELLED";
     if (!done) return true; // always keep active orders
+    if (protectedIds.has(o.id)) return true; // bill not settled yet
     return new Date(o.createdAt).getTime() > cutoff;
   });
   if (kept.length !== all.length) writeAll(kept);
   return all.length - kept.length; // number of orders removed
+}
+
+/**
+ * Order IDs belonging to ACTIVE / BILL_REQUESTED sessions.
+ * Reads the session storage key directly to avoid a circular import
+ * with tableSession.ts.
+ */
+function getOpenSessionOrderIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const sessions = JSON.parse(localStorage.getItem("dzukai-table-sessions") ?? "[]") as {
+      status: string;
+      orderIds: string[];
+    }[];
+    const ids = new Set<string>();
+    for (const s of sessions) {
+      if (s.status === "ACTIVE" || s.status === "BILL_REQUESTED") {
+        for (const id of s.orderIds) ids.add(id);
+      }
+    }
+    return ids;
+  } catch {
+    return new Set();
+  }
 }
 
 /**

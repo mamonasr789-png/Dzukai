@@ -195,15 +195,19 @@ export function deleteTask(id: string): void {
 }
 
 /**
- * Mark all non-completed tasks for the given order IDs as completed.
+ * Mark non-completed tasks for the given order IDs as completed.
  * Called when a session is closed (payment received) to clean up the task list.
+ *
+ * IMPORTANT: active "ready_to_serve" tasks are NOT auto-completed — payment
+ * does not mean the food reached the table. If the customer pays early, the
+ * waiter must still see "Nešti maistą" until they actually deliver it.
  */
 export function completeTasksForOrders(orderIds: string[]): void {
   const idSet = new Set(orderIds);
   const tasks = readAll();
   let changed = false;
   const updated = tasks.map((t) => {
-    if (idSet.has(t.orderId) && t.status !== "completed") {
+    if (idSet.has(t.orderId) && t.status !== "completed" && t.type !== "ready_to_serve") {
       changed = true;
       return { ...t, status: "completed" as WaiterTaskStatus, updatedAt: now() };
     }

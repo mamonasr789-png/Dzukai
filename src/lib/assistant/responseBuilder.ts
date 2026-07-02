@@ -319,15 +319,17 @@ function confirmationResponse(state: ConversationState): string {
     ? findById(state.lastRecommendedIds[0])?.name
     : null;
 
+  // NOTE: this response carries no cart action, so it must never claim
+  // "added to cart" — actual adds happen in actionResolver with an ADD_TO_CART action.
   const responses = {
     lt: dish
-      ? [`Puikus pasirinkimas — **${dish}**! Ar norėtumėte ko nors gerti prie to?`, `Pridedu **${dish}** į krepšelį. Ar reikia dar ko nors?`]
+      ? [`Puikus pasirinkimas — **${dish}**! Ar norėtumėte ko nors gerti prie to?`]
       : ["Puiku! Ar reikia ko nors dar?"],
     en: dish
-      ? [`Great choice — **${dish}**! Would you like something to drink with that?`, `Added **${dish}**. Anything else?`]
+      ? [`Great choice — **${dish}**! Would you like something to drink with that?`]
       : ["Perfect! Anything else?"],
     ru: dish
-      ? [`Отличный выбор — **${dish}**! Что-нибудь выпьете?`, `Добавил **${dish}**. Что-нибудь ещё?`]
+      ? [`Отличный выбор — **${dish}**! Что-нибудь выпьете?`]
       : ["Отлично! Что-нибудь ещё?"],
   };
 

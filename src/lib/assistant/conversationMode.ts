@@ -31,6 +31,12 @@ export function determineConversationMode(
 ): ConversationMode {
   const text = nlu.normalizedInput;
 
+  // Beer snacks — "ką užkąsti prie alaus?" is a FOOD request, not drink pairing,
+  // even though it matches the "prie ... alaus" pairing pattern below.
+  if (/(uzkand|uzkas|kasti|valgy)/.test(text) && /\b(alaus|alui|alu)\b/.test(text)) {
+    return "FOOD_RECOMMENDATION";
+  }
+
   if (DRINK_PAIRING_PATTERNS.some((re) => re.test(text))) return "DRINK_PAIRING";
 
   if (/\b(no alcohol|be alkoholio|nealkohol|non.?alcohol|без алкоголя)\b/i.test(text)) {

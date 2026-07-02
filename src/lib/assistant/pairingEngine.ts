@@ -224,7 +224,7 @@ export function defaultPairing(state: ConversationState): PairingResult {
 }
 
 function filterAlcoholPreference(pool: Product[], state: ConversationState): Product[] {
-  if (state.preferredDrink !== "nonAlcoholic") return pool;
+  if (!isAlcoholRestricted(state)) return pool;
   return pool.filter((p) => {
     if (["limonadai", "gerimai", "nealko-alus", "kava"].includes(p.category)) return true;
     const text = `${p.name} ${p.description}`.toLowerCase();
@@ -252,7 +252,7 @@ function filterDrinkPreference(pool: Product[], state: ConversationState): Produ
 }
 
 function withNonAlcoholFallback(pool: Product[], state: ConversationState): Product[] {
-  if (pool.length > 0 || state.preferredDrink !== "nonAlcoholic") return pool;
+  if (pool.length > 0 || !isAlcoholRestricted(state)) return pool;
   return applyHardFilters([
     ...byCategory("limonadai"),
     ...byCategory("gerimai"),

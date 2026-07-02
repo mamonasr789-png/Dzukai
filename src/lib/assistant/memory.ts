@@ -15,6 +15,11 @@ export function updateMemory(state: ConversationState, nlu: NLUResult): Restrict
   const { entities, normalizedInput: n } = nlu;
   const semanticUpdate = applySemanticRestrictions(state, nlu.rawInput);
 
+  // Restriction cancellation — "nesu vegetaras", "valgau viską", "I eat everything".
+  // Must run BEFORE diet-flag setting, and its result suppresses re-setting flags
+  // this turn ("nesu vegetaras" contains "vegetaras" which the synonym group matches).
+  const dietCancelled = clearCancelledRestrictions(state, n);
+
   // Budget
   if (entities.budget != null && !semanticUpdate.budgetChanged) {
     state.budget = entities.budget;
@@ -32,12 +37,12 @@ export function updateMemory(state: ConversationState, nlu: NLUResult): Restrict
   if (entities.moodSpicy) state.wantsSpicyFood = true;
 
   // Diet flags
-  if (entities.vegetarian) {
+  if (entities.vegetarian && !dietCancelled) {
     state.vegetarian = true;
     state.diet = state.diet === "vegan" ? "vegan" : "vegetarian";
     state.noMeat = true;
   }
-  if (entities.vegan) {
+  if (entities.vegan && !dietCancelled) {
     state.vegan = true;
     state.vegetarian = true; // vegan implies vegetarian
     state.diet = "vegan";
@@ -50,8 +55,14 @@ export function updateMemory(state: ConversationState, nlu: NLUResult): Restrict
   // Protein preference
   if (entities.protein) {
     state.preferredProtein = entities.protein;
-    // Protein preference clears strict diet (user said "vištiena" so not strictly veg)
+    // A fresh protein request supersedes a stale category preference
+    // ("noriu picos" … "o dabar kiaulienos" must not stay locked to pizzas).
+    if (!entities.category) state.preferredCategory = null;
   }
+
+  // "be alkoholio" / "no alcohol" is a hard restriction, not just a preference —
+  // otherwise a later "alaus" request silently resets it.
+  if (isNoAlcohol(n)) state.allowAlcohol = false;
 
   const drinkPreference = inferDrinkPreference(n, entities.drinkType);
   if (drinkPreference) {
@@ -91,6 +102,28 @@ export function updateMemory(state: ConversationState, nlu: NLUResult): Restrict
   }
 
   return semanticUpdate;
+}
+
+/**
+ * Detect explicit cancellation of diet restrictions and clear the flags.
+ * Returns true when a cancellation was detected (caller must not re-set flags this turn).
+ */
+function clearCancelledRestrictions(state: ConversationState, n: string): boolean {
+  const cancelDiet =
+    /\b(nesu|nebesu|jau ne)\s+(vegetar\w*|vegan\w*)/.test(n) ||
+    /\b(valgau (viska|mesa)|galiu valgyti mesa|apsigalvojau del (mesos|dietos))\b/.test(n) ||
+    /\b(not (a )?(vegetarian|vegan)|i eat (everything|meat))\b/.test(n) ||
+    /(не вегетарианец|ем мясо|ем вс[её])/.test(n);
+
+  if (cancelDiet) {
+    state.vegetarian = false;
+    state.vegan = false;
+    state.diet = null;
+    state.noMeat = false;
+    state.noAnimalProducts = false;
+    return true;
+  }
+  return false;
 }
 
 /** Extract "be X" (without X) patterns for uncommon dislikes */

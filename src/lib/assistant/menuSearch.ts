@@ -81,8 +81,10 @@ export function findByName(query: string): Product[] {
   const inflected = findByInflectedName(q);
   if (inflected) return [inflected];
 
-  // Fuzzy: any word from query in name
-  const words = q.split(/\s+/).filter((w) => w.length > 3);
+  // Fuzzy: any word from query in name. Common verbs/fillers are excluded —
+  // "turi" must not match "Ke-turi-ų sūrių".
+  const FUZZY_STOP = new Set(["turi", "turit", "turite", "noriu", "kokia", "koks", "koki", "yra", "gal", "prasau", "prasom", "kiek", "kada", "kur"]);
+  const words = q.split(/\s+/).filter((w) => w.length > 3 && !FUZZY_STOP.has(w));
   return allProducts.filter((p) => {
     const name = normalizeText(p.name);
     return words.some((w) => name.includes(w));
@@ -127,16 +129,32 @@ function deriveStemVariants(word: string): string[] {
  */
 function findByInflectedName(normalizedQuery: string): Product | undefined {
   const words = normalizedQuery.split(/\s+/).filter((w) => w.length >= 7);
+  // All query words (3+ chars) used for disambiguation scoring
+  const allWords = normalizedQuery.split(/\s+/).filter((w) => w.length >= 3);
+
+  const candidates: Product[] = [];
   for (const word of words) {
     const variants = deriveStemVariants(word).filter((v) => v.length >= 5);
     for (const product of allProducts) {
       const nameWords = normalizeText(product.name).split(/\s+/);
       if (variants.some((v) => nameWords.some((nw) => nw === v || nw.startsWith(v)))) {
-        return product;
+        if (!candidates.includes(product)) candidates.push(product);
       }
     }
   }
-  return undefined;
+
+  if (candidates.length === 0) return undefined;
+  if (candidates.length === 1) return candidates[0];
+
+  // Multiple candidates — score by how many query words appear in product name
+  let best = candidates[0];
+  let bestScore = 0;
+  for (const product of candidates) {
+    const name = normalizeText(product.name);
+    const score = allWords.filter((w) => name.includes(w)).length;
+    if (score > bestScore) { bestScore = score; best = product; }
+  }
+  return best;
 }
 
 /**
@@ -145,7 +163,33 @@ function findByInflectedName(normalizedQuery: string): Product | undefined {
  * (e.g. "noriu degustacijos" → "Alaus degustacija").
  */
 export function findProductByInflectedName(query: string): Product | undefined {
-  return findByInflectedName(normalizeText(query));
+  const normalized = normalizeText(query);
+  return findByInflectedName(normalized) ?? findByExactNameWord(normalized);
+}
+
+/** Generic words that appear in many product names — never enough to identify one. */
+const AMBIGUOUS_NAME_WORDS = new Set([
+  "alus", "alaus", "vynas", "vyno", "kava", "kavos", "arbata", "arbatos",
+  "sultys", "sulciu", "vanduo", "vandens", "sriuba", "sriubos", "salotos", "salotu",
+  "mesa", "mesos", "padazas", "padazu", "duona", "duonos",
+]);
+
+/**
+ * Fallback for short distinctive product names ("Čystas", "Šposas") that the
+ * 7-char inflection matcher can't reach. Requires an EXACT word match (5+ chars)
+ * against a product-name word that isn't generic.
+ */
+function findByExactNameWord(normalizedQuery: string): Product | undefined {
+  const words = normalizedQuery
+    .split(/\s+/)
+    .filter((w) => w.length >= 5 && !AMBIGUOUS_NAME_WORDS.has(w));
+  for (const word of words) {
+    for (const product of allProducts) {
+      const nameWords = normalizeText(product.name).split(/\s+/);
+      if (nameWords.includes(word)) return product;
+    }
+  }
+  return undefined;
 }
 
 /** Find a dish from conversational references, including common inflected names. */

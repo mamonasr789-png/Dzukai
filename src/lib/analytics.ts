@@ -21,13 +21,19 @@ export function getTodayOrders(orders: Order[]): Order[] {
 
 // ── Revenue ───────────────────────────────────────────────────────────────────
 
+/** Orders that count toward money metrics — cancelled orders bring no revenue. */
+function revenueOrders(orders: Order[]): Order[] {
+  return orders.filter((o) => o.status !== "CANCELLED");
+}
+
 export function calculateRevenue(orders: Order[]): number {
-  return orders.reduce((sum, o) => sum + o.total, 0);
+  return revenueOrders(orders).reduce((sum, o) => sum + o.total, 0);
 }
 
 export function averageOrderValue(orders: Order[]): number {
-  if (orders.length === 0) return 0;
-  return calculateRevenue(orders) / orders.length;
+  const counted = revenueOrders(orders);
+  if (counted.length === 0) return 0;
+  return calculateRevenue(counted) / counted.length;
 }
 
 // ── Status counts ─────────────────────────────────────────────────────────────
@@ -73,8 +79,9 @@ export interface PopularItem {
 export function getPopularItems(orders: Order[], topN = 5): PopularItem[] {
   const map = new Map<string, PopularItem>();
 
-  for (const order of orders) {
+  for (const order of revenueOrders(orders)) {
     for (const item of order.items) {
+      if (item.itemStatus === "CANCELLED") continue; // cancelled dish ≠ sold dish
       const existing = map.get(item.productId);
       if (existing) {
         existing.quantitySold += item.quantity;
