@@ -52,6 +52,8 @@ export interface Order {
   servingPreference?: ServingPreference;
   /** Set to true when customer pays for this specific order (single-order scope). */
   isPaid?: boolean;
+  /** ISO timestamp of when the order was paid — powers the receipt confirmation. */
+  paidAt?: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -278,6 +280,16 @@ export function getLatestActiveOrder(): Order | undefined {
   return active[0];
 }
 
+/**
+ * True while the customer has at least one order that has not been delivered
+ * (COMPLETED) or CANCELLED. This is the definitive "is there anything to track"
+ * signal — independent of payment status and of the cart. The UI uses it so an
+ * empty cart or a paid bill can never hide undelivered food.
+ */
+export function hasActiveOrders(): boolean {
+  return readAll().some((o) => ACTIVE_STATUSES.includes(o.status));
+}
+
 export function deleteOrder(id: string): void {
   writeAll(readAll().filter((o) => o.id !== id));
 }
@@ -287,7 +299,8 @@ export function markOrderPaid(id: string): Order | undefined {
   const orders = readAll();
   const idx = orders.findIndex((o) => o.id === id);
   if (idx === -1) return undefined;
-  orders[idx] = { ...orders[idx], isPaid: true };
+  // Keep the first paid timestamp if already set (idempotent re-pay is a no-op).
+  orders[idx] = { ...orders[idx], isPaid: true, paidAt: orders[idx].paidAt ?? new Date().toISOString() };
   writeAll(orders);
   return orders[idx];
 }
@@ -309,9 +322,9 @@ export function purgeOldHistory(maxAgeMs = HISTORY_MAX_AGE_MS): number {
   const cutoff = Date.now() - maxAgeMs;
   const all = readAll();
 
-  // Orders referenced by an OPEN (unpaid) table session must never be purged —
-  // deleting them would erase the customer's bill while they're still dining.
-  const protectedIds = getOpenSessionOrderIds();
+  // Orders still being tracked by the customer must never be purged — deleting
+  // them would erase part of the visit while it's still on screen.
+  const protectedIds = getProtectedOrderIds(all);
 
   const kept = all.filter((o) => {
     const done = o.status === "COMPLETED" || o.status === "CANCELLED";
@@ -324,26 +337,38 @@ export function purgeOldHistory(maxAgeMs = HISTORY_MAX_AGE_MS): number {
 }
 
 /**
- * Order IDs belonging to ACTIVE / BILL_REQUESTED sessions.
- * Reads the session storage key directly to avoid a circular import
- * with tableSession.ts.
+ * Order IDs the customer can still be tracking, so purge must leave them alone:
+ *   - every order in an OPEN (ACTIVE / BILL_REQUESTED) session, and
+ *   - orders in a settled (PAID / CLOSED) session whose food is not all
+ *     delivered yet — payment doesn't end tracking, delivery does.
+ *
+ * Reads the session storage key directly to avoid a circular import with
+ * tableSession.ts.
  */
-function getOpenSessionOrderIds(): Set<string> {
-  if (typeof window === "undefined") return new Set();
+function getProtectedOrderIds(all: Order[]): Set<string> {
+  const ids = new Set<string>();
+  if (typeof window === "undefined") return ids;
   try {
     const sessions = JSON.parse(localStorage.getItem("dzukai-table-sessions") ?? "[]") as {
       status: string;
       orderIds: string[];
     }[];
-    const ids = new Set<string>();
+    const statusById = new Map(all.map((o) => [o.id, o.status]));
+    const finished = (id: string) => {
+      const st = statusById.get(id);
+      return st === undefined || st === "COMPLETED" || st === "CANCELLED";
+    };
     for (const s of sessions) {
-      if (s.status === "ACTIVE" || s.status === "BILL_REQUESTED") {
+      const open = s.status === "ACTIVE" || s.status === "BILL_REQUESTED";
+      const settledButTracking =
+        (s.status === "PAID" || s.status === "CLOSED") && !s.orderIds.every(finished);
+      if (open || settledButTracking) {
         for (const id of s.orderIds) ids.add(id);
       }
     }
     return ids;
   } catch {
-    return new Set();
+    return ids;
   }
 }
 

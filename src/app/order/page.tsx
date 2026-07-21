@@ -1,11 +1,11 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   CheckCircle2, Clock, ChefHat, Bell, XCircle,
-  UtensilsCrossed, Utensils, Zap, Truck, CreditCard, Receipt,
+  UtensilsCrossed, Utensils, Zap, Truck, CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -23,7 +23,7 @@ import {
 } from "@/lib/orders";
 import {
   type TableSession,
-  getActiveSession,
+  getTrackableSession,
   subscribeSession,
   updateSessionStatus,
   markSessionPaid,
@@ -86,7 +86,6 @@ function formatTime(iso: string): string {
 // ── Main content ──────────────────────────────────────────────────────────────
 
 function OrderContent() {
-  const router = useRouter();
   const params = useSearchParams();
   const id = params.get("id");
 
@@ -97,7 +96,7 @@ function OrderContent() {
   const hadSessionRef = useRef(false);
 
   // Payment state
-  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [justPaid, setJustPaid] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [billCalledFeedback, setBillCalledFeedback] = useState(false);
@@ -112,11 +111,16 @@ function OrderContent() {
   const doRefresh = () => {
     const currentId = idRef.current;
 
-    // Always read session — payment card needs it even on the ?id= view.
-    const s = getActiveSession();
+    // Trackable session survives payment — it only disappears once the visit is
+    // fully settled AND every order is delivered/cancelled.
+    const s = getTrackableSession();
     if (hadSessionRef.current && !s) {
-      setSessionEnded(true);
-      return;
+      // No specific order pinned → the whole visit is over: show the thank-you
+      // screen. With ?id= we keep rendering that order (it may be COMPLETED).
+      if (!currentId) {
+        setSessionEnded(true);
+        return;
+      }
     }
     if (s) hadSessionRef.current = true;
     setSession(s);
@@ -235,31 +239,32 @@ function OrderContent() {
     setPaymentProcessing(true);
     const result = await processPayment(payableTotal);
     if (result.success) {
-      if (isSessionScope) {
-        // Full session payment — close everything.
-        completeTasksForOrders(session.orderIds);
+      // Record payment only — this is a financial event. Each paid order is
+      // flagged isPaid; the session's bill is settled once every order is paid.
+      // Crucially we do NOT navigate away: the customer keeps tracking food
+      // preparation and delivery on this page until it's all delivered.
+      payableOrders.forEach((o) => markOrderPaid(o.id));
+      if (allOrdersPaid(session.orderIds)) {
+        completeTasksForOrders(session.orderIds); // clears bill tasks, keeps food tasks
         markSessionPaid("APP");
         clearCartStorage();
-      } else if (order) {
-        // Single-order payment — mark only this order paid.
-        markOrderPaid(order.id);
-        // If every order in the session is now paid, close the session too.
-        if (allOrdersPaid(session.orderIds)) {
-          completeTasksForOrders(session.orderIds);
-          markSessionPaid("APP");
-          clearCartStorage();
-        }
       }
       setShowPaymentModal(false);
-      setPaymentSuccess(true);
-      setTimeout(() => router.push("/"), 2500);
+      setJustPaid(true);
+      doRefresh();
     }
     setPaymentProcessing(false);
   };
 
+  // Auto-dismiss the "payment successful" banner; tracking stays put.
+  useEffect(() => {
+    if (!justPaid) return;
+    const t = setTimeout(() => setJustPaid(false), 4000);
+    return () => clearTimeout(t);
+  }, [justPaid]);
+
   // ── Early returns ─────────────────────────────────────────────────────────
 
-  if (paymentSuccess) return <PaymentSuccessView />;
   if (sessionEnded) return <SessionEndedView />;
 
   if (order === undefined) {
@@ -273,6 +278,7 @@ function OrderContent() {
   if (!id && !order && session && sessionOrders.length > 1) {
     return (
       <>
+        {justPaid && <PaidBanner />}
         <SessionView
           session={session}
           orders={sessionOrders}
@@ -318,10 +324,18 @@ function OrderContent() {
 
   return (
     <>
+      {justPaid && <PaidBanner />}
       <div className="flex flex-col min-h-screen bg-background pb-10">
         {/* Header */}
         <div className="px-4 pt-14 pb-6 border-b border-border/40">
-          <p className="text-xs text-muted-foreground mb-1">Užsakymo numeris</p>
+          <div className="flex items-center gap-2 mb-1">
+            <p className="text-xs text-muted-foreground">Užsakymo numeris</p>
+            {order.isPaid && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 size={11} /> Apmokėta
+              </span>
+            )}
+          </div>
           <h1 className="font-black text-3xl tracking-tight">#{order.id}</h1>
           {order.tableNumber && (
             <p className="text-sm text-muted-foreground mt-1">
@@ -423,10 +437,25 @@ function OrderContent() {
               );
             })}
             <Separator className="my-1" />
-            <div className="flex justify-between font-bold text-base">
-              <span>Iš viso</span>
-              <span className="text-primary">{order.total.toFixed(2)} €</span>
-            </div>
+            {order.isPaid ? (
+              /* Receipt: bill is settled — neutral amount + explicit paid confirmation,
+                 never the primary "amount to pay" accent. */
+              <div className="flex items-end justify-between">
+                <div className="flex flex-col">
+                  <span className="font-bold text-base">Iš viso</span>
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                    <CheckCircle2 size={13} className="shrink-0" />
+                    Apmokėta{order.paidAt ? ` · ${formatTime(order.paidAt)}` : ""}
+                  </span>
+                </div>
+                <span className="font-bold text-base text-foreground tabular-nums">{order.total.toFixed(2)} €</span>
+              </div>
+            ) : (
+              <div className="flex justify-between font-bold text-base">
+                <span>Iš viso</span>
+                <span className="text-primary tabular-nums">{order.total.toFixed(2)} €</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -577,16 +606,17 @@ function PaymentModal({
   );
 }
 
-// ── Payment success ───────────────────────────────────────────────────────────
+// ── Payment success banner ────────────────────────────────────────────────────
+// Non-blocking: payment is confirmed but the order tracking stays on screen so
+// the customer can keep following food preparation and delivery.
 
-function PaymentSuccessView() {
+function PaidBanner() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
-      <div className="w-24 h-24 rounded-full bg-emerald-500/10 flex items-center justify-center mb-5">
-        <CheckCircle2 size={48} className="text-emerald-500" />
+    <div className="fixed top-4 inset-x-0 z-50 flex justify-center px-4 pointer-events-none">
+      <div className="flex items-center gap-2 bg-emerald-500 text-white rounded-full px-4 py-2.5 shadow-lg shadow-emerald-500/30">
+        <CheckCircle2 size={18} className="shrink-0" />
+        <p className="text-sm font-bold">Mokėjimas sėkmingas — sekite užsakymą žemiau</p>
       </div>
-      <h2 className="font-black text-2xl mb-2">Mokėjimas sėkmingas</h2>
-      <p className="text-muted-foreground text-sm">Ačiū už apsilankymą!</p>
     </div>
   );
 }
@@ -621,6 +651,9 @@ function SessionView({
 }) {
   // Remaining amount: only unpaid orders. Paid orders are kept in history.
   const unpaidTotal = orders.filter((o) => !o.isPaid).reduce((s, o) => s + o.total, 0);
+  const isPaid = session.paymentStatus === "PAID";
+  // Paid and bill-requested are both "success"; only a live open session is accent.
+  const successChip = isPaid || isBillRequested;
 
   return (
     <div className="flex flex-col min-h-screen bg-background pb-10">
@@ -631,14 +664,15 @@ function SessionView({
           {session.tableNumber ? `Stalas Nr. ${session.tableNumber}` : "Sesija"}
         </h1>
         <div className="flex items-center gap-2 mt-1">
-          <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold
-            ${isBillRequested
+          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold
+            ${successChip
               ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
               : "bg-primary/10 text-primary"}`}>
+            {isPaid && <CheckCircle2 size={12} className="shrink-0" />}
             {SESSION_STATUS_LABEL[session.status] ?? session.status}
           </span>
           <span className="text-xs text-muted-foreground">
-            {orders.length} užsakymai · iš viso {sessionTotal.toFixed(2)} €
+            {orders.length} užsakymai · {isPaid ? "sumokėta" : "iš viso"} {sessionTotal.toFixed(2)} €
           </span>
         </div>
       </div>
@@ -662,13 +696,15 @@ function SessionView({
             <div className="bg-card border border-border/40 rounded-2xl p-4 shadow-sm flex items-center gap-3 hover:border-border transition-colors">
               <div className="shrink-0">{STATUS_ICON[o.status]}</div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-bold text-sm">#{o.id}</p>
-                  {o.isPaid ? (
-                    <span className="text-xs font-semibold text-emerald-500">Apmokėta</span>
-                  ) : (
-                    <span className={`text-xs font-semibold ${STATUS_COLOR[o.status]}`}>
-                      {STATUS_LABEL[o.status]}
+                  {/* Food status is always shown; a paid order additionally gets a paid chip. */}
+                  <span className={`text-xs font-semibold ${STATUS_COLOR[o.status]}`}>
+                    {STATUS_LABEL[o.status]}
+                  </span>
+                  {o.isPaid && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 size={10} className="shrink-0" /> Apmokėta
                     </span>
                   )}
                 </div>
@@ -676,7 +712,8 @@ function SessionView({
                   {formatTime(o.createdAt)} · {o.items.length} patiekal{o.items.length === 1 ? "as" : "ai"}
                 </p>
               </div>
-              <p className={`text-sm font-bold shrink-0 ${o.isPaid ? "text-muted-foreground line-through" : "text-primary"}`}>
+              {/* Paid amount stays legible (receipt), never struck through (voided). */}
+              <p className={`text-sm font-bold shrink-0 tabular-nums ${o.isPaid ? "text-foreground" : "text-primary"}`}>
                 {o.total.toFixed(2)} €
               </p>
             </div>

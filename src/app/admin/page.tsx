@@ -6,7 +6,6 @@ import {
   type OrderStatus,
   listOrders,
   subscribeOrders,
-  SERVING_LABELS,
 } from "@/lib/orders";
 import {
   type KitchenStats,
@@ -24,22 +23,21 @@ import {
 } from "lucide-react";
 import { getSessionStats, getPaymentStats, subscribeSession } from "@/lib/tableSession";
 import { resetDemoData } from "@/lib/devReset";
-import { Separator } from "@/components/ui/separator";
+import {
+  type StaffLang,
+  type StaffDict,
+  useStaffLang,
+  staffT,
+  ORDER_STATUS_LABEL,
+  SERVING_SHORT,
+} from "@/lib/staff-i18n";
+import StaffLangSwitch from "@/components/StaffLangSwitch";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type DateFilter = "today" | "all";
 
-// ── Status display ────────────────────────────────────────────────────────────
-
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  NEW: "Naujas",
-  PREPARING: "Gaminamas",
-  READY: "Paruoštas",
-  DELIVERING: "Neša padavėjas",
-  COMPLETED: "Įvykdytas",
-  CANCELLED: "Atšauktas",
-};
+// ── Status display (colors only — labels come from staff-i18n) ────────────────
 
 const STATUS_DOT: Record<OrderStatus, string> = {
   NEW: "bg-amber-400",
@@ -60,8 +58,8 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("lt-LT", { hour: "2-digit", minute: "2-digit" });
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("lt-LT", { month: "short", day: "numeric" });
+function formatDate(iso: string, lang: StaffLang): string {
+  return new Date(iso).toLocaleDateString(lang === "en" ? "en-GB" : "lt-LT", { month: "short", day: "numeric" });
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -75,6 +73,8 @@ export default function AdminPage() {
   const [spinning, setSpinning] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [lang, setLang] = useStaffLang();
+  const t = staffT(lang);
 
   const handleReset = () => {
     resetDemoData();
@@ -136,20 +136,22 @@ export default function AdminPage() {
             </div>
             <div>
               <h1 className="font-black text-base tracking-tight">Dzūkų Ainiai</h1>
-              <p className="text-[11px] text-white/40 leading-none">Direktoriaus valdymo skydelis</p>
+              <p className="text-[11px] text-white/40 leading-none">{t.adminSubtitle}</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            <StaffLangSwitch lang={lang} onChange={setLang} />
+
             {/* Filter */}
             <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 gap-1">
               <FilterBtn active={filter === "today"} onClick={() => setFilter("today")}>
                 <Calendar size={12} />
-                Šiandien
+                {t.today}
               </FilterBtn>
               <FilterBtn active={filter === "all"} onClick={() => setFilter("all")}>
                 <Layers size={12} />
-                Visi
+                {t.all}
               </FilterBtn>
             </div>
 
@@ -157,7 +159,7 @@ export default function AdminPage() {
             <button
               onClick={handleManualRefresh}
               className="flex items-center gap-1.5 text-[11px] text-white/30 hover:text-white/60 transition-colors px-2 py-1.5 rounded-lg hover:bg-white/5"
-              title="Atnaujinti"
+              title={t.adminRefresh}
             >
               <RefreshCw size={11} className={spinning ? "animate-spin" : ""} />
               <span className="hidden sm:inline">{formatTime(lastRefresh.toISOString())}</span>
@@ -166,28 +168,28 @@ export default function AdminPage() {
             {/* Dev reset */}
             {confirmReset ? (
               <div className="flex items-center gap-1.5">
-                <span className="hidden sm:inline text-[11px] text-red-400/80">Tikrai?</span>
+                <span className="hidden sm:inline text-[11px] text-red-400/80">{t.adminResetConfirmQ}</span>
                 <button
                   onClick={handleReset}
                   className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-red-500/20 text-red-400 hover:bg-red-500/35 border border-red-500/40 transition-colors"
                 >
-                  Taip, išvalyti
+                  {t.adminResetYes}
                 </button>
                 <button
                   onClick={cancelConfirm}
                   className="px-2.5 py-1.5 rounded-lg text-[11px] text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors"
                 >
-                  Ne
+                  {t.adminResetNo}
                 </button>
               </div>
             ) : (
               <button
                 onClick={requestConfirm}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-red-400/70 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/25 transition-colors"
-                title="Tik testavimui"
+                title={t.adminResetHint}
               >
                 <XCircle size={11} />
-                <span className="hidden sm:inline">Išvalyti testinius duomenis</span>
+                <span className="hidden sm:inline">{t.adminResetBtn}</span>
               </button>
             )}
           </div>
@@ -197,40 +199,40 @@ export default function AdminPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
         {isEmpty ? (
-          <EmptyState filter={filter} />
+          <EmptyState filter={filter} t={t} />
         ) : (
           <>
             {/* ── Summary cards ── */}
             <section>
-              <SectionLabel>Suvestinė{filter === "today" ? " — šiandien" : ""}</SectionLabel>
+              <SectionLabel>{t.adminSummary}{filter === "today" ? t.adminSummaryToday : ""}</SectionLabel>
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 <StatCard
-                  label="Užsakymų"
+                  label={t.adminOrders}
                   value={orders.length}
                   icon={<ShoppingBag size={16} />}
                   color="text-primary"
                 />
                 <StatCard
-                  label="Pajamos"
+                  label={t.adminRevenue}
                   value={`${fmt(revenue)} €`}
                   icon={<TrendingUp size={16} />}
                   color="text-emerald-400"
                 />
                 <StatCard
-                  label="Vid. užsakymas"
+                  label={t.adminAvgOrder}
                   value={`${fmt(avg)} €`}
                   icon={<BarChart3 size={16} />}
                   color="text-blue-400"
                 />
                 <StatCard
-                  label="Aktyvūs"
+                  label={t.adminActive}
                   value={activeOrders.length}
                   icon={<Clock size={16} />}
                   color="text-amber-400"
                   highlight={activeOrders.length > 0}
                 />
                 <StatCard
-                  label="Atšaukti"
+                  label={t.adminCancelled}
                   value={cancelledOrders.length}
                   icon={<XCircle size={16} />}
                   color="text-red-400"
@@ -240,30 +242,30 @@ export default function AdminPage() {
 
             {/* ── Kitchen live ── */}
             <section>
-              <SectionLabel>Virtuvė — dabar</SectionLabel>
-              <KitchenLive stats={kitchenStats} />
+              <SectionLabel>{t.adminKitchenNow}</SectionLabel>
+              <KitchenLive stats={kitchenStats} t={t} />
             </section>
 
             {/* ── Table sessions ── */}
             <section>
-              <SectionLabel>Stalų sesijos</SectionLabel>
+              <SectionLabel>{t.adminTableSessions}</SectionLabel>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <StatCard
-                  label="Aktyvios sesijos"
+                  label={t.adminActiveSessions}
                   value={sessionStats.active}
                   icon={<Table2 size={16} />}
                   color="text-amber-400"
                   highlight={sessionStats.active > 0}
                 />
                 <StatCard
-                  label="Sąskaita prašoma"
+                  label={t.adminBillRequested}
                   value={sessionStats.billRequested}
                   icon={<Receipt size={16} />}
                   color="text-emerald-400"
                   highlight={sessionStats.billRequested > 0}
                 />
                 <StatCard
-                  label="Iš viso sesijų"
+                  label={t.adminTotalSessions}
                   value={sessionStats.total}
                   icon={<Layers size={16} />}
                   color="text-white/50"
@@ -273,22 +275,22 @@ export default function AdminPage() {
 
             {/* ── Payments today ── */}
             <section>
-              <SectionLabel>Mokėjimai šiandien</SectionLabel>
-              <PaymentStats stats={paymentStats} />
+              <SectionLabel>{t.adminPaymentsToday}</SectionLabel>
+              <PaymentStats stats={paymentStats} t={t} />
             </section>
 
             {/* ── Popular + Recent ── */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Popular dishes */}
               <section>
-                <SectionLabel>Populiariausi patiekalai</SectionLabel>
+                <SectionLabel>{t.adminPopular}</SectionLabel>
                 {popularItems.length === 0 ? (
-                  <Card><p className="text-white/40 text-sm py-2">Nėra duomenų.</p></Card>
+                  <Card><p className="text-white/40 text-sm py-2">{t.noData}</p></Card>
                 ) : (
                   <Card noPad>
                     <div className="divide-y divide-white/5">
                       {popularItems.map((item, i) => (
-                        <PopularRow key={item.productId} item={item} rank={i + 1} />
+                        <PopularRow key={item.productId} item={item} rank={i + 1} t={t} />
                       ))}
                     </div>
                   </Card>
@@ -297,14 +299,14 @@ export default function AdminPage() {
 
               {/* Recent orders */}
               <section>
-                <SectionLabel>Paskutiniai užsakymai</SectionLabel>
+                <SectionLabel>{t.adminRecent}</SectionLabel>
                 {recentOrders.length === 0 ? (
-                  <Card><p className="text-white/40 text-sm py-2">Nėra duomenų.</p></Card>
+                  <Card><p className="text-white/40 text-sm py-2">{t.noData}</p></Card>
                 ) : (
                   <Card noPad>
                     <div className="divide-y divide-white/5">
                       {recentOrders.map((order) => (
-                        <RecentRow key={order.id} order={order} />
+                        <RecentRow key={order.id} order={order} lang={lang} t={t} />
                       ))}
                     </div>
                   </Card>
@@ -320,15 +322,15 @@ export default function AdminPage() {
 
 // ── Empty state ───────────────────────────────────────────────────────────────
 
-function EmptyState({ filter }: { filter: DateFilter }) {
+function EmptyState({ filter, t }: { filter: DateFilter; t: StaffDict }) {
   return (
     <div className="flex flex-col items-center justify-center py-32 text-center">
       <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-4">
         <ShoppingBag size={28} className="text-white/30" />
       </div>
-      <p className="font-bold text-lg text-white/70 mb-1">Užsakymų nėra</p>
+      <p className="font-bold text-lg text-white/70 mb-1">{t.adminEmptyTitle}</p>
       <p className="text-sm text-white/30">
-        {filter === "today" ? "Šiandien dar nebuvo užsakymų." : "Lokaliai nėra išsaugotų užsakymų."}
+        {filter === "today" ? t.adminEmptyToday : t.adminEmptyAll}
       </p>
     </div>
   );
@@ -336,14 +338,14 @@ function EmptyState({ filter }: { filter: DateFilter }) {
 
 // ── Kitchen live status ───────────────────────────────────────────────────────
 
-function KitchenLive({ stats }: { stats: KitchenStats }) {
+function KitchenLive({ stats, t }: { stats: KitchenStats; t: StaffDict }) {
   const items = [
-    { label: "Nauji", value: stats.newCount, icon: <Clock size={15} />, color: "text-amber-400", bg: "bg-amber-400/10 border-amber-400/20" },
-    { label: "Gaminami", value: stats.preparingCount, icon: <ChefHat size={15} />, color: "text-blue-400", bg: "bg-blue-400/10 border-blue-400/20" },
-    { label: "Paruošti", value: stats.readyCount, icon: <Bell size={15} />, color: "text-green-400", bg: "bg-green-400/10 border-green-400/20" },
-    { label: "Neša padavėjas", value: stats.deliveringCount, icon: <Truck size={15} />, color: "text-purple-400", bg: "bg-purple-400/10 border-purple-400/20" },
-    { label: "Įvykdyti", value: stats.completedCount, icon: <CheckCircle2 size={15} />, color: "text-emerald-400", bg: "bg-emerald-400/10 border-emerald-400/20" },
-    { label: "Atšaukti", value: stats.cancelledCount, icon: <XCircle size={15} />, color: "text-red-400", bg: "bg-red-400/10 border-red-400/20" },
+    { label: t.adminNew, value: stats.newCount, icon: <Clock size={15} />, color: "text-amber-400", bg: "bg-amber-400/10 border-amber-400/20" },
+    { label: t.adminPreparing, value: stats.preparingCount, icon: <ChefHat size={15} />, color: "text-blue-400", bg: "bg-blue-400/10 border-blue-400/20" },
+    { label: t.adminReady, value: stats.readyCount, icon: <Bell size={15} />, color: "text-green-400", bg: "bg-green-400/10 border-green-400/20" },
+    { label: t.adminDelivering, value: stats.deliveringCount, icon: <Truck size={15} />, color: "text-purple-400", bg: "bg-purple-400/10 border-purple-400/20" },
+    { label: t.adminCompleted, value: stats.completedCount, icon: <CheckCircle2 size={15} />, color: "text-emerald-400", bg: "bg-emerald-400/10 border-emerald-400/20" },
+    { label: t.adminCancelled, value: stats.cancelledCount, icon: <XCircle size={15} />, color: "text-red-400", bg: "bg-red-400/10 border-red-400/20" },
   ];
 
   return (
@@ -363,17 +365,17 @@ function KitchenLive({ stats }: { stats: KitchenStats }) {
 
 // ── Popular item row ──────────────────────────────────────────────────────────
 
-function PopularRow({ item, rank }: { item: PopularItem; rank: number }) {
+function PopularRow({ item, rank, t }: { item: PopularItem; rank: number; t: StaffDict }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3">
       <span className="w-5 text-center text-xs font-bold text-white/20 shrink-0">{rank}</span>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold truncate">{item.name}</p>
-        <p className="text-[11px] text-white/40">{item.revenue.toFixed(2)} € pajamos</p>
+        <p className="text-[11px] text-white/40">{item.revenue.toFixed(2)} {t.adminRevenueSuffix}</p>
       </div>
       <div className="text-right shrink-0">
         <p className="text-sm font-black text-primary">{item.quantitySold}</p>
-        <p className="text-[11px] text-white/30">vnt.</p>
+        <p className="text-[11px] text-white/30">{t.adminUnits}</p>
       </div>
     </div>
   );
@@ -381,9 +383,9 @@ function PopularRow({ item, rank }: { item: PopularItem; rank: number }) {
 
 // ── Recent order row ──────────────────────────────────────────────────────────
 
-function RecentRow({ order }: { order: Order }) {
+function RecentRow({ order, lang, t }: { order: Order; lang: StaffLang; t: StaffDict }) {
   const pref = order.servingPreference ?? "together";
-  const prefShort = SERVING_LABELS[pref].short;
+  const prefShort = SERVING_SHORT[lang][pref];
   const isToday = new Date(order.createdAt).toDateString() === new Date().toDateString();
 
   return (
@@ -392,18 +394,18 @@ function RecentRow({ order }: { order: Order }) {
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold">#{order.id}</span>
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[order.status]}`} />
-          <span className="text-[11px] text-white/40 truncate">{STATUS_LABEL[order.status]}</span>
+          <span className="text-[11px] text-white/40 truncate">{ORDER_STATUS_LABEL[lang][order.status]}</span>
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-[11px] text-white/30">
-            {isToday ? formatTime(order.createdAt) : formatDate(order.createdAt)}
+            {isToday ? formatTime(order.createdAt) : formatDate(order.createdAt, lang)}
           </span>
           <span className="text-[11px] text-white/20">·</span>
           <span className="text-[11px] text-white/30 truncate">{prefShort}</span>
           {order.tableNumber && (
             <>
               <span className="text-[11px] text-white/20">·</span>
-              <span className="text-[11px] text-white/30">Stalas {order.tableNumber}</span>
+              <span className="text-[11px] text-white/30">{t.table} {order.tableNumber}</span>
             </>
           )}
         </div>
@@ -450,8 +452,10 @@ function Card({ children, noPad = false }: { children: React.ReactNode; noPad?: 
 
 function PaymentStats({
   stats,
+  t,
 }: {
   stats: { paidInApp: number; paidByWaiter: number; total: number };
+  t: StaffDict;
 }) {
   const total = stats.total || 1; // avoid division by zero
   const appPct = Math.round((stats.paidInApp / total) * 100);
@@ -462,7 +466,7 @@ function PaymentStats({
       <div className="border border-white/8 rounded-xl p-4 bg-white/3 flex flex-col gap-2">
         <div className="flex items-center gap-1.5 text-blue-400">
           <CreditCard size={14} />
-          <span className="text-[11px] font-semibold uppercase tracking-wide">Programėlėje</span>
+          <span className="text-[11px] font-semibold uppercase tracking-wide">{t.adminPaidApp}</span>
         </div>
         <div className="flex items-end gap-2">
           <p className="font-black text-2xl text-blue-400">{stats.paidInApp}</p>
@@ -474,7 +478,7 @@ function PaymentStats({
       <div className="border border-white/8 rounded-xl p-4 bg-white/3 flex flex-col gap-2">
         <div className="flex items-center gap-1.5 text-emerald-400">
           <Receipt size={14} />
-          <span className="text-[11px] font-semibold uppercase tracking-wide">Padavėjas</span>
+          <span className="text-[11px] font-semibold uppercase tracking-wide">{t.adminPaidWaiter}</span>
         </div>
         <div className="flex items-end gap-2">
           <p className="font-black text-2xl text-emerald-400">{stats.paidByWaiter}</p>
@@ -486,7 +490,7 @@ function PaymentStats({
       <div className="border border-white/8 rounded-xl p-4 bg-white/3 flex flex-col gap-2">
         <div className="flex items-center gap-1.5 text-white/50">
           <Layers size={14} />
-          <span className="text-[11px] font-semibold uppercase tracking-wide">Iš viso</span>
+          <span className="text-[11px] font-semibold uppercase tracking-wide">{t.adminPaidTotal}</span>
         </div>
         <p className="font-black text-2xl text-white/60">{stats.total}</p>
       </div>

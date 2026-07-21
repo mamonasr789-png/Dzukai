@@ -10,19 +10,13 @@ import {
 import { categories, products, Product, Category } from "@/lib/data";
 import { useCartStore } from "@/lib/store";
 import { useT, categoryLabels } from "@/lib/i18n";
-import { productTranslations, badgeTranslations } from "@/lib/product-translations";
+import { badgeTranslations, tProduct } from "@/lib/product-translations";
 import ThemeToggle from "@/components/ThemeToggle";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import QuantitySelector from "@/components/QuantitySelector";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
-
-function tProduct(id: string, lang: string, field: "name" | "description", fallback: string) {
-  if (lang === "lt") return fallback;
-  const l = lang as "en" | "ru";
-  return productTranslations[l]?.[id]?.[field] ?? fallback;
-}
 
 function tBadge(badge: string, lang: string) {
   if (lang === "lt") return badge;

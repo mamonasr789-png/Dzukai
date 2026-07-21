@@ -7,23 +7,18 @@ import {
   subscribeOrders,
   startItemsDelivery,
   completeItemsDelivery,
-  SERVING_LABELS,
 } from "@/lib/orders";
 import {
   type WaiterTask,
   type WaiterTaskType,
   type WaiterTaskStatus,
   type WaiterTaskPriority,
-  TASK_LABEL,
-  TASK_ACTION_LABEL,
-  TASK_STATUS_LABEL,
   TASK_PRIORITY,
   listTasks,
   updateTaskStatus,
   subscribeWaiterTasks,
   syncReadyToServeTasks,
   getActiveTasks,
-  getTasksByTable,
   countActiveTables,
   completeTasksForOrders,
 } from "@/lib/waiterTasks";
@@ -37,6 +32,25 @@ import {
 } from "@/lib/tableSession";
 import { clearCartStorage } from "@/lib/store";
 import {
+  type StaffLang,
+  type StaffDict,
+  type PaymentBadgeKey,
+  useStaffLang,
+  staffT,
+  ORDER_STATUS_LABEL,
+  SERVING_SHORT,
+  TASK_TYPE_LABEL,
+  TASK_ACTION_LABEL_I18N,
+  TASK_STATUS_LABEL_I18N,
+  PAYMENT_BADGE_LABEL_I18N,
+  minutesAgoLabel,
+  ordersCount,
+  tasksCount,
+  activeTasksCount,
+  dishesCount,
+} from "@/lib/staff-i18n";
+import StaffLangSwitch from "@/components/StaffLangSwitch";
+import {
   UtensilsCrossed, Receipt, Bell, ShoppingBag,
   Clock, CheckCircle2, ChevronDown, ChevronUp,
   Table2, List, CreditCard,
@@ -44,7 +58,7 @@ import {
 
 // ── Payment status derivation ─────────────────────────────────────────────────
 
-type PaymentBadge = "PAID_APP" | "PAID_WAITER" | "BILL_REQUESTED" | "UNPAID" | null;
+type PaymentBadge = PaymentBadgeKey | null;
 
 function derivePaymentBadge(
   orderId: string,
@@ -62,14 +76,7 @@ function derivePaymentBadge(
   return null; // UNPAID — omit badge to reduce clutter
 }
 
-const PAYMENT_BADGE_LABEL: Record<Exclude<PaymentBadge, null>, string> = {
-  PAID_APP:       "Apmokėta programėlėje",
-  PAID_WAITER:    "Apmokėta padavėjui",
-  BILL_REQUESTED: "Sąskaita paprašyta",
-  UNPAID:         "Neapmokėta",
-};
-
-const PAYMENT_BADGE_CLS: Record<Exclude<PaymentBadge, null>, string> = {
+const PAYMENT_BADGE_CLS: Record<PaymentBadgeKey, string> = {
   PAID_APP:       "text-emerald-300 bg-emerald-400/15 border border-emerald-400/25",
   PAID_WAITER:    "text-blue-300 bg-blue-400/15 border border-blue-400/25",
   BILL_REQUESTED: "text-amber-300 bg-amber-400/15 border border-amber-400/25",
@@ -80,13 +87,15 @@ const PAYMENT_BADGE_CLS: Record<Exclude<PaymentBadge, null>, string> = {
 
 type TaskFilter = "all" | "ready" | "bills" | "calls" | "completed";
 
-const FILTER_LABELS: Record<TaskFilter, string> = {
-  all: "Visi",
-  ready: "Maistas",
-  bills: "Sąskaitos",
-  calls: "Kvietimai",
-  completed: "Atlikti",
-};
+function filterLabels(t: StaffDict): Record<TaskFilter, string> {
+  return {
+    all: t.waiterFilterAll,
+    ready: t.waiterFilterFood,
+    bills: t.waiterFilterBills,
+    calls: t.waiterFilterCalls,
+    completed: t.waiterFilterDone,
+  };
+}
 
 type ViewMode = "tasks" | "tables";
 
@@ -180,13 +189,6 @@ function groupTasksByOrder(tasks: WaiterTask[]): TaskGroup[] {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function minutesAgo(iso: string): string {
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 1) return "ką tik";
-  if (mins === 1) return "prieš 1 min.";
-  return `prieš ${mins} min.`;
-}
-
 function filterTasks(tasks: WaiterTask[], filter: TaskFilter): WaiterTask[] {
   switch (filter) {
     case "ready":     return tasks.filter((t) => t.type === "ready_to_serve" && t.status !== "completed");
@@ -207,6 +209,8 @@ export default function WaiterPage() {
   const [view, setView] = useState<ViewMode>("tasks");
   // Tracks which group (orderId) is expanded — one at a time
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [lang, setLang] = useStaffLang();
+  const t = staffT(lang);
 
   useEffect(() => {
     const refreshOrders = () => {
@@ -232,12 +236,13 @@ export default function WaiterPage() {
   const displayedGroups = groupTasksByOrder(displayedTasks);
   const activeTables = countActiveTables(orders);
 
-  const readyCount = activeTasks.filter((t) => t.type === "ready_to_serve").length;
-  const billCount  = activeTasks.filter((t) => t.type === "bill_requested").length;
-  const callCount  = activeTasks.filter((t) => t.type === "waiter_called").length;
+  const readyCount = activeTasks.filter((tk) => tk.type === "ready_to_serve").length;
+  const billCount  = activeTasks.filter((tk) => tk.type === "bill_requested").length;
+  const callCount  = activeTasks.filter((tk) => tk.type === "waiter_called").length;
   const { paidInApp } = getPaymentStats(true);
 
   const toggle = (key: string) => setExpandedKey((p) => (p === key ? null : key));
+  const FILTER_LABELS = filterLabels(t);
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white">
@@ -249,17 +254,20 @@ export default function WaiterPage() {
               <UtensilsCrossed size={17} className="text-amber-400" />
             </div>
             <div>
-              <h1 className="font-black text-base tracking-tight">Padavėjas</h1>
+              <h1 className="font-black text-base tracking-tight">{t.waiterTitle}</h1>
               <p className="text-[11px] text-white/40 leading-none">Dzūkų Ainiai</p>
             </div>
           </div>
-          <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
-            <ViewBtn active={view === "tasks"} onClick={() => setView("tasks")}>
-              <List size={13} />
-            </ViewBtn>
-            <ViewBtn active={view === "tables"} onClick={() => setView("tables")}>
-              <Table2 size={13} />
-            </ViewBtn>
+          <div className="flex items-center gap-2">
+            <StaffLangSwitch lang={lang} onChange={setLang} />
+            <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
+              <ViewBtn active={view === "tasks"} onClick={() => setView("tasks")}>
+                <List size={13} />
+              </ViewBtn>
+              <ViewBtn active={view === "tables"} onClick={() => setView("tables")}>
+                <Table2 size={13} />
+              </ViewBtn>
+            </div>
           </div>
         </div>
       </div>
@@ -268,26 +276,26 @@ export default function WaiterPage() {
 
         {/* Summary cards */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <SummaryCard label="Nešti maistą" value={readyCount} icon={<UtensilsCrossed size={15} />} accent="amber" urgent={readyCount > 0} />
-          <SummaryCard label="Aktyvūs stalai" value={activeTables} icon={<Table2 size={15} />} accent="blue" />
-          <SummaryCard label="Sąskaita" value={billCount} icon={<Receipt size={15} />} accent="emerald" urgent={billCount > 0} />
-          <SummaryCard label="Kvietimai" value={callCount} icon={<Bell size={15} />} accent="red" urgent={callCount > 0} />
-          <SummaryCard label="Apmokėta appse" value={paidInApp} icon={<CreditCard size={15} />} accent="violet" />
+          <SummaryCard label={t.waiterServeFood} value={readyCount} icon={<UtensilsCrossed size={15} />} accent="amber" urgent={readyCount > 0} />
+          <SummaryCard label={t.waiterActiveTables} value={activeTables} icon={<Table2 size={15} />} accent="blue" />
+          <SummaryCard label={t.waiterBill} value={billCount} icon={<Receipt size={15} />} accent="emerald" urgent={billCount > 0} />
+          <SummaryCard label={t.waiterCalls} value={callCount} icon={<Bell size={15} />} accent="red" urgent={callCount > 0} />
+          <SummaryCard label={t.waiterPaidInApp} value={paidInApp} icon={<CreditCard size={15} />} accent="violet" />
         </div>
 
         {/* Active sessions — payment status overview, shown regardless of tasks */}
-        <ActiveSessionsSection sessions={sessions} orders={orders} tasks={tasks} />
+        <ActiveSessionsSection sessions={sessions} orders={orders} tasks={tasks} lang={lang} t={t} />
 
         {/* Filter tabs */}
         <div className="flex gap-1 overflow-x-auto pb-0.5 scrollbar-none">
           {(Object.keys(FILTER_LABELS) as TaskFilter[]).map((f) => {
             const count =
-              f === "completed" ? tasks.filter((t) => t.status === "completed").length
+              f === "completed" ? tasks.filter((tk) => tk.status === "completed").length
               : f === "all" ? activeTasks.length
-              : activeTasks.filter((t) =>
-                  f === "ready" ? t.type === "ready_to_serve"
-                  : f === "bills" ? t.type === "bill_requested"
-                  : t.type === "waiter_called"
+              : activeTasks.filter((tk) =>
+                  f === "ready" ? tk.type === "ready_to_serve"
+                  : f === "bills" ? tk.type === "bill_requested"
+                  : tk.type === "waiter_called"
                 ).length;
             return (
               <FilterTab key={f} active={filter === f} onClick={() => setFilter(f)} count={count}>
@@ -299,11 +307,11 @@ export default function WaiterPage() {
 
         {/* Content */}
         {displayedGroups.length === 0 ? (
-          <EmptyState filter={filter} />
+          <EmptyState filter={filter} t={t} />
         ) : view === "tables" ? (
-          <TableView groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} />
+          <TableView groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} lang={lang} t={t} />
         ) : (
-          <GroupList groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} />
+          <GroupList groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} lang={lang} t={t} />
         )}
       </div>
     </div>
@@ -320,21 +328,23 @@ function sessionPaymentBadge(session: TableSession, orders: Order[]): PaymentBad
 }
 
 function ActiveSessionsSection({
-  sessions, orders, tasks,
+  sessions, orders, tasks, lang, t,
 }: {
   sessions: TableSession[];
   orders: Order[];
   tasks: WaiterTask[];
+  lang: StaffLang;
+  t: StaffDict;
 }) {
   const active = sessions.filter((s) => s.status === "ACTIVE" || s.status === "BILL_REQUESTED");
   if (active.length === 0) return null;
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">Aktyvūs stalai</p>
+      <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">{t.waiterActiveSessions}</p>
       <div className="flex flex-col gap-2">
         {active.map((session) => (
-          <ActiveSessionCard key={session.id} session={session} orders={orders} tasks={tasks} />
+          <ActiveSessionCard key={session.id} session={session} orders={orders} tasks={tasks} lang={lang} t={t} />
         ))}
       </div>
     </div>
@@ -342,11 +352,13 @@ function ActiveSessionsSection({
 }
 
 function ActiveSessionCard({
-  session, orders, tasks,
+  session, orders, tasks, lang, t,
 }: {
   session: TableSession;
   orders: Order[];
   tasks: WaiterTask[];
+  lang: StaffLang;
+  t: StaffDict;
 }) {
   const sessionOrders = session.orderIds
     .map((id) => orders.find((o) => o.id === id))
@@ -357,7 +369,7 @@ function ActiveSessionCard({
   const unpaidAmount = total - paidAmount;
 
   const activeTaskCount = tasks.filter(
-    (t) => session.orderIds.includes(t.orderId) && t.status !== "completed"
+    (tk) => session.orderIds.includes(tk.orderId) && tk.status !== "completed"
   ).length;
 
   const badge = sessionPaymentBadge(session, orders);
@@ -376,23 +388,23 @@ function ActiveSessionCard({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           {session.tableNumber && (
-            <span className="font-bold text-sm text-white/80">Stalas {session.tableNumber}</span>
+            <span className="font-bold text-sm text-white/80">{t.table} {session.tableNumber}</span>
           )}
           <span className="text-xs text-white/35">#{session.id}</span>
           {/* Payment badge */}
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border
             ${badge ? PAYMENT_BADGE_CLS[badge] : "text-white/30 bg-white/5 border-white/10"}`}>
-            {badge ? PAYMENT_BADGE_LABEL[badge] : ""}
+            {badge ? PAYMENT_BADGE_LABEL_I18N[lang][badge] : ""}
           </span>
         </div>
 
         <div className="flex items-center gap-3 mt-1 text-xs text-white/40 flex-wrap">
-          <span>{sessionOrders.length} užsakym{sessionOrders.length === 1 ? "as" : "ai"}</span>
+          <span>{ordersCount(sessionOrders.length, lang)}</span>
           {paidAmount > 0 && unpaidAmount > 0 && (
-            <span className="text-emerald-400/70">apmokėta {paidAmount.toFixed(2)} €</span>
+            <span className="text-emerald-400/70">{t.waiterPaidAmount} {paidAmount.toFixed(2)} €</span>
           )}
           {activeTaskCount > 0 && (
-            <span className="text-amber-400/80">{activeTaskCount} aktyvios užduotys</span>
+            <span className="text-amber-400/80">{activeTaskCount} {t.waiterActiveTasksSuffix}</span>
           )}
         </div>
       </div>
@@ -402,7 +414,7 @@ function ActiveSessionCard({
         {unpaidAmount > 0 && unpaidAmount < total ? (
           <>
             <p className="font-black text-base text-white/80">{unpaidAmount.toFixed(2)} €</p>
-            <p className="text-[10px] text-white/30">liko iš {total.toFixed(2)} €</p>
+            <p className="text-[10px] text-white/30">{t.waiterLeftOf} {total.toFixed(2)} €</p>
           </>
         ) : (
           <p className="font-black text-base text-white/80">{total.toFixed(2)} €</p>
@@ -415,13 +427,15 @@ function ActiveSessionCard({
 // ── Group list ────────────────────────────────────────────────────────────────
 
 function GroupList({
-  groups, orders, sessions, expandedKey, onToggle,
+  groups, orders, sessions, expandedKey, onToggle, lang, t,
 }: {
   groups: TaskGroup[];
   orders: Order[];
   sessions: TableSession[];
   expandedKey: string | null;
   onToggle: (key: string) => void;
+  lang: StaffLang;
+  t: StaffDict;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -433,6 +447,8 @@ function GroupList({
           sessions={sessions}
           expanded={expandedKey === group.key}
           onToggle={() => onToggle(group.key)}
+          lang={lang}
+          t={t}
         />
       ))}
     </div>
@@ -442,13 +458,15 @@ function GroupList({
 // ── Table view ────────────────────────────────────────────────────────────────
 
 function TableView({
-  groups, orders, sessions, expandedKey, onToggle,
+  groups, orders, sessions, expandedKey, onToggle, lang, t,
 }: {
   groups: TaskGroup[];
   orders: Order[];
   sessions: TableSession[];
   expandedKey: string | null;
   onToggle: (key: string) => void;
+  lang: StaffLang;
+  t: StaffDict;
 }) {
   // Re-group by table, preserving the already-grouped structure
   const byTable = new Map<string, TaskGroup[]>();
@@ -468,9 +486,9 @@ function TableView({
             <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/8 bg-white/2">
               <Table2 size={13} className="text-white/40" />
               <span className="text-xs font-bold uppercase tracking-widest text-white/50">
-                {table === "—" ? "Stalas nenurodytas" : `Stalas ${table}`}
+                {table === "—" ? t.tableUnset : `${t.table} ${table}`}
               </span>
-              <span className="ml-auto text-[11px] text-white/30">{activeCount} aktyvūs</span>
+              <span className="ml-auto text-[11px] text-white/30">{activeCount} {t.waiterActiveShort}</span>
             </div>
             <div className="flex flex-col gap-3 p-3">
               {tableGroups.map((group) => (
@@ -481,6 +499,8 @@ function TableView({
                   sessions={sessions}
                   expanded={expandedKey === group.key}
                   onToggle={() => onToggle(group.key)}
+                  lang={lang}
+                  t={t}
                 />
               ))}
             </div>
@@ -494,20 +514,22 @@ function TableView({
 // ── Group card ────────────────────────────────────────────────────────────────
 
 function GroupCard({
-  group, orders, sessions, expanded, onToggle,
+  group, orders, sessions, expanded, onToggle, lang, t,
 }: {
   group: TaskGroup;
   orders: Order[];
   sessions: TableSession[];
   expanded: boolean;
   onToggle: () => void;
+  lang: StaffLang;
+  t: StaffDict;
 }) {
   const isAllCompleted = group.activeTasks.length === 0;
   const order = orders.find((o) => o.id === group.orderId);
   const paymentBadge = derivePaymentBadge(group.orderId, orders, sessions);
 
   // Unique task-type labels for the summary line
-  const typeLabels = Array.from(new Set(group.tasks.map((t) => TASK_LABEL[t.type]))).join(" · ");
+  const typeLabels = Array.from(new Set(group.tasks.map((tk) => TASK_TYPE_LABEL[lang][tk.type]))).join(" · ");
 
   return (
     <div className={`border border-white/8 rounded-3xl overflow-hidden border-l-[5px] ${group.primaryAccent} bg-white/3 transition-opacity ${isAllCompleted ? "opacity-40" : ""}`}>
@@ -518,7 +540,7 @@ function GroupCard({
           {/* Primary icon */}
           <div className={`mt-0.5 w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border
             ${group.hasHighPriority ? PRIORITY_COLOR["high"] : PRIORITY_COLOR["normal"]}`}>
-            {TASK_ICON[group.tasks.find((t) => t.status !== "completed")?.type ?? group.tasks[0]?.type ?? "ready_to_serve"]}
+            {TASK_ICON[group.tasks.find((tk) => tk.status !== "completed")?.type ?? group.tasks[0]?.type ?? "ready_to_serve"]}
           </div>
 
           {/* Info */}
@@ -529,12 +551,12 @@ function GroupCard({
               </span>
               {group.tableNumber && (
                 <span className="text-sm font-bold text-white/60 bg-white/10 px-2.5 py-0.5 rounded-full">
-                  Stalas {group.tableNumber}
+                  {t.table} {group.tableNumber}
                 </span>
               )}
               {paymentBadge && (
                 <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${PAYMENT_BADGE_CLS[paymentBadge]}`}>
-                  {PAYMENT_BADGE_LABEL[paymentBadge]}
+                  {PAYMENT_BADGE_LABEL_I18N[lang][paymentBadge]}
                 </span>
               )}
               <span className="ml-auto text-white/30 shrink-0">
@@ -545,22 +567,22 @@ function GroupCard({
             <p className="text-sm text-white/50 mt-0.5 truncate">{typeLabels}</p>
 
             <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[13px]">
-              <span className="text-white/35">{group.tasks.length} užduot{group.tasks.length === 1 ? "is" : "ys"}</span>
+              <span className="text-white/35">{tasksCount(group.tasks.length, lang)}</span>
               {group.completedCount > 0 && (
                 <>
                   <span className="text-white/20">·</span>
-                  <span className="text-emerald-400">{group.completedCount} atlikta</span>
+                  <span className="text-emerald-400">{group.completedCount} {t.waiterDone}</span>
                 </>
               )}
               {group.activeTasks.length > 0 && (
                 <>
                   <span className="text-white/20">·</span>
-                  <span className="text-amber-400">{group.activeTasks.length} aktyv{group.activeTasks.length === 1 ? "i" : "ios"}</span>
+                  <span className="text-amber-400">{activeTasksCount(group.activeTasks.length, lang)}</span>
                 </>
               )}
               <span className="text-white/20">·</span>
               <Clock size={11} className="text-white/30 shrink-0" />
-              <span className="text-white/35">{minutesAgo(group.earliestAt)}</span>
+              <span className="text-white/35">{minutesAgoLabel(group.earliestAt, lang)}</span>
             </div>
           </div>
         </div>
@@ -573,19 +595,19 @@ function GroupCard({
           {order && (
             <div className="px-5 py-3 border-b border-white/5 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
               <div>
-                <span className="text-white/25 text-xs uppercase tracking-wide">Patiekimas · </span>
+                <span className="text-white/25 text-xs uppercase tracking-wide">{t.waiterServing} · </span>
                 <span className="text-white/60 font-semibold">
-                  {SERVING_LABELS[order.servingPreference ?? "together"].short}
+                  {SERVING_SHORT[lang][order.servingPreference ?? "together"]}
                 </span>
               </div>
               {order.notes && (
                 <div>
-                  <span className="text-white/25 text-xs uppercase tracking-wide">Pastabos · </span>
+                  <span className="text-white/25 text-xs uppercase tracking-wide">{t.waiterNotes} · </span>
                   <span className="text-white/60">{order.notes}</span>
                 </div>
               )}
               <div>
-                <span className="text-white/25 text-xs uppercase tracking-wide">Suma · </span>
+                <span className="text-white/25 text-xs uppercase tracking-wide">{t.total} · </span>
                 <span className="text-white/70 font-bold">{order.total.toFixed(2)} €</span>
               </div>
             </div>
@@ -598,6 +620,8 @@ function GroupCard({
               task={task}
               order={order}
               isLast={i === group.tasks.length - 1}
+              lang={lang}
+              t={t}
             />
           ))}
         </div>
@@ -609,11 +633,13 @@ function GroupCard({
 // ── Task row (inside expanded group) ─────────────────────────────────────────
 
 function TaskRow({
-  task, order, isLast,
+  task, order, isLast, lang, t,
 }: {
   task: WaiterTask;
   order: Order | undefined;
   isLast: boolean;
+  lang: StaffLang;
+  t: StaffDict;
 }) {
   const isCompleted = task.status === "completed";
 
@@ -644,10 +670,10 @@ function TaskRow({
 
   const actionLabel =
     task.type === "bill_requested" && task.status === "accepted"
-      ? "Pažymėti kaip apmokėta"
+      ? t.waiterMarkPaid
       : task.status === "waiting"
-        ? "Priimti užduotį"
-        : TASK_ACTION_LABEL[task.type];
+        ? t.waiterAcceptTask
+        : TASK_ACTION_LABEL_I18N[lang][task.type];
 
   return (
     <div className={`px-5 py-4 ${!isLast ? "border-b border-white/5" : ""} ${isCompleted ? "opacity-45" : ""}`}>
@@ -658,19 +684,19 @@ function TaskRow({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-base text-white/85">{TASK_LABEL[task.type]}</span>
+            <span className="font-bold text-base text-white/85">{TASK_TYPE_LABEL[lang][task.type]}</span>
             {task.items.length === 1 && (
               <span className="text-sm text-white/45 truncate">— {task.items[0].name}</span>
             )}
             {task.items.length > 1 && (
-              <span className="text-sm text-white/45">— {task.items.length} patiekalai</span>
+              <span className="text-sm text-white/45">— {dishesCount(task.items.length, lang)}</span>
             )}
           </div>
         </div>
         {/* Status indicator */}
         <div className="flex items-center gap-1.5 shrink-0">
           <span className={`w-2 h-2 rounded-full ${STATUS_DOT[task.status]}`} />
-          <span className="text-xs text-white/40">{TASK_STATUS_LABEL[task.status]}</span>
+          <span className="text-xs text-white/40">{TASK_STATUS_LABEL_I18N[lang][task.status]}</span>
         </div>
       </div>
 
@@ -682,7 +708,7 @@ function TaskRow({
             return (
               <div key={item.productId} className="flex items-center justify-between gap-3">
                 <span className="text-sm text-white/55">{item.name} ×{item.quantity}</span>
-                {liveStatus && <ItemStatusBadge status={liveStatus} />}
+                {liveStatus && <ItemStatusBadge status={liveStatus} lang={lang} />}
               </div>
             );
           })}
@@ -709,7 +735,7 @@ function TaskRow({
 
 // ── Item status badge ─────────────────────────────────────────────────────────
 
-function ItemStatusBadge({ status }: { status: string }) {
+function ItemStatusBadge({ status, lang }: { status: string; lang: StaffLang }) {
   const map: Record<string, string> = {
     NEW: "text-amber-400/70 bg-amber-400/10",
     PREPARING: "text-blue-400/70 bg-blue-400/10",
@@ -718,26 +744,23 @@ function ItemStatusBadge({ status }: { status: string }) {
     COMPLETED: "text-emerald-400/70 bg-emerald-400/10",
     CANCELLED: "text-red-400/70 bg-red-400/10",
   };
-  const label: Record<string, string> = {
-    NEW: "Naujas", PREPARING: "Gaminamas", READY: "Paruoštas",
-    DELIVERING: "Neša padavėjas", COMPLETED: "Atlikta", CANCELLED: "Atšaukta",
-  };
+  const labels = ORDER_STATUS_LABEL[lang] as Record<string, string>;
   return (
     <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0 ${map[status] ?? "text-white/30 bg-white/5"}`}>
-      {label[status] ?? status}
+      {labels[status] ?? status}
     </span>
   );
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────────
 
-function EmptyState({ filter }: { filter: TaskFilter }) {
+function EmptyState({ filter, t }: { filter: TaskFilter; t: StaffDict }) {
   const msgs: Record<TaskFilter, string> = {
-    all: "Nėra aktyvių užduočių.",
-    ready: "Nėra maisto, kurį reikia nešti.",
-    bills: "Niekas neprašė sąskaitos.",
-    calls: "Niekas neskambino.",
-    completed: "Dar nėra atliktų užduočių.",
+    all: t.waiterEmptyAll,
+    ready: t.waiterEmptyReady,
+    bills: t.waiterEmptyBills,
+    calls: t.waiterEmptyCalls,
+    completed: t.waiterEmptyDone,
   };
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -745,7 +768,7 @@ function EmptyState({ filter }: { filter: TaskFilter }) {
         <CheckCircle2 size={24} className="text-white/20" />
       </div>
       <p className="font-bold text-white/50">{msgs[filter]}</p>
-      <p className="text-sm text-white/25 mt-1">Užduotys atsiras automatiškai.</p>
+      <p className="text-sm text-white/25 mt-1">{t.waiterEmptyHint}</p>
     </div>
   );
 }

@@ -10,8 +10,17 @@ import {
   updateItemStatus,
   subscribeOrders,
   purgeOldHistory,
-  SERVING_LABELS,
 } from "@/lib/orders";
+import {
+  type StaffLang,
+  type StaffDict,
+  useStaffLang,
+  staffT,
+  ORDER_STATUS_LABEL,
+  SERVING_SHORT,
+  minutesAgoLabel,
+} from "@/lib/staff-i18n";
+import StaffLangSwitch from "@/components/StaffLangSwitch";
 import {
   Clock, ChefHat, Bell, CheckCircle2, XCircle,
   UtensilsCrossed, Sun, Moon, Utensils, Zap, ChevronDown, ChevronUp,
@@ -52,16 +61,7 @@ function applyTheme(theme: KitchenTheme): void {
   else document.documentElement.classList.remove("dark");
 }
 
-// ── Status maps ───────────────────────────────────────────────────────────────
-
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  NEW: "Naujas",
-  PREPARING: "Gaminamas",
-  READY: "Paruoštas",
-  DELIVERING: "Neša padavėjas",
-  COMPLETED: "Įvykdytas",
-  CANCELLED: "Atšauktas",
-};
+// ── Status style maps (colors only — labels come from staff-i18n) ─────────────
 
 const STATUS_BADGE_LIGHT: Record<OrderStatus, string> = {
   NEW: "bg-amber-100 text-amber-700 border border-amber-300",
@@ -125,13 +125,6 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("lt-LT", { hour: "2-digit", minute: "2-digit" });
 }
 
-function minutesAgo(iso: string): string {
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 1) return "ką tik";
-  if (mins === 1) return "prieš 1 min.";
-  return `prieš ${mins} min.`;
-}
-
 type Tab = "active" | "history";
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -141,6 +134,8 @@ export default function KitchenPage() {
   const [tab, setTab] = useState<Tab>("active");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [theme, toggleTheme] = useKitchenTheme();
+  const [lang, setLang] = useStaffLang();
+  const t = staffT(lang);
 
   useEffect(() => {
     purgeOldHistory(); // clean on mount
@@ -175,7 +170,7 @@ export default function KitchenPage() {
         <div className="flex items-center justify-between max-w-6xl mx-auto gap-3">
           <div className="flex items-center gap-2 min-w-0">
             <UtensilsCrossed size={20} className="text-primary shrink-0" />
-            <h1 className="font-black text-lg tracking-tight">Virtuvė</h1>
+            <h1 className="font-black text-lg tracking-tight">{t.kitchenTitle}</h1>
             {activeOrders.length > 0 && (
               <span className="px-2 py-0.5 rounded-full bg-primary/20 text-primary text-xs font-bold">
                 {activeOrders.length}
@@ -186,10 +181,10 @@ export default function KitchenPage() {
           <div className="flex items-center gap-2 shrink-0">
             <div className={`flex gap-1 rounded-xl p-1 ${wrapBg}`}>
               <button onClick={() => setTab("active")} className={`${tabBase} ${tab === "active" ? tabOn : tabOff}`}>
-                Aktyvūs
+                {t.kitchenTabActive}
               </button>
               <button onClick={() => setTab("history")} className={`${tabBase} ${tab === "history" ? tabOn : tabOff}`}>
-                Istorija
+                {t.kitchenTabHistory}
                 {historyOrders.length > 0 && (
                   <span className="ml-1.5 px-1.5 py-0 rounded-full bg-muted-foreground/20 text-muted-foreground text-[10px] font-bold">
                     {historyOrders.length}
@@ -198,9 +193,11 @@ export default function KitchenPage() {
               </button>
             </div>
 
+            <StaffLangSwitch lang={lang} onChange={setLang} variant="panel" />
+
             <button
               onClick={toggleTheme}
-              aria-label={theme === "dark" ? "Šviesi tema" : "Tamsi tema"}
+              aria-label={theme === "dark" ? t.themeLight : t.themeDark}
               className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors
                 ${theme === "dark" ? "bg-secondary text-muted-foreground hover:text-foreground" : "bg-gray-100 text-gray-500 hover:text-gray-800"}`}
             >
@@ -214,17 +211,17 @@ export default function KitchenPage() {
       <div className="p-4 max-w-6xl mx-auto">
         {tab === "active" ? (
           activeOrders.length === 0 ? (
-            <EmptyState theme={theme} message="Nėra aktyvių užsakymų" />
+            <EmptyState message={t.kitchenEmptyActive} hint={t.kitchenEmptyHint} />
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {activeOrders.map((order) => (
-                <OrderCard key={order.id} order={order} theme={theme} />
+                <OrderCard key={order.id} order={order} theme={theme} lang={lang} t={t} />
               ))}
             </div>
           )
         ) : (
           historyOrders.length === 0 ? (
-            <EmptyState theme={theme} message="Istorija tuščia" />
+            <EmptyState message={t.kitchenEmptyHistory} hint={t.kitchenEmptyHint} />
           ) : (
             <div className="flex flex-col gap-2 max-w-lg">
               {historyOrders.map((order) => (
@@ -232,6 +229,8 @@ export default function KitchenPage() {
                   key={order.id}
                   order={order}
                   theme={theme}
+                  lang={lang}
+                  t={t}
                   expanded={expandedId === order.id}
                   onToggle={() => toggleExpand(order.id)}
                 />
@@ -246,32 +245,32 @@ export default function KitchenPage() {
 
 // ── Empty state ───────────────────────────────────────────────────────────────
 
-function EmptyState({ theme, message }: { theme: KitchenTheme; message: string }) {
+function EmptyState({ message, hint }: { message: string; hint: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
       <ChefHat size={48} className="text-muted-foreground mb-4" />
       <p className="font-bold text-lg mb-1">{message}</p>
-      <p className="text-muted-foreground text-sm">Nauji užsakymai pasirodys automatiškai.</p>
+      <p className="text-muted-foreground text-sm">{hint}</p>
     </div>
   );
 }
 
 // ── Active order card ─────────────────────────────────────────────────────────
 
-function OrderCard({ order, theme }: { order: Order; theme: KitchenTheme }) {
+function OrderCard({ order, theme, lang, t }: { order: Order; theme: KitchenTheme; lang: StaffLang; t: StaffDict }) {
   const cardBorder = theme === "dark" ? CARD_BORDER_DARK[order.status] : CARD_BORDER_LIGHT[order.status];
 
   return (
     <div className={`border-2 rounded-2xl p-4 flex flex-col gap-3 transition-all ${cardBorder}`}>
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Užsakymas</p>
+          <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">{t.kitchenOrder}</p>
           <p className="font-black text-2xl tracking-tight leading-none mt-0.5">#{order.id}</p>
         </div>
         <div className="text-right shrink-0">
           {order.tableNumber && (
             <>
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Stalas</p>
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">{t.table}</p>
               <p className="font-black text-2xl leading-none mt-0.5">{order.tableNumber}</p>
             </>
           )}
@@ -280,23 +279,23 @@ function OrderCard({ order, theme }: { order: Order; theme: KitchenTheme }) {
 
       <div className="flex items-center justify-between gap-2 -mt-1">
         <p className="text-xs text-muted-foreground">
-          {formatTime(order.createdAt)} · {minutesAgo(order.createdAt)}
+          {formatTime(order.createdAt)} · {minutesAgoLabel(order.createdAt, lang)}
         </p>
-        <ServingBadge preference={order.servingPreference ?? "together"} theme={theme} />
+        <ServingBadge preference={order.servingPreference ?? "together"} theme={theme} lang={lang} />
       </div>
 
       <Separator className="opacity-30" />
 
       <div className="flex flex-col gap-2.5">
         {order.items.map((item) => (
-          <ItemRow key={item.productId} orderId={order.id} item={item} theme={theme} />
+          <ItemRow key={item.productId} orderId={order.id} item={item} theme={theme} lang={lang} t={t} />
         ))}
       </div>
 
       <Separator className="opacity-30" />
 
       <div className="flex justify-between text-sm font-bold">
-        <span className="text-muted-foreground">Suma</span>
+        <span className="text-muted-foreground">{t.total}</span>
         <span className="text-primary">{order.total.toFixed(2)} €</span>
       </div>
     </div>
@@ -308,11 +307,15 @@ function OrderCard({ order, theme }: { order: Order; theme: KitchenTheme }) {
 function HistoryRow({
   order,
   theme,
+  lang,
+  t,
   expanded,
   onToggle,
 }: {
   order: Order;
   theme: KitchenTheme;
+  lang: StaffLang;
+  t: StaffDict;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -320,6 +323,7 @@ function HistoryRow({
   const badge = theme === "dark" ? STATUS_BADGE_DARK[order.status] : STATUS_BADGE_LIGHT[order.status];
   const rowBg = theme === "dark" ? "bg-card/60 border-border/30" : "bg-white border-gray-200";
   const expandedBorder = theme === "dark" ? CARD_BORDER_DARK[order.status] : CARD_BORDER_LIGHT[order.status];
+  const statusLabel = ORDER_STATUS_LABEL[lang];
 
   if (expanded) {
     return (
@@ -333,7 +337,7 @@ function HistoryRow({
             <span className="font-black text-lg">#{order.id}</span>
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${badge}`}>
               {STATUS_ICON_SM[order.status]}
-              {STATUS_LABEL[order.status]}
+              {statusLabel[order.status]}
             </span>
           </div>
           <ChevronUp size={16} className="text-muted-foreground" />
@@ -343,9 +347,9 @@ function HistoryRow({
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
               {formatTime(order.createdAt)}
-              {order.tableNumber && ` · Stalas ${order.tableNumber}`}
+              {order.tableNumber && ` · ${t.table} ${order.tableNumber}`}
             </p>
-            <ServingBadge preference={order.servingPreference ?? "together"} theme={theme} />
+            <ServingBadge preference={order.servingPreference ?? "together"} theme={theme} lang={lang} />
           </div>
           <Separator className="opacity-30" />
           <div className="space-y-1.5">
@@ -357,7 +361,7 @@ function HistoryRow({
                   <span className="truncate text-muted-foreground">{item.name} ×{item.quantity}</span>
                   <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${ib}`}>
                     {STATUS_ICON_SM[st]}
-                    {STATUS_LABEL[st]}
+                    {statusLabel[st]}
                   </span>
                 </div>
               );
@@ -365,7 +369,7 @@ function HistoryRow({
           </div>
           <Separator className="opacity-30" />
           <div className="flex justify-between text-sm font-bold">
-            <span className="text-muted-foreground">Suma</span>
+            <span className="text-muted-foreground">{t.total}</span>
             <span className="text-primary">{order.total.toFixed(2)} €</span>
           </div>
         </div>
@@ -394,7 +398,7 @@ function HistoryRow({
 
 // ── Serving preference badge ──────────────────────────────────────────────────
 
-function ServingBadge({ preference, theme }: { preference: ServingPreference; theme: KitchenTheme }) {
+function ServingBadge({ preference, theme, lang }: { preference: ServingPreference; theme: KitchenTheme; lang: StaffLang }) {
   const isTogether = preference === "together";
   const light = isTogether
     ? "bg-purple-100 text-purple-700 border border-purple-200"
@@ -405,14 +409,14 @@ function ServingBadge({ preference, theme }: { preference: ServingPreference; th
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${theme === "dark" ? dark : light}`}>
       {isTogether ? <Utensils size={10} /> : <Zap size={10} />}
-      {SERVING_LABELS[preference].short}
+      {SERVING_SHORT[lang][preference]}
     </span>
   );
 }
 
 // ── Item row ──────────────────────────────────────────────────────────────────
 
-function ItemRow({ orderId, item, theme }: { orderId: string; item: OrderItem; theme: KitchenTheme }) {
+function ItemRow({ orderId, item, theme, lang, t }: { orderId: string; item: OrderItem; theme: KitchenTheme; lang: StaffLang; t: StaffDict }) {
   const status = item.itemStatus ?? "NEW";
   const badge = theme === "dark" ? STATUS_BADGE_DARK[status] : STATUS_BADGE_LIGHT[status];
   // Kitchen's job ends at READY. DELIVERING and beyond are waiter territory.
@@ -427,8 +431,8 @@ function ItemRow({ orderId, item, theme }: { orderId: string; item: OrderItem; t
   const cancel = () => updateItemStatus(orderId, item.productId, "CANCELLED");
 
   const actionLabel: Partial<Record<OrderStatus, string>> = {
-    NEW: "Pradėti",
-    PREPARING: "Paruošta",
+    NEW: t.kitchenStart,
+    PREPARING: t.kitchenReady,
   };
 
   const actionColor: Record<string, string> = {
@@ -447,7 +451,7 @@ function ItemRow({ orderId, item, theme }: { orderId: string; item: OrderItem; t
         </div>
         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${badge}`}>
           {STATUS_ICON_SM[status]}
-          {STATUS_LABEL[status]}
+          {ORDER_STATUS_LABEL[lang][status]}
         </span>
       </div>
       {!isDone && (

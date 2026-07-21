@@ -15,6 +15,15 @@
 const STORAGE_KEY = "dzukai-table-sessions";
 const SYNC_EVENT = "dzukai:session";
 
+// Order storage is read directly (never imported) to keep the two storage
+// modules decoupled — mirrors getProtectedOrderIds() in orders.ts.
+const ORDERS_STORAGE_KEY = "dzukai-orders";
+const FINISHED_ORDER_STATUSES = new Set(["COMPLETED", "CANCELLED"]);
+// An order is "active" for the customer until the waiter has delivered it.
+// This — NOT payment status and NOT cart contents — is the source of truth for
+// whether the customer still has something to track.
+const ACTIVE_ORDER_STATUSES = new Set(["NEW", "PREPARING", "READY", "DELIVERING"]);
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type SessionStatus = "ACTIVE" | "BILL_REQUESTED" | "PAID" | "CLOSED";
@@ -70,6 +79,77 @@ function writeAll(sessions: TableSession[]): void {
 /** Return the one open (ACTIVE or BILL_REQUESTED) session, if any. */
 export function getActiveSession(): TableSession | null {
   return readAll().find((s) => OPEN_STATUSES.includes(s.status)) ?? null;
+}
+
+/**
+ * Read orders (id, status, createdAt) without importing orders.ts (avoids a
+ * circular import — same pattern orders.ts uses to read sessions).
+ */
+function readOrders(): { id: string; status: string; createdAt: string }[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(ORDERS_STORAGE_KEY) ?? "[]") as {
+      id: string;
+      status: string;
+      createdAt: string;
+    }[];
+  } catch {
+    return [];
+  }
+}
+
+function readOrderStatuses(): Map<string, string> {
+  return new Map(readOrders().map((o) => [o.id, o.status]));
+}
+
+/**
+ * True when every order in the session has been delivered (COMPLETED) or
+ * CANCELLED. A missing order id (already purged from history) counts as
+ * finished so a session can never get stuck open on an id that no longer exists.
+ */
+export function allSessionOrdersFinished(session: TableSession): boolean {
+  if (session.orderIds.length === 0) return false;
+  const statuses = readOrderStatuses();
+  return session.orderIds.every((id) => {
+    const st = statuses.get(id);
+    return st === undefined || FINISHED_ORDER_STATUSES.has(st);
+  });
+}
+
+/**
+ * The session the customer can still see and track on /order and /cart.
+ *
+ * SOURCE OF TRUTH = ORDER DELIVERY STATUS, not payment status and not the cart.
+ * A session is trackable for as long as it owns at least one order that has not
+ * yet been delivered (COMPLETED) or CANCELLED. Payment (PAID/CLOSED) and an
+ * empty cart are deliberately irrelevant here — that separation is the whole
+ * point: paying or clearing the basket must never hide undelivered food.
+ *
+ * Resolution order:
+ *   1. the open session (ACTIVE / BILL_REQUESTED) — the one accepting new orders
+ *   2. otherwise the session that owns the most recent still-active order,
+ *      whatever that session's lifecycle status is (PAID, CLOSED, …)
+ *   3. nothing active anywhere → null (only now does tracking disappear)
+ */
+export function getTrackableSession(): TableSession | null {
+  const all = readAll();
+
+  // 1. An open session (still accepting orders) always wins.
+  const open = all.find((s) => OPEN_STATUSES.includes(s.status));
+  if (open) return open;
+
+  // 2. Follow the ORDERS: any order still in flight keeps its session trackable,
+  //    regardless of whether the bill was paid or the session was closed.
+  const activeOrders = readOrders()
+    .filter((o) => ACTIVE_ORDER_STATUSES.has(o.status))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  for (const o of activeOrders) {
+    const owner = all.find((s) => s.orderIds.includes(o.id));
+    if (owner) return owner;
+  }
+
+  // 3. No active orders → nothing left to track.
+  return null;
 }
 
 export function listSessions(): TableSession[] {
@@ -145,6 +225,10 @@ export function closeSession(): void {
 /**
  * Mark the active session as PAID and record how payment was made.
  * Replaces closeSession() for payment flows so analytics can split by method.
+ *
+ * Note: PAID marks the bill settled, NOT the visit over. The customer keeps
+ * tracking the session via getTrackableSession() until all its orders are
+ * delivered/cancelled — payment and food progress are separate concerns.
  */
 export function markSessionPaid(method: PaymentMethod): TableSession | null {
   const sessions = readAll();

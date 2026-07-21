@@ -199,6 +199,232 @@ describe("table session invariants", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// GROUP 4b — payment must NOT end order tracking (THE bug this fixes)
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Mirror of store.clearCartStorage() — the real one lives in a "use client"
+ * module that can't be imported here, but it's a plain localStorage write.
+ */
+function clearCartStorage() {
+  const raw = JSON.parse(mem.get("dzukai-cart") ?? "{}");
+  raw.state = { ...(raw.state ?? {}), items: [] };
+  mem.set("dzukai-cart", JSON.stringify(raw));
+}
+
+/** Replicates the customer in-app payment flow from order/page.tsx. */
+function payFullSession(session: { orderIds: string[] }) {
+  session.orderIds.forEach((oid) => orders.markOrderPaid(oid));
+  if (orders.allOrdersPaid(session.orderIds)) {
+    sessions.markSessionPaid("APP");
+    clearCartStorage();
+  }
+}
+
+describe("payment keeps the order trackable", () => {
+  it("full lifecycle: pay → cart empty → still tracked → closes only on completion", () => {
+    reset();
+
+    // 1. create order
+    const o = makeOrder(18);
+    const session = sessions.addOrderToSession(o.id, "7");
+
+    // 2. pay order (before any food is delivered)
+    payFullSession(session);
+
+    // 3. cart becomes empty
+    // (seed a non-empty cart first so we prove clearing actually empties it)
+    mem.set("dzukai-cart", JSON.stringify({ state: { items: [{ x: 1 }] }, version: 0 }));
+    clearCartStorage();
+    const cart = JSON.parse(mem.get("dzukai-cart")!);
+    expect(cart.state.items).toHaveLength(0);
+
+    // 4. active order still visible despite being paid
+    const tracked = sessions.getTrackableSession();
+    expect(tracked?.id).toBe(session.id);
+    expect(tracked?.paymentStatus).toBe("PAID");
+    expect(orders.getOrder(o.id)?.isPaid).toBeTruthy();
+    // Receipt needs a payment timestamp so the paid total can show "Apmokėta · HH:MM".
+    expect(typeof orders.getOrder(o.id)?.paidAt).toBe("string");
+
+    // 5. tracking still updates through READY / DELIVERING / COMPLETED
+    orders.updateOrderStatus(o.id, "READY");
+    expect(orders.getOrder(o.id)?.status).toBe("READY");
+    expect(sessions.getTrackableSession()?.id).toBe(session.id); // still tracked
+
+    orders.updateOrderStatus(o.id, "DELIVERING");
+    expect(orders.getOrder(o.id)?.status).toBe("DELIVERING");
+    expect(sessions.getTrackableSession()?.id).toBe(session.id); // still tracked
+
+    // 6. session leaves tracking ONLY after final completion
+    orders.updateOrderStatus(o.id, "COMPLETED");
+    expect(orders.getOrder(o.id)?.status).toBe("COMPLETED");
+    expect(sessions.getTrackableSession()).toBeFalsy(); // now, and only now, gone
+  });
+
+  it("paid order is not removed from tracking while a sibling is still cooking", () => {
+    reset();
+    const o1 = makeOrder(10);
+    const o2 = makeOrder(12);
+    const session = sessions.addOrderToSession(o1.id, "7");
+    sessions.addOrderToSession(o2.id, "7");
+
+    // Pay the whole session up front.
+    payFullSession(session);
+    expect(sessions.getTrackableSession()?.orderIds).toHaveLength(2);
+
+    // First order delivered, second still on its way → still trackable.
+    orders.updateOrderStatus(o1.id, "COMPLETED");
+    expect(sessions.getTrackableSession()?.id).toBe(session.id);
+
+    // Both delivered → tracking ends.
+    orders.updateOrderStatus(o2.id, "COMPLETED");
+    expect(sessions.getTrackableSession()).toBeFalsy();
+  });
+
+  it("purge keeps a paid session's completed order while a sibling is undelivered", () => {
+    reset();
+    const o1 = makeOrder(10); // will be completed + aged
+    const o2 = makeOrder(12); // stays in the kitchen
+    const session = sessions.addOrderToSession(o1.id, "7");
+    sessions.addOrderToSession(o2.id, "7");
+    payFullSession(session);
+
+    orders.updateOrderStatus(o1.id, "COMPLETED");
+    orders.updateOrderStatus(o2.id, "PREPARING");
+    ageOrder(o1.id, 40);
+
+    // o1 is old + completed but its session is still tracking o2 → must survive.
+    expect(orders.purgeOldHistory()).toBe(0);
+    expect(orders.getOrder(o1.id)?.id).toBe(o1.id);
+  });
+
+  it("getActiveSession still excludes a paid session (new orders start fresh)", () => {
+    reset();
+    const o = makeOrder(10);
+    const s1 = sessions.addOrderToSession(o.id, "7");
+    payFullSession(s1);
+    // Paid → no longer 'open' for new orders, though still trackable.
+    expect(sessions.getActiveSession()).toBeFalsy();
+    expect(sessions.getTrackableSession()?.id).toBe(s1.id);
+    // Ordering again opens a brand-new session.
+    const o2 = makeOrder(5);
+    const s2 = sessions.addOrderToSession(o2.id, "7");
+    expect(s2.id).not.toBe(s1.id);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GROUP 4c — customer/waiter/kitchen see ONE shared active order across the flow
+// ══════════════════════════════════════════════════════════════════════════════
+
+const ACTIVE = ["NEW", "PREPARING", "READY", "DELIVERING"];
+
+/** Mirrors the cart page's screen decision (post client storage-read). */
+function cartScreen(cartItemCount: number): "cart" | "tracking" | "empty" {
+  if (cartItemCount > 0) return "cart";
+  return sessions.getTrackableSession() ? "tracking" : "empty";
+}
+
+/** What the customer's /order page would resolve to on a fresh mount / refresh. */
+function refreshCustomerTracking() {
+  // getTrackableSession re-reads storage every call — a fresh page mount is
+  // exactly this. No React state is carried across a refresh.
+  return sessions.getTrackableSession();
+}
+
+describe("tracking survives payment, cart clear and refresh (shared active order)", () => {
+  it("full 10-step flow keeps one order visible everywhere until COMPLETED", () => {
+    reset();
+
+    // 1. create order
+    const o = makeOrder(22.1);
+    const session = sessions.addOrderToSession(o.id, "5");
+    orders.updateOrderStatus(o.id, "PREPARING"); // kitchen picks it up
+
+    // 2. pay
+    payFullSession(session);
+
+    // 3. cart becomes empty
+    mem.set("dzukai-cart", JSON.stringify({ state: { items: [{ x: 1 }] }, version: 0 }));
+    clearCartStorage();
+    expect(JSON.parse(mem.get("dzukai-cart")!).state.items).toHaveLength(0);
+
+    // 4. customer still sees tracking (cart empty must NOT hide it)
+    expect(cartScreen(0)).toBe("tracking");
+    expect(sessions.getTrackableSession()?.id).toBe(session.id);
+
+    // 5. waiter references the SAME order id (ready task flows off it)
+    orders.updateOrderStatus(o.id, "READY");
+    tasks.syncReadyToServeTasks(orders.listOrders());
+    const waiterTask = tasks.listTasks().find((t) => t.type === "ready_to_serve");
+    expect(waiterTask?.orderId).toBe(o.id);
+    expect(session.orderIds).toContain(o.id); // same session the customer tracks
+
+    // 6. kitchen references the SAME order (appears in the active order list)
+    const kitchenQueue = orders.listOrders().filter((x) => ACTIVE.includes(x.status));
+    expect(kitchenQueue.some((x) => x.id === o.id)).toBeTruthy();
+
+    // 7 + 8. refresh customer page → tracking still resolves to the same session
+    expect(refreshCustomerTracking()?.id).toBe(session.id);
+    expect(cartScreen(0)).toBe("tracking");
+
+    // tracking updates through DELIVERING and stays visible the whole time
+    orders.startItemsDelivery(o.id, [o.items[0].productId]);
+    expect(orders.getOrder(o.id)?.status).toBe("DELIVERING");
+    expect(cartScreen(0)).toBe("tracking");
+
+    // 9. complete delivery
+    orders.completeItemsDelivery(o.id, [o.items[0].productId]);
+    expect(orders.getOrder(o.id)?.status).toBe("COMPLETED");
+
+    // 10. only NOW does the empty cart show — and it survives a refresh too
+    expect(cartScreen(0)).toBe("empty");
+    expect(refreshCustomerTracking()).toBeFalsy();
+  });
+
+  it("with items still in the cart, the cart view always wins over tracking", () => {
+    reset();
+    const o = makeOrder(10);
+    sessions.addOrderToSession(o.id, "5");
+    // A non-empty cart shows the cart itself, regardless of an active session.
+    expect(cartScreen(2)).toBe("cart");
+  });
+
+  it("no session at all → empty cart is correct", () => {
+    reset();
+    expect(cartScreen(0)).toBe("empty");
+  });
+
+  it("tracking is driven by ORDER status, not session lifecycle status", () => {
+    reset();
+    const o = makeOrder(15);
+    const session = sessions.addOrderToSession(o.id, "5");
+    payFullSession(session); // session → PAID
+    orders.updateOrderStatus(o.id, "DELIVERING"); // food on its way, not delivered
+
+    // Even if the session gets CLOSED (e.g. waiter action / legacy state),
+    // an undelivered order MUST keep the session trackable.
+    sessions.updateSessionStatus("BILL_REQUESTED"); // no-op: no open session
+    sessions.closeSession(); // no-op: no open session either
+    // Force a terminal CLOSED status directly to simulate legacy/edge data.
+    const raw = JSON.parse(mem.get("dzukai-table-sessions")!);
+    raw[0].status = "CLOSED";
+    mem.set("dzukai-table-sessions", JSON.stringify(raw));
+
+    expect(orders.hasActiveOrders()).toBeTruthy();
+    expect(sessions.getTrackableSession()?.id).toBe(session.id); // still tracked
+    expect(cartScreen(0)).toBe("tracking");
+
+    // Only delivery ends it.
+    orders.updateOrderStatus(o.id, "COMPLETED");
+    expect(orders.hasActiveOrders()).toBeFalsy();
+    expect(sessions.getTrackableSession()).toBeFalsy();
+    expect(cartScreen(0)).toBe("empty");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // GROUP 5 — task dedup + status derivation
 // ══════════════════════════════════════════════════════════════════════════════
 

@@ -2,6 +2,24 @@ export type ProductLang = "en" | "ru";
 
 type T = { name: string; description: string };
 
+/**
+ * Resolve a product's localized name or description at render time from its id +
+ * current UI language. Lithuanian (the canonical source) always falls back to
+ * the passed value; EN/RU look up the translation and fall back to `fallback`
+ * when no translation exists. Shared by the menu and cart so there is a single
+ * product-localization path (never store translated names in state).
+ */
+export function tProduct(
+  id: string,
+  lang: string,
+  field: "name" | "description",
+  fallback: string
+): string {
+  if (lang === "lt") return fallback;
+  const l = lang as ProductLang;
+  return productTranslations[l]?.[id]?.[field] ?? fallback;
+}
+
 export const badgeTranslations: Record<ProductLang, Record<string, string>> = {
   en: {
     "Šefo pasirinkimas": "Chef's choice",
