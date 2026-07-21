@@ -1,4 +1,10 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Vaise
+
+**Vaise** is a smart in-restaurant ordering platform — QR-menu browsing, an AI waiter assistant, cart and table sessions, live kitchen and waiter displays, payments, and an owner analytics dashboard.
+
+The bundled demo restaurant is **Dzūkų Ainiai** (Dzūkų Alaus Restoranas, Vilniaus g. 35, Alytus). Its name, menu, and contact details are demo content served through Vaise — the platform itself is Vaise.
+
+Built with [Next.js](https://nextjs.org).
 
 ## Getting Started
 

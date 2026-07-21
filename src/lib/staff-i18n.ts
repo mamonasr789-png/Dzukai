@@ -148,6 +148,7 @@ const lt = {
     // Shared
     table: "Stalas",
     tableUnset: "Stalas nenurodytas",
+    restaurantLabel: "Restoranas",
     total: "Suma",
     noData: "Nėra duomenų.",
     all: "Visi",
@@ -239,6 +240,7 @@ const en: StaffDict = {
     // Shared
     table: "Table",
     tableUnset: "No table set",
+    restaurantLabel: "Restaurant",
     total: "Total",
     noData: "No data.",
     all: "All",

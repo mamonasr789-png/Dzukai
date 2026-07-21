@@ -135,8 +135,9 @@ export default function AdminPage() {
               <BarChart3 size={18} className="text-primary" />
             </div>
             <div>
-              <h1 className="font-black text-base tracking-tight">Dzūkų Ainiai</h1>
+              <h1 className="font-black text-base tracking-tight">Vaise</h1>
               <p className="text-[11px] text-white/40 leading-none">{t.adminSubtitle}</p>
+              <p className="text-[11px] text-white/30 leading-none mt-0.5">{t.restaurantLabel}: Dzūkų Ainiai</p>
             </div>
           </div>
 

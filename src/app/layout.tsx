@@ -16,12 +16,22 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Dzūkų Ainiai — Alaus Restoranas, Alytus",
-  description: "Dzūkų Alaus Restoranas Alytuje. Vilniaus g. 35, Alytus. Tel. (0-601) 90888.",
+  // Vaise is the ordering platform; Dzūkų Ainiai is the demo restaurant it powers.
+  title: "Vaise — Dzūkų Ainiai",
+  description:
+    "Vaise — išmani restorano užsakymų platforma. Demonstracinis restoranas: Dzūkų Alaus Restoranas, Vilniaus g. 35, Alytus. Tel. (0-601) 90888.",
+  applicationName: "Vaise",
+  openGraph: {
+    title: "Vaise — Dzūkų Ainiai",
+    description:
+      "Vaise — išmani restorano užsakymų platforma. Demonstracinis restoranas: Dzūkų Alaus Restoranas, Alytus.",
+    siteName: "Vaise",
+    type: "website",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Dzūkų Ainiai",
+    title: "Vaise",
   },
 };
 

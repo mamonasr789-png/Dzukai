@@ -255,7 +255,8 @@ export default function WaiterPage() {
             </div>
             <div>
               <h1 className="font-black text-base tracking-tight">{t.waiterTitle}</h1>
-              <p className="text-[11px] text-white/40 leading-none">Dzūkų Ainiai</p>
+              <p className="text-[11px] text-white/40 leading-none">Vaise</p>
+              <p className="text-[11px] text-white/30 leading-none mt-0.5">{t.restaurantLabel}: Dzūkų Ainiai</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
