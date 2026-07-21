@@ -50,6 +50,7 @@ import {
   dishesCount,
 } from "@/lib/staff-i18n";
 import StaffLangSwitch from "@/components/StaffLangSwitch";
+import { tProduct } from "@/lib/product-translations";
 import {
   UtensilsCrossed, Receipt, Bell, ShoppingBag,
   Clock, CheckCircle2, ChevronDown, ChevronUp,
@@ -687,7 +688,7 @@ function TaskRow({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-base text-white/85">{TASK_TYPE_LABEL[lang][task.type]}</span>
             {task.items.length === 1 && (
-              <span className="text-sm text-white/45 truncate">— {task.items[0].name}</span>
+              <span className="text-sm text-white/45 truncate">— {tProduct(task.items[0].productId, lang, "name", task.items[0].name)}</span>
             )}
             {task.items.length > 1 && (
               <span className="text-sm text-white/45">— {dishesCount(task.items.length, lang)}</span>
@@ -708,7 +709,7 @@ function TaskRow({
             const liveStatus = order?.items.find((i) => i.productId === item.productId)?.itemStatus;
             return (
               <div key={item.productId} className="flex items-center justify-between gap-3">
-                <span className="text-sm text-white/55">{item.name} ×{item.quantity}</span>
+                <span className="text-sm text-white/55">{tProduct(item.productId, lang, "name", item.name)} ×{item.quantity}</span>
                 {liveStatus && <ItemStatusBadge status={liveStatus} lang={lang} />}
               </div>
             );

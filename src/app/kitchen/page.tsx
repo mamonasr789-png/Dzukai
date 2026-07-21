@@ -21,6 +21,7 @@ import {
   minutesAgoLabel,
 } from "@/lib/staff-i18n";
 import StaffLangSwitch from "@/components/StaffLangSwitch";
+import { tProduct } from "@/lib/product-translations";
 import {
   Clock, ChefHat, Bell, CheckCircle2, XCircle,
   UtensilsCrossed, Sun, Moon, Utensils, Zap, ChevronDown, ChevronUp,
@@ -358,7 +359,7 @@ function HistoryRow({
               const ib = theme === "dark" ? STATUS_BADGE_DARK[st] : STATUS_BADGE_LIGHT[st];
               return (
                 <div key={item.productId} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="truncate text-muted-foreground">{item.name} ×{item.quantity}</span>
+                  <span className="truncate text-muted-foreground">{tProduct(item.productId, lang, "name", item.name)} ×{item.quantity}</span>
                   <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${ib}`}>
                     {STATUS_ICON_SM[st]}
                     {statusLabel[st]}
@@ -444,7 +445,7 @@ function ItemRow({ orderId, item, theme, lang, t }: { orderId: string; item: Ord
     <div className={`rounded-xl p-2.5 transition-opacity ${isDone ? "opacity-50" : ""} ${theme === "dark" ? "bg-black/10" : "bg-white/60"}`}>
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-baseline gap-1.5 flex-wrap">
-          <span className="font-semibold text-sm leading-snug">{item.name}</span>
+          <span className="font-semibold text-sm leading-snug">{tProduct(item.productId, lang, "name", item.name)}</span>
           {item.quantity > 1 && (
             <span className="shrink-0 text-xs font-bold text-muted-foreground">×{item.quantity}</span>
           )}

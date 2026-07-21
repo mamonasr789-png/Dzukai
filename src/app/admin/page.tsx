@@ -32,6 +32,7 @@ import {
   SERVING_SHORT,
 } from "@/lib/staff-i18n";
 import StaffLangSwitch from "@/components/StaffLangSwitch";
+import { tProduct } from "@/lib/product-translations";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -291,7 +292,7 @@ export default function AdminPage() {
                   <Card noPad>
                     <div className="divide-y divide-white/5">
                       {popularItems.map((item, i) => (
-                        <PopularRow key={item.productId} item={item} rank={i + 1} t={t} />
+                        <PopularRow key={item.productId} item={item} rank={i + 1} lang={lang} t={t} />
                       ))}
                     </div>
                   </Card>
@@ -366,12 +367,12 @@ function KitchenLive({ stats, t }: { stats: KitchenStats; t: StaffDict }) {
 
 // ── Popular item row ──────────────────────────────────────────────────────────
 
-function PopularRow({ item, rank, t }: { item: PopularItem; rank: number; t: StaffDict }) {
+function PopularRow({ item, rank, lang, t }: { item: PopularItem; rank: number; lang: StaffLang; t: StaffDict }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3">
       <span className="w-5 text-center text-xs font-bold text-white/20 shrink-0">{rank}</span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold truncate">{item.name}</p>
+        <p className="text-sm font-semibold truncate">{tProduct(item.productId, lang, "name", item.name)}</p>
         <p className="text-[11px] text-white/40">{item.revenue.toFixed(2)} {t.adminRevenueSuffix}</p>
       </div>
       <div className="text-right shrink-0">

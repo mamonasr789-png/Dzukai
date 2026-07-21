@@ -1,6 +1,6 @@
 export type ProductLang = "en" | "ru";
 
-type T = { name: string; description: string };
+type T = { name: string; description?: string };
 
 /**
  * Resolve a product's localized name or description at render time from its id +
@@ -257,6 +257,29 @@ export const productTranslations: Record<ProductLang, Record<string, T>> = {
     // Wine
     vy1: { name: "House wine (150ml)", description: "Chef's selection house wine." },
     vy2: { name: "Mulled wine", description: "Warm spiced mulled wine." },
+    // Pizzas (names with Lithuanian words)
+    pb1: { name: "Panouzzo Pizza" },
+    pb2: { name: "With Chicken and Curry" },
+    pb3: { name: "Vegetarian Bianca Pizza" },
+    pb4: { name: "With Cured Ham and Caramelized Onions" },
+    pb5: { name: "With Ham and Truffle Sauce" },
+    // Cocktails with Lithuanian words (brand/international names fall back to LT)
+    ko9: { name: "Strawberry Mojito" },
+    // Spirits with Lithuanian descriptors (pure brand names fall back to LT)
+    sp1: { name: "Original Lithuanian Golden Vodka (40ml)" },
+    sp4: { name: "Crystal Hop Vodka (40ml)" },
+    sp6: { name: "J.P. Chanet XO Brandy (40ml)" },
+    sp7: { name: "Torres 5 Brandy (40ml)" },
+    sp8: { name: "Martell VSOP Cognac (40ml)" },
+    sp11: { name: "Shankey's Whip Irish Whiskey Liqueur (40ml)" },
+    sp21: { name: "Red Devynerios Bitters (40ml)" },
+    sp22: { name: "Green Devynerios Bitters (40ml)" },
+    sp23: { name: "Absinthe (40ml)" },
+    sp29: { name: "Hendrix Gin (40ml)" },
+    sp30: { name: "Tanqueray London Dry Gin (40ml)" },
+    sp31: { name: "Suktinis Lithuanian Mead (40ml)" },
+    // Sparkling with Lithuanian words (brand names fall back to LT)
+    sam3: { name: "Alita Sparkling Wine" },
   },
   ru: {
     // Закуски
