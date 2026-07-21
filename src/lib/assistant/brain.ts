@@ -38,7 +38,7 @@ import {
 } from "./pairingEngine.ts";
 import { buildResponse } from "./responseBuilder.ts";
 import { getFullInfo, getHours } from "./knowledgeBase.ts";
-import { findById, findDishReference, findProductByInflectedName, FOOD_CATEGORIES, DRINK_CATEGORIES, allProducts, categoriesForProtein, byCategory } from "./menuSearch.ts";
+import { findById, findDishReference, findProductByInflectedName, matchProductName, FOOD_CATEGORIES, DRINK_CATEGORIES, allProducts, categoriesForProtein, byCategory } from "./menuSearch.ts";
 import { normalizeText } from "./synonyms.ts";
 import { isAlcoholicProduct } from "./restrictionEngine.ts";
 import { answerAvailability } from "./availabilitySearch.ts";
@@ -84,12 +84,14 @@ export function processMessage(input: string, state: ConversationState): string 
 
   // 4. General cart action resolution — runs AFTER NLU so entities are available.
   //    Handles: "taip", "noriu degustacijos", "šitą", "dar vieną", etc.
-  const cartResolution = resolveCartAction(
-    nlu.normalizedInput,
-    nlu.entities,
-    state,
-    state.currentLanguage
-  );
+  const cartResolution = nlu.intent === "add_to_cart"
+    ? null
+    : resolveCartAction(
+        nlu.normalizedInput,
+        nlu.entities,
+        state,
+        state.currentLanguage
+      );
   if (cartResolution) {
     state.pendingActions = cartResolution.actions;
     recordTurn(state, "user", input, nlu.intent);
@@ -439,15 +441,44 @@ function handleChildren(state: ConversationState): string {
 }
 
 function handleAddToCart(nlu: NLUResult, state: ConversationState): string {
-  // Try context dish, then explicit name match (any category allowed for cart)
-  const dish = findDishForTurn(nlu, state) ?? findProductByInflectedName(nlu.normalizedInput);
   const lang = state.currentLanguage;
-  if (!dish) {
+  const nameMatch = matchProductName(nlu.normalizedInput);
+  if (nameMatch.kind === "ambiguous") {
+    const names = nameMatch.products
+      .map((product) => `**${tProduct(product.id, lang, "name", product.name)}**`)
+      .join(", ");
     return lang === "en"
-      ? "Which item would you like to add to your cart?"
+      ? `Which one did you mean: ${names}?`
       : lang === "ru"
-      ? "Какой товар добавить в корзину?"
-      : "Kurį patiekalą norėtumėte pridėti į krepšelį?";
+      ? `Какой вариант вы имели в виду: ${names}?`
+      : `Kurį variantą turėjote omenyje: ${names}?`;
+  }
+
+  const hasExplicitProductWords = nlu.normalizedInput
+    .replace(/\b(add|put|place|please|one|the|a|an|to|into|in|on|my|cart|basket|bag|pridek|prideti|idek|ideti|dek|prasau|viena|i|mano|krepseli|krepselis)\b/g, " ")
+    .trim().length > 0;
+  const dish = nameMatch.kind === "match"
+    ? nameMatch.product
+    : !hasExplicitProductWords
+    ? findDishForTurn(nlu, state)
+    : undefined;
+
+  if (!dish) {
+    const alternatives = nameMatch.kind === "none" ? nameMatch.alternatives : [];
+    const alternativeList = alternatives.length > 0
+      ? `\n${alternatives.map((product) => `• **${tProduct(product.id, lang, "name", product.name)}**`).join("\n")}`
+      : "";
+    return lang === "en"
+      ? alternatives.length > 0
+        ? `I couldn't find that exact item. The closest options are:${alternativeList}`
+        : "I couldn't find that item on the menu."
+      : lang === "ru"
+      ? alternatives.length > 0
+        ? `Точной позиции в меню нет. Ближайшие варианты:${alternativeList}`
+        : "Не нашёл такую позицию в меню."
+      : alternatives.length > 0
+      ? `Tokio tikslaus produkto meniu neradau. Artimiausi variantai:${alternativeList}`
+      : "Tokio produkto meniu neradau.";
   }
   if (FOOD_CATEGORIES.includes(dish.category as Category)) {
     state.lastFoodDishId = dish.id;

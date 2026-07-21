@@ -429,6 +429,14 @@ function detectPriorityIntent(normalized: string, state: ConversationState): Int
   if (/\b(isvalyk|isvalykite|istustink|istustinkite)\b.*\b(krepseli|krepsel)\b/.test(normalized)) {
     return "clear_cart";
   }
+  // Direct add commands can put the verb before or after the product name and
+  // do not require prior recommendation context ("add one duck breast").
+  if (
+    /\b(add|put|place)\b/.test(normalized) ||
+    /\b(pridek|prideti|idek|ideti|dek)\b/.test(normalized)
+  ) {
+    return "add_to_cart";
+  }
   // Cart summary — "kas mano krepšelyje?", "parodyk krepšelį", "kiek moku?"
   if (
     /krepsel/.test(normalized) &&

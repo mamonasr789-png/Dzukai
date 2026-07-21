@@ -395,33 +395,4 @@ export function subscribeOrders(callback: () => void): () => void {
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 
-export const STATUS_LABELS: Record<OrderStatus, string> = {
-  NEW: "Naujas",
-  PREPARING: "Gaminamas",
-  READY: "Paruoštas",
-  DELIVERING: "Neša padavėjas",
-  COMPLETED: "Įvykdytas",
-  CANCELLED: "Atšauktas",
-};
-
-export const STATUS_MESSAGES: Record<OrderStatus, string> = {
-  NEW: "Užsakymas priimtas. Laukimo laikas apie 15 min.",
-  PREPARING: "Užsakymas gaminamas. Laukimo laikas apie 10 min.",
-  READY: "Užsakymas paruoštas! Padavėjas jau neša.",
-  DELIVERING: "Padavėjas neša jūsų užsakymą. Jau beveik!",
-  COMPLETED: "Skanaus!",
-  CANCELLED: "Užsakymas atšauktas.",
-};
-
 export const STATUS_ORDER: OrderStatus[] = ["NEW", "PREPARING", "READY", "DELIVERING", "COMPLETED"];
-
-export const SERVING_LABELS: Record<ServingPreference, { short: string; long: string }> = {
-  together: {
-    short: "Visi kartu",
-    long: "Visi patiekalai bus atnešti kartu, kai bus paruošti.",
-  },
-  as_ready: {
-    short: "Kai tik paruošta",
-    long: "Paruošti patiekalai bus atnešami iš karto.",
-  },
-};

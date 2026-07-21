@@ -27,6 +27,7 @@ const orders = await import("../orders.ts");
 const sessions = await import("../tableSession.ts");
 const tasks = await import("../waiterTasks.ts");
 const analytics = await import("../analytics.ts");
+const i18n = await import("../i18n.ts");
 
 function reset() {
   mem.clear();
@@ -475,6 +476,33 @@ describe("order status derivation", () => {
     expect(orders.getOrder("NOPE")).toBeFalsy();
     expect(orders.updateItemStatus("NOPE", "x", "READY")).toBeFalsy();
     expect(orders.updateOrderStatus("NOPE", "READY")).toBeFalsy();
+  });
+});
+
+describe("customer order tracking translations", () => {
+  it("provides English labels for every order status", () => {
+    expect(i18n.orderStatusLabels.en).toEqual({
+      NEW: "New",
+      PREPARING: "Preparing",
+      READY: "Ready",
+      DELIVERING: "Being served",
+      COMPLETED: "Completed",
+      CANCELLED: "Cancelled",
+    });
+  });
+
+  it("localizes status descriptions, ETA text, and serving labels", () => {
+    expect(i18n.orderStatusMessages.en.NEW).toContain("15 minutes");
+    expect(i18n.orderStatusMessages.en.PREPARING).toContain("10 minutes");
+    expect(i18n.servingPreferenceLabels.en.together.short).toBe("All together");
+    expect(i18n.servingPreferenceLabels.en.as_ready.long).toContain("as soon as it is ready");
+  });
+
+  it("keeps customer order-screen copy available in English", () => {
+    const copy = i18n.t.en;
+    expect(copy.ordered_dishes).toBe("Ordered dishes");
+    expect(copy.serving).toBe("Serving");
+    expect(copy.payment_success_tracking).toContain("Payment successful");
   });
 });
 

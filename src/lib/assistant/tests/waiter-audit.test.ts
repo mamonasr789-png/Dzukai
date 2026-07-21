@@ -544,4 +544,42 @@ describe("Audit: localized product names in chatbot replies", () => {
   });
 });
 
+describe("Audit: direct bilingual add-to-cart commands", () => {
+  const directCommands = [
+    { lang: "en", prompt: "Add duck breast with pear and blue cheese to the basket" },
+    { lang: "en", prompt: "Duck breast with pear and blue cheese add to basket please" },
+    { lang: "en", prompt: "Put the duck breast in my cart" },
+    { lang: "en", prompt: "Add one duck breast" },
+    { lang: "lt", prompt: "Pridėk antienos krūtinėlę į krepšelį" },
+  ];
+
+  for (const { lang, prompt } of directCommands) {
+    it(`adds v7 directly for: ${prompt}`, () => {
+      const s = state(lang);
+      const reply = processMessage(prompt, s);
+      expect(s.pendingActions).toHaveLength(1);
+      expect(s.pendingActions![0].type).toBe("ADD_TO_CART");
+      expect((s.pendingActions![0] as { productId: string }).productId).toBe("v7");
+      expect(reply).toContain(tProduct("v7", lang, "name", "Antienos krūtinėlė su kriauše ir pelėsiniu sūriu"));
+      expect(reply).notToContain("Also available");
+      expect(reply).notToContain("• **");
+    });
+  }
+
+  it("asks for clarification when a translated partial name is ambiguous", () => {
+    const s = state("en");
+    const reply = processMessage("Add tuna to cart", s);
+    expect(s.pendingActions).toHaveLength(0);
+    expect(reply).toContain("Which one did you mean");
+  });
+
+  it("does not add an unrelated item when no product matches", () => {
+    const s = state("en");
+    const reply = processMessage("Add lobster roll to my cart", s);
+    expect(s.pendingActions).toHaveLength(0);
+    expect(reply).toContain("couldn't find");
+    expect(reply).notToContain("Also available");
+  });
+});
+
 printResults();

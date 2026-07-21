@@ -1,5 +1,6 @@
-import { Lang } from "./store";
-import { Category } from "./data";
+import type { Lang } from "./store";
+import type { Category } from "./data";
+import type { OrderStatus, ServingPreference } from "./orders";
 
 export const categoryLabels: Record<Lang, Partial<Record<Category, string>>> = {
   lt: {},
@@ -65,6 +66,69 @@ export const categoryLabels: Record<Lang, Partial<Record<Category, string>>> = {
   },
 };
 
+export const orderStatusLabels: Record<Lang, Record<OrderStatus, string>> = {
+  lt: {
+    NEW: "Naujas", PREPARING: "Gaminamas", READY: "Paruoštas",
+    DELIVERING: "Neša padavėjas", COMPLETED: "Įvykdytas", CANCELLED: "Atšauktas",
+  },
+  en: {
+    NEW: "New", PREPARING: "Preparing", READY: "Ready",
+    DELIVERING: "Being served", COMPLETED: "Completed", CANCELLED: "Cancelled",
+  },
+  ru: {
+    NEW: "Новый", PREPARING: "Готовится", READY: "Готов",
+    DELIVERING: "Официант несёт", COMPLETED: "Выполнен", CANCELLED: "Отменён",
+  },
+};
+
+export const orderStatusMessages: Record<Lang, Record<OrderStatus, string>> = {
+  lt: {
+    NEW: "Užsakymas priimtas. Laukimo laikas apie 15 min.",
+    PREPARING: "Užsakymas gaminamas. Laukimo laikas apie 10 min.",
+    READY: "Užsakymas paruoštas! Padavėjas jau neša.",
+    DELIVERING: "Padavėjas neša jūsų užsakymą. Jau beveik!",
+    COMPLETED: "Skanaus!",
+    CANCELLED: "Užsakymas atšauktas.",
+  },
+  en: {
+    NEW: "Order received. Estimated wait: about 15 minutes.",
+    PREPARING: "Your order is being prepared. Estimated wait: about 10 minutes.",
+    READY: "Your order is ready! The waiter will bring it shortly.",
+    DELIVERING: "The waiter is bringing your order. Almost there!",
+    COMPLETED: "Enjoy your meal!",
+    CANCELLED: "Your order has been cancelled.",
+  },
+  ru: {
+    NEW: "Заказ принят. Ожидание около 15 минут.",
+    PREPARING: "Заказ готовится. Ожидание около 10 минут.",
+    READY: "Заказ готов! Официант скоро принесёт его.",
+    DELIVERING: "Официант несёт ваш заказ. Уже почти!",
+    COMPLETED: "Приятного аппетита!",
+    CANCELLED: "Заказ отменён.",
+  },
+};
+
+export const servingPreferenceLabels: Record<Lang, Record<ServingPreference, { short: string; long: string }>> = {
+  lt: {
+    together: { short: "Visi kartu", long: "Visi patiekalai bus atnešti kartu, kai bus paruošti." },
+    as_ready: { short: "Kai tik paruošta", long: "Paruošti patiekalai bus atnešami iš karto." },
+  },
+  en: {
+    together: { short: "All together", long: "All dishes will be served together when they are ready." },
+    as_ready: { short: "As soon as ready", long: "Each dish will be served as soon as it is ready." },
+  },
+  ru: {
+    together: { short: "Всё вместе", long: "Все блюда подадут вместе, когда они будут готовы." },
+    as_ready: { short: "По готовности", long: "Каждое готовое блюдо подадут сразу." },
+  },
+};
+
+export const sessionStatusLabels: Record<Lang, Record<"ACTIVE" | "BILL_REQUESTED" | "PAID" | "CLOSED", string>> = {
+  lt: { ACTIVE: "Aktyvi sesija", BILL_REQUESTED: "Sąskaita paprašyta", PAID: "Apmokėta", CLOSED: "Uždaryta" },
+  en: { ACTIVE: "Active session", BILL_REQUESTED: "Bill requested", PAID: "Paid", CLOSED: "Closed" },
+  ru: { ACTIVE: "Активная сессия", BILL_REQUESTED: "Счёт запрошен", PAID: "Оплачено", CLOSED: "Закрыто" },
+};
+
 export const t = {
   lt: {
     // Nav
@@ -119,6 +183,34 @@ export const t = {
     order_more: "Užsisakyti papildomai",
     call_waiter: "Kviesti padavėją",
     request_bill: "Pakviesti padavėją sąskaitai",
+    // Customer order tracking
+    order_not_found: "Užsakymas nerastas",
+    no_active_order: "Aktyvaus užsakymo nėra.",
+    order_not_found_sub: "Patikrinkite nuorodą arba kreipkitės į padavėją.",
+    no_active_order_sub: "Pateikite užsakymą iš meniu.",
+    order_number: "Užsakymo numeris",
+    paid: "Apmokėta",
+    ordered_at: "Užsakyta",
+    serving: "Patiekimas",
+    ordered_dishes: "Užsakyti patiekalai",
+    order_action_title: "Ką norite daryti?",
+    order_hint_completed: "Ačiū! Galite užsisakyti papildomai arba atsiskaityti.",
+    order_hint_arriving: "Užsakymas jau kelyje. Galite užsisakyti papildomai arba atsiskaityti.",
+    order_hint_default: "Galite užsisakyti papildomai arba atsiskaityti bet kada.",
+    pay_in_app: "Apmokėti programėlėje",
+    payment_question: "Apmokėti",
+    payment_secure: "Mokėjimas bus apdorotas saugiai.",
+    processing: "Apdorojama...",
+    pay: "Apmokėti",
+    cancel: "Atšaukti",
+    payment_success_tracking: "Mokėjimas sėkmingas — sekite užsakymą žemiau",
+    active_table: "Aktyvus stalas",
+    session: "Sesija",
+    paid_lower: "sumokėta",
+    your_orders: "Jūsų užsakymai",
+    back: "Grįžti",
+    session_ended_title: "Sesija užbaigta. Ačiū!",
+    session_ended_sub: "Sąskaita apmokėta. Labai džiaugiamės jus matę!",
     // Home
     recommended: "Rekomenduojame",
     beer_label: "Savos daryklos alus",
@@ -179,6 +271,34 @@ export const t = {
     order_more: "Order more",
     call_waiter: "Call waiter",
     request_bill: "Request the bill",
+    // Customer order tracking
+    order_not_found: "Order not found",
+    no_active_order: "There is no active order.",
+    order_not_found_sub: "Check the link or ask your waiter for help.",
+    no_active_order_sub: "Place an order from the menu.",
+    order_number: "Order number",
+    paid: "Paid",
+    ordered_at: "Ordered",
+    serving: "Serving",
+    ordered_dishes: "Ordered dishes",
+    order_action_title: "What would you like to do?",
+    order_hint_completed: "Thank you! You can order more or pay your bill.",
+    order_hint_arriving: "Your order is on its way. You can order more or pay your bill.",
+    order_hint_default: "You can order more or pay at any time.",
+    pay_in_app: "Pay in app",
+    payment_question: "Pay",
+    payment_secure: "Your payment will be processed securely.",
+    processing: "Processing...",
+    pay: "Pay",
+    cancel: "Cancel",
+    payment_success_tracking: "Payment successful — keep tracking your order below",
+    active_table: "Active table",
+    session: "Session",
+    paid_lower: "paid",
+    your_orders: "Your orders",
+    back: "Back",
+    session_ended_title: "Session completed. Thank you!",
+    session_ended_sub: "Your bill has been paid. We were delighted to serve you!",
     recommended: "Recommended",
     beer_label: "Our brewery",
     beer_title: "6 types of\nCraft beer 🍺",
@@ -237,6 +357,34 @@ export const t = {
     order_more: "Заказать ещё",
     call_waiter: "Позвать официанта",
     request_bill: "Попросить счёт",
+    // Customer order tracking
+    order_not_found: "Заказ не найден",
+    no_active_order: "Активного заказа нет.",
+    order_not_found_sub: "Проверьте ссылку или обратитесь к официанту.",
+    no_active_order_sub: "Сделайте заказ из меню.",
+    order_number: "Номер заказа",
+    paid: "Оплачено",
+    ordered_at: "Заказано",
+    serving: "Подача",
+    ordered_dishes: "Заказанные блюда",
+    order_action_title: "Что вы хотите сделать?",
+    order_hint_completed: "Спасибо! Вы можете заказать ещё или оплатить счёт.",
+    order_hint_arriving: "Заказ уже в пути. Вы можете заказать ещё или оплатить счёт.",
+    order_hint_default: "Вы можете заказать ещё или оплатить в любое время.",
+    pay_in_app: "Оплатить в приложении",
+    payment_question: "Оплатить",
+    payment_secure: "Платёж будет обработан безопасно.",
+    processing: "Обработка...",
+    pay: "Оплатить",
+    cancel: "Отмена",
+    payment_success_tracking: "Оплата прошла успешно — следите за заказом ниже",
+    active_table: "Активный стол",
+    session: "Сессия",
+    paid_lower: "оплачено",
+    your_orders: "Ваши заказы",
+    back: "Назад",
+    session_ended_title: "Сессия завершена. Спасибо!",
+    session_ended_sub: "Счёт оплачен. Мы были рады вас видеть!",
     recommended: "Рекомендуем",
     beer_label: "Наша пивоварня",
     beer_title: "6 видов\nКрафтового пива 🍺",

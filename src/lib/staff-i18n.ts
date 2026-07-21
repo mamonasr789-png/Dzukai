@@ -11,62 +11,35 @@
  * (translations, where they exist, come from product-translations.ts).
  */
 
-import { useEffect, useState } from "react";
 import type { OrderStatus, ServingPreference } from "./orders";
 import type { WaiterTaskType, WaiterTaskStatus } from "./waiterTasks";
+import { orderStatusLabels, servingPreferenceLabels } from "./i18n";
+import { useLanguage } from "./store";
 
 export type StaffLang = "lt" | "en";
 
-const STORAGE_KEY = "dzukai-staff-lang";
-const SYNC_EVENT = "dzukai:staff-lang";
-
 export function useStaffLang(): [StaffLang, (l: StaffLang) => void] {
-  const [lang, setLangState] = useState<StaffLang>("lt");
-
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === "en" || saved === "lt") setLangState(saved);
-    // Sync across mounted panels (and tabs via the storage event)
-    const onSync = () => {
-      const v = localStorage.getItem(STORAGE_KEY);
-      if (v === "en" || v === "lt") setLangState(v);
-    };
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY || e.key === null) onSync();
-    };
-    window.addEventListener(SYNC_EVENT, onSync);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener(SYNC_EVENT, onSync);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
-
-  const setLang = (l: StaffLang) => {
-    setLangState(l);
-    localStorage.setItem(STORAGE_KEY, l);
-    window.dispatchEvent(new CustomEvent(SYNC_EVENT));
-  };
-
-  return [lang, setLang];
+  const [globalLang, setGlobalLang] = useLanguage();
+  const lang: StaffLang = globalLang === "en" ? "en" : "lt";
+  return [lang, setGlobalLang];
 }
 
 // ── Shared enum label maps ────────────────────────────────────────────────────
 
 export const ORDER_STATUS_LABEL: Record<StaffLang, Record<OrderStatus, string>> = {
-  lt: {
-    NEW: "Naujas", PREPARING: "Gaminamas", READY: "Paruoštas",
-    DELIVERING: "Neša padavėjas", COMPLETED: "Įvykdytas", CANCELLED: "Atšauktas",
-  },
-  en: {
-    NEW: "New", PREPARING: "Preparing", READY: "Ready",
-    DELIVERING: "Being served", COMPLETED: "Completed", CANCELLED: "Cancelled",
-  },
+  lt: orderStatusLabels.lt,
+  en: orderStatusLabels.en,
 };
 
 export const SERVING_SHORT: Record<StaffLang, Record<ServingPreference, string>> = {
-  lt: { together: "Visi kartu", as_ready: "Kai tik paruošta" },
-  en: { together: "All together", as_ready: "As ready" },
+  lt: {
+    together: servingPreferenceLabels.lt.together.short,
+    as_ready: servingPreferenceLabels.lt.as_ready.short,
+  },
+  en: {
+    together: servingPreferenceLabels.en.together.short,
+    as_ready: servingPreferenceLabels.en.as_ready.short,
+  },
 };
 
 export const TASK_TYPE_LABEL: Record<StaffLang, Record<WaiterTaskType, string>> = {

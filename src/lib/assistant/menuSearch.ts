@@ -5,6 +5,7 @@
 
 import { products as allProducts } from "../data.ts";
 import type { Product, Category } from "../data.ts";
+import { tProduct } from "../product-translations.ts";
 import { normalizeText } from "./synonyms.ts";
 
 export { allProducts };
@@ -66,6 +67,108 @@ export function textSearch(query: string, pool: Product[] = allProducts): Produc
 /** Find a specific product by ID */
 export function findById(id: string): Product | undefined {
   return allProducts.find((p) => p.id === id);
+}
+
+export type ProductNameMatch =
+  | { kind: "match"; product: Product; confidence: number }
+  | { kind: "ambiguous"; products: Product[] }
+  | { kind: "none"; alternatives: Product[] };
+
+const PRODUCT_QUERY_FILLERS = new Set([
+  "add", "put", "place", "please", "one", "the", "a", "an", "to", "into", "in", "on", "my",
+  "cart", "basket", "bag", "pridek", "prideti", "idek", "ideti", "dek", "prasau", "viena",
+  "i", "mano", "krepseli", "krepselis", "krepselį",
+]);
+
+const NAME_CONNECTORS = new Set(["with", "and", "su", "ir", "bei", "of"]);
+const GENERIC_PRODUCT_TERMS = new Set([
+  "duck", "antiena", "antienos", "chicken", "vistiena", "pork", "kiauliena", "beef", "jautiena",
+  "fish", "zuvis", "pizza", "pica", "salad", "salotos", "soup", "sriuba", "beer", "alus",
+]);
+const PRODUCT_TYPE_TERMS = new Set([
+  "salad", "salotos", "pizza", "pica", "soup", "sriuba", "wok", "noodles", "makaronai", "rice",
+  "ryziai", "snack", "uzkandis", "pancakes", "blynai", "lemonade", "limonadas", "cocktail", "kokteilis",
+]);
+
+function meaningfulNameTerms(text: string): string[] {
+  return normalizeText(text)
+    .split(/\s+/)
+    .filter((term) => term.length > 1 && !PRODUCT_QUERY_FILLERS.has(term) && !NAME_CONNECTORS.has(term));
+}
+
+function nameTokenMatches(queryTerm: string, nameTerm: string): boolean {
+  if (queryTerm === nameTerm) return true;
+  if (queryTerm.length < 5 || nameTerm.length < 5) return false;
+  const prefixLength = Math.min(queryTerm.length, nameTerm.length) - 1;
+  return prefixLength >= 4 && queryTerm.slice(0, prefixLength) === nameTerm.slice(0, prefixLength);
+}
+
+function productAliases(product: Product): string[] {
+  return [...new Set([
+    product.name,
+    tProduct(product.id, "en", "name", product.name),
+    tProduct(product.id, "ru", "name", product.name),
+  ])];
+}
+
+/**
+ * Match a direct product-name request against canonical and translated menu names.
+ * Returns ambiguity instead of silently choosing when candidates are too close.
+ */
+export function matchProductName(query: string): ProductNameMatch {
+  const normalizedQuery = normalizeText(query);
+  const queryTerms = meaningfulNameTerms(normalizedQuery);
+  if (queryTerms.length === 0) return { kind: "none", alternatives: [] };
+
+  const scored = allProducts.map((product) => {
+    let bestScore = 0;
+    for (const alias of productAliases(product)) {
+      const normalizedAlias = normalizeText(alias);
+      const aliasTerms = meaningfulNameTerms(normalizedAlias);
+      const matchedTerms = queryTerms.filter((queryTerm) =>
+        aliasTerms.some((nameTerm) => nameTokenMatches(queryTerm, nameTerm))
+      );
+      if (matchedTerms.length === 0) continue;
+
+      const coverage = matchedTerms.length / queryTerms.length;
+      const exactAliasInCommand = normalizedQuery.includes(normalizedAlias);
+      const queryPhrase = queryTerms.join(" ");
+      const aliasPhrase = aliasTerms.join(" ");
+      const startsWithQuery = aliasPhrase.startsWith(queryPhrase);
+      let score = exactAliasInCommand
+        ? 1
+        : coverage === 1
+        ? 0.82 + (startsWithQuery ? 0.08 : 0) + (queryTerms.length >= 3 ? 0.03 : 0)
+        : coverage * 0.65 + (matchedTerms.length / aliasTerms.length) * 0.2;
+
+      const missingType = aliasTerms.some((term) => PRODUCT_TYPE_TERMS.has(term)) &&
+        !queryTerms.some((term) => PRODUCT_TYPE_TERMS.has(term));
+      if (missingType) score -= 0.18;
+      bestScore = Math.max(bestScore, score);
+    }
+    return { product, score: bestScore };
+  }).filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.product.id.localeCompare(b.product.id));
+
+  if (scored.length === 0) return { kind: "none", alternatives: [] };
+
+  const plausible = scored.filter((candidate) => candidate.score >= 0.55);
+  const onlyGenericTerm = queryTerms.length === 1 && GENERIC_PRODUCT_TERMS.has(queryTerms[0]);
+  if (onlyGenericTerm && plausible.length > 1) {
+    return { kind: "ambiguous", products: plausible.slice(0, 4).map((candidate) => candidate.product) };
+  }
+
+  const [best, second] = scored;
+  if (best.score >= 0.78 && (!second || best.score - second.score >= 0.08)) {
+    return { kind: "match", product: best.product, confidence: best.score };
+  }
+  if (plausible.length > 1) {
+    return { kind: "ambiguous", products: plausible.slice(0, 4).map((candidate) => candidate.product) };
+  }
+  if (best.score >= 0.78) {
+    return { kind: "match", product: best.product, confidence: best.score };
+  }
+  return { kind: "none", alternatives: scored.filter((candidate) => candidate.score >= 0.2).slice(0, 3).map((candidate) => candidate.product) };
 }
 
 /** Find product(s) whose name best matches user input */

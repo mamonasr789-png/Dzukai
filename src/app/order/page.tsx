@@ -17,9 +17,7 @@ import {
   markOrderPaid,
   allOrdersPaid,
   subscribeOrders,
-  STATUS_MESSAGES,
   STATUS_ORDER,
-  SERVING_LABELS,
 } from "@/lib/orders";
 import {
   type TableSession,
@@ -29,7 +27,15 @@ import {
   markSessionPaid,
 } from "@/lib/tableSession";
 import { createUniqueTask, completeTasksForOrders, subscribeWaiterTasks } from "@/lib/waiterTasks";
-import { clearCartStorage } from "@/lib/store";
+import { clearCartStorage, useLanguage, type Lang } from "@/lib/store";
+import {
+  useT,
+  orderStatusLabels,
+  orderStatusMessages,
+  servingPreferenceLabels,
+  sessionStatusLabels,
+} from "@/lib/i18n";
+import { tProduct } from "@/lib/product-translations";
 import { processPayment } from "@/lib/payment";
 
 // ── Status display maps ───────────────────────────────────────────────────────
@@ -52,15 +58,6 @@ const STATUS_ICON_SM: Record<OrderStatus, React.ReactNode> = {
   CANCELLED: <XCircle size={12} className="text-destructive" />,
 };
 
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  NEW: "Naujas",
-  PREPARING: "Gaminamas",
-  READY: "Paruoštas",
-  DELIVERING: "Neša padavėjas",
-  COMPLETED: "Įvykdytas",
-  CANCELLED: "Atšauktas",
-};
-
 const STATUS_COLOR: Record<OrderStatus, string> = {
   NEW: "text-amber-400",
   PREPARING: "text-blue-400",
@@ -79,8 +76,9 @@ const ITEM_BADGE: Record<OrderStatus, string> = {
   CANCELLED: "bg-destructive/10 text-destructive",
 };
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("lt-LT", { hour: "2-digit", minute: "2-digit" });
+function formatTime(iso: string, lang: Lang): string {
+  const locale = lang === "en" ? "en-GB" : lang === "ru" ? "ru-RU" : "lt-LT";
+  return new Date(iso).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
 }
 
 // ── Main content ──────────────────────────────────────────────────────────────
@@ -88,6 +86,8 @@ function formatTime(iso: string): string {
 function OrderContent() {
   const params = useSearchParams();
   const id = params.get("id");
+  const [lang] = useLanguage();
+  const copy = useT(lang);
 
   const [order, setOrder] = useState<Order | null | undefined>(undefined);
   const [session, setSession] = useState<TableSession | null>(null);
@@ -265,7 +265,7 @@ function OrderContent() {
 
   // ── Early returns ─────────────────────────────────────────────────────────
 
-  if (sessionEnded) return <SessionEndedView />;
+  if (sessionEnded) return <SessionEndedView lang={lang} />;
 
   if (order === undefined) {
     return (
@@ -278,8 +278,9 @@ function OrderContent() {
   if (!id && !order && session && sessionOrders.length > 1) {
     return (
       <>
-        {justPaid && <PaidBanner />}
+        {justPaid && <PaidBanner lang={lang} />}
         <SessionView
+          lang={lang}
           session={session}
           orders={sessionOrders}
           isPaymentEligible={isPaymentEligible}
@@ -291,6 +292,7 @@ function OrderContent() {
         />
         {showPaymentModal && (
           <PaymentModal
+            lang={lang}
             total={payableTotal}
             processing={paymentProcessing}
             onCancel={() => setShowPaymentModal(false)}
@@ -306,13 +308,13 @@ function OrderContent() {
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
         <UtensilsCrossed size={48} className="text-muted-foreground mb-4" />
         <h2 className="font-black text-xl mb-2">
-          {id ? "Užsakymas nerastas" : "Aktyvaus užsakymo nėra."}
+          {id ? copy.order_not_found : copy.no_active_order}
         </h2>
         <p className="text-muted-foreground text-sm mb-6">
-          {id ? "Patikrinkite nuorodą arba kreipkitės į padavėją." : "Pateikite užsakymą iš meniu."}
+          {id ? copy.order_not_found_sub : copy.no_active_order_sub}
         </p>
         <Link href="/menu">
-          <Button className="rounded-full px-8 h-12 font-bold">Grįžti į meniu</Button>
+          <Button className="rounded-full px-8 h-12 font-bold">{copy.back_to_menu}</Button>
         </Link>
       </div>
     );
@@ -324,25 +326,25 @@ function OrderContent() {
 
   return (
     <>
-      {justPaid && <PaidBanner />}
+      {justPaid && <PaidBanner lang={lang} />}
       <div className="flex flex-col min-h-screen bg-background pb-10">
         {/* Header */}
         <div className="px-4 pt-14 pb-6 border-b border-border/40">
           <div className="flex items-center gap-2 mb-1">
-            <p className="text-xs text-muted-foreground">Užsakymo numeris</p>
+            <p className="text-xs text-muted-foreground">{copy.order_number}</p>
             {order.isPaid && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                <CheckCircle2 size={11} /> Apmokėta
+                <CheckCircle2 size={11} /> {copy.paid}
               </span>
             )}
           </div>
           <h1 className="font-black text-3xl tracking-tight">#{order.id}</h1>
           {order.tableNumber && (
             <p className="text-sm text-muted-foreground mt-1">
-              Stalas Nr. <span className="font-bold text-foreground">{order.tableNumber}</span>
+              {copy.table_no} <span className="font-bold text-foreground">{order.tableNumber}</span>
             </p>
           )}
-          <p className="text-xs text-muted-foreground mt-1">Užsakyta: {formatTime(order.createdAt)}</p>
+          <p className="text-xs text-muted-foreground mt-1">{copy.ordered_at}: {formatTime(order.createdAt, lang)}</p>
         </div>
 
         {/* Overall status */}
@@ -350,25 +352,25 @@ function OrderContent() {
           <div className="flex items-center gap-3 mb-3">
             {STATUS_ICON[order.status]}
             <p className={`font-black text-xl ${STATUS_COLOR[order.status]}`}>
-              {STATUS_LABEL[order.status]}
+              {orderStatusLabels[lang][order.status]}
             </p>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            {STATUS_MESSAGES[order.status]}
+            {orderStatusMessages[lang][order.status]}
           </p>
         </div>
 
         {/* Serving preference */}
         {(() => {
           const pref = order.servingPreference ?? "together";
-          const info = SERVING_LABELS[pref];
+          const info = servingPreferenceLabels[lang][pref];
           return (
             <div className="mx-4 mt-3 bg-card border border-border/40 rounded-2xl px-4 py-3 shadow-sm flex items-start gap-3">
               <span className="shrink-0 mt-0.5 text-muted-foreground">
                 {pref === "together" ? <Utensils size={16} /> : <Zap size={16} />}
               </span>
               <div>
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Patiekimas</p>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">{copy.serving}</p>
                 <p className="text-sm font-semibold text-foreground">{info.short}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">{info.long}</p>
               </div>
@@ -392,7 +394,7 @@ function OrderContent() {
                       {i + 1}
                     </div>
                     <p className={`text-[10px] text-center leading-tight ${done ? "text-foreground font-semibold" : "text-muted-foreground"}`}>
-                      {STATUS_LABEL[s]}
+                      {orderStatusLabels[lang][s]}
                     </p>
                   </div>
                 );
@@ -409,7 +411,7 @@ function OrderContent() {
 
         {/* Items */}
         <div className="mx-4 mt-4 bg-card border border-border/40 rounded-2xl p-4 shadow-sm">
-          <h3 className="font-bold text-sm mb-3">Užsakyti patiekalai</h3>
+          <h3 className="font-bold text-sm mb-3">{copy.ordered_dishes}</h3>
           <div className="space-y-2.5">
             {order.items.map((item) => {
               const itemStatus = item.itemStatus ?? order.status;
@@ -418,7 +420,7 @@ function OrderContent() {
                   <div className="flex items-center justify-between gap-2 text-sm">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate text-muted-foreground">
-                        {item.name} × {item.quantity}
+                        {tProduct(item.productId, lang, "name", item.name)} × {item.quantity}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -428,7 +430,7 @@ function OrderContent() {
                       {hasItemVariation && (
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${ITEM_BADGE[itemStatus]}`}>
                           {STATUS_ICON_SM[itemStatus]}
-                          {STATUS_LABEL[itemStatus]}
+                          {orderStatusLabels[lang][itemStatus]}
                         </span>
                       )}
                     </div>
@@ -442,17 +444,17 @@ function OrderContent() {
                  never the primary "amount to pay" accent. */
               <div className="flex items-end justify-between">
                 <div className="flex flex-col">
-                  <span className="font-bold text-base">Iš viso</span>
+                  <span className="font-bold text-base">{copy.total}</span>
                   <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
                     <CheckCircle2 size={13} className="shrink-0" />
-                    Apmokėta{order.paidAt ? ` · ${formatTime(order.paidAt)}` : ""}
+                    {copy.paid}{order.paidAt ? ` · ${formatTime(order.paidAt, lang)}` : ""}
                   </span>
                 </div>
                 <span className="font-bold text-base text-foreground tabular-nums">{order.total.toFixed(2)} €</span>
               </div>
             ) : (
               <div className="flex justify-between font-bold text-base">
-                <span>Iš viso</span>
+                <span>{copy.total}</span>
                 <span className="text-primary tabular-nums">{order.total.toFixed(2)} €</span>
               </div>
             )}
@@ -462,6 +464,7 @@ function OrderContent() {
         {/* Action card — visible while order is unpaid */}
         {isPaymentEligible && session && (
           <ActionCard
+            lang={lang}
             total={payableTotal}
             orderStatus={order.status}
             isBillRequested={!!isBillRequested}
@@ -474,7 +477,7 @@ function OrderContent() {
         <div className="px-4 mt-6">
           <Link href="/menu">
             <Button variant="outline" className="w-full rounded-2xl h-12 font-semibold">
-              Grįžti į meniu
+              {copy.back_to_menu}
             </Button>
           </Link>
         </div>
@@ -482,6 +485,7 @@ function OrderContent() {
 
       {showPaymentModal && (
         <PaymentModal
+          lang={lang}
           total={payableTotal}
           processing={paymentProcessing}
           onCancel={() => setShowPaymentModal(false)}
@@ -495,49 +499,52 @@ function OrderContent() {
 // ── Payment card ──────────────────────────────────────────────────────────────
 
 function ActionCard({
+  lang,
   total,
   orderStatus,
   isBillRequested,
   onPayInApp,
   onCallWaiter,
 }: {
+  lang: Lang;
   total: number;
   orderStatus: OrderStatus;
   isBillRequested: boolean;
   onPayInApp: () => void;
   onCallWaiter: () => void;
 }) {
+  const copy = useT(lang);
   const hint =
     orderStatus === "COMPLETED"
-      ? "Ačiū! Galite užsisakyti papildomai arba atsiskaityti."
+      ? copy.order_hint_completed
       : orderStatus === "READY" || orderStatus === "DELIVERING"
-        ? "Užsakymas jau kelyje. Galite užsisakyti papildomai arba atsiskaityti."
-        : "Galite užsisakyti papildomai arba atsiskaityti bet kada.";
+        ? copy.order_hint_arriving
+        : copy.order_hint_default;
 
   return (
     <div className="mx-4 mt-4 bg-card border border-primary/30 rounded-2xl p-5 shadow-sm">
-      <h3 className="font-black text-base mb-1">Ką norite daryti?</h3>
+      <h3 className="font-black text-base mb-1">{copy.order_action_title}</h3>
       <p className="text-xs text-muted-foreground mb-1">{hint}</p>
       <p className="text-xs text-muted-foreground mb-4">
-        Iš viso: <span className="font-bold text-foreground">{total.toFixed(2)} €</span>
+        {copy.total}: <span className="font-bold text-foreground">{total.toFixed(2)} €</span>
       </p>
       <div className="flex flex-col gap-2.5">
         <Link href="/menu" className="w-full">
           <button className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 transition-colors">
-            🍽️ Užsisakyti papildomai
+            🍽️ {copy.order_more}
           </button>
         </Link>
         <button
           onClick={onPayInApp}
           className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors"
         >
-          💳 Apmokėti programėlėje
+          💳 {copy.pay_in_app}
         </button>
         {isBillRequested ? (
           <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-3">
             <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
             <p className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">
-              Sąskaita paprašyta. Padavėjas netrukus prieis.
+              {copy.bill_requested_msg}
             </p>
           </div>
         ) : (
@@ -545,7 +552,7 @@ function ActionCard({
             onClick={onCallWaiter}
             className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors"
           >
-            👨‍💼 Pakviesti padavėją sąskaitai
+            👨‍💼 {copy.request_bill}
           </button>
         )}
       </div>
@@ -556,16 +563,19 @@ function ActionCard({
 // ── Payment modal ─────────────────────────────────────────────────────────────
 
 function PaymentModal({
+  lang,
   total,
   processing,
   onCancel,
   onConfirm,
 }: {
+  lang: Lang;
   total: number;
   processing: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const copy = useT(lang);
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 px-4">
       <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm shadow-xl">
@@ -573,10 +583,10 @@ function PaymentModal({
           <CreditCard size={26} className="text-primary" />
         </div>
         <h2 className="font-black text-xl text-center mb-1">
-          Apmokėti {total.toFixed(2)} €?
+          {copy.payment_question} {total.toFixed(2)} €?
         </h2>
         <p className="text-muted-foreground text-sm text-center mb-6">
-          Mokėjimas bus apdorotas saugiai.
+          {copy.payment_secure}
         </p>
         <div className="flex flex-col gap-2.5">
           <button
@@ -587,10 +597,10 @@ function PaymentModal({
             {processing ? (
               <>
                 <div className="w-4 h-4 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground animate-spin" />
-                Apdorojama...
+                {copy.processing}
               </>
             ) : (
-              "Apmokėti"
+              copy.pay
             )}
           </button>
           <button
@@ -598,7 +608,7 @@ function PaymentModal({
             disabled={processing}
             className="w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors disabled:opacity-50"
           >
-            Atšaukti
+            {copy.cancel}
           </button>
         </div>
       </div>
@@ -610,12 +620,13 @@ function PaymentModal({
 // Non-blocking: payment is confirmed but the order tracking stays on screen so
 // the customer can keep following food preparation and delivery.
 
-function PaidBanner() {
+function PaidBanner({ lang }: { lang: Lang }) {
+  const copy = useT(lang);
   return (
     <div className="fixed top-4 inset-x-0 z-50 flex justify-center px-4 pointer-events-none">
       <div className="flex items-center gap-2 bg-emerald-500 text-white rounded-full px-4 py-2.5 shadow-lg shadow-emerald-500/30">
         <CheckCircle2 size={18} className="shrink-0" />
-        <p className="text-sm font-bold">Mokėjimas sėkmingas — sekite užsakymą žemiau</p>
+        <p className="text-sm font-bold">{copy.payment_success_tracking}</p>
       </div>
     </div>
   );
@@ -623,14 +634,8 @@ function PaidBanner() {
 
 // ── Session overview (multiple orders) ───────────────────────────────────────
 
-const SESSION_STATUS_LABEL: Record<string, string> = {
-  ACTIVE: "Aktyvi sesija",
-  BILL_REQUESTED: "Sąskaita paprašyta",
-  PAID: "Apmokėta",
-  CLOSED: "Uždaryta",
-};
-
 function SessionView({
+  lang,
   session,
   orders,
   isPaymentEligible,
@@ -640,6 +645,7 @@ function SessionView({
   onPayInApp,
   onCallWaiter,
 }: {
+  lang: Lang;
   session: TableSession;
   orders: Order[];
   isPaymentEligible: boolean;
@@ -649,6 +655,7 @@ function SessionView({
   onPayInApp: () => void;
   onCallWaiter: () => void;
 }) {
+  const copy = useT(lang);
   // Remaining amount: only unpaid orders. Paid orders are kept in history.
   const unpaidTotal = orders.filter((o) => !o.isPaid).reduce((s, o) => s + o.total, 0);
   const isPaid = session.paymentStatus === "PAID";
@@ -659,9 +666,9 @@ function SessionView({
     <div className="flex flex-col min-h-screen bg-background pb-10">
       {/* Header */}
       <div className="px-4 pt-14 pb-6 border-b border-border/40">
-        <p className="text-xs text-muted-foreground mb-1">Aktyvus stalas</p>
+        <p className="text-xs text-muted-foreground mb-1">{copy.active_table}</p>
         <h1 className="font-black text-3xl tracking-tight">
-          {session.tableNumber ? `Stalas Nr. ${session.tableNumber}` : "Sesija"}
+          {session.tableNumber ? `${copy.table_no} ${session.tableNumber}` : copy.session}
         </h1>
         <div className="flex items-center gap-2 mt-1">
           <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold
@@ -669,10 +676,10 @@ function SessionView({
               ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
               : "bg-primary/10 text-primary"}`}>
             {isPaid && <CheckCircle2 size={12} className="shrink-0" />}
-            {SESSION_STATUS_LABEL[session.status] ?? session.status}
+            {sessionStatusLabels[lang][session.status] ?? session.status}
           </span>
           <span className="text-xs text-muted-foreground">
-            {orders.length} užsakymai · {isPaid ? "sumokėta" : "iš viso"} {sessionTotal.toFixed(2)} €
+            {orders.length} {orders.length === 1 ? copy.order1 : copy.order234} · {isPaid ? copy.paid_lower : copy.total.toLowerCase()} {sessionTotal.toFixed(2)} €
           </span>
         </div>
       </div>
@@ -680,6 +687,7 @@ function SessionView({
       {/* Action card — visible while there are unpaid orders */}
       {isPaymentEligible && (
         <ActionCard
+          lang={lang}
           total={unpaidTotal}
           orderStatus={paymentHintStatus}
           isBillRequested={isBillRequested}
@@ -690,7 +698,7 @@ function SessionView({
 
       {/* Orders list */}
       <div className="px-4 mt-5 space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Jūsų užsakymai</p>
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">{copy.your_orders}</p>
         {[...orders].reverse().map((o) => (
           <Link key={o.id} href={`/order?id=${o.id}`}>
             <div className="bg-card border border-border/40 rounded-2xl p-4 shadow-sm flex items-center gap-3 hover:border-border transition-colors">
@@ -700,16 +708,16 @@ function SessionView({
                   <p className="font-bold text-sm">#{o.id}</p>
                   {/* Food status is always shown; a paid order additionally gets a paid chip. */}
                   <span className={`text-xs font-semibold ${STATUS_COLOR[o.status]}`}>
-                    {STATUS_LABEL[o.status]}
+                    {orderStatusLabels[lang][o.status]}
                   </span>
                   {o.isPaid && (
                     <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                      <CheckCircle2 size={10} className="shrink-0" /> Apmokėta
+                      <CheckCircle2 size={10} className="shrink-0" /> {copy.paid}
                     </span>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {formatTime(o.createdAt)} · {o.items.length} patiekal{o.items.length === 1 ? "as" : "ai"}
+                  {formatTime(o.createdAt, lang)} · {o.items.length} {o.items.length === 1 ? copy.dish1 : copy.dish234}
                 </p>
               </div>
               {/* Paid amount stays legible (receipt), never struck through (voided). */}
@@ -725,12 +733,12 @@ function SessionView({
       <div className="px-4 mt-6 flex flex-col gap-2.5">
         <Link href="/menu">
           <Button variant="outline" className="w-full rounded-2xl h-12 font-semibold">
-            Užsisakyti papildomai
+            {copy.order_more}
           </Button>
         </Link>
         <Link href="/cart">
           <Button variant="ghost" className="w-full rounded-2xl h-12 font-semibold text-muted-foreground">
-            Grįžti
+            {copy.back}
           </Button>
         </Link>
       </div>
@@ -740,18 +748,19 @@ function SessionView({
 
 // ── Session ended (waiter paid) ───────────────────────────────────────────────
 
-function SessionEndedView() {
+function SessionEndedView({ lang }: { lang: Lang }) {
+  const copy = useT(lang);
   return (
     <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
       <div className="w-20 h-20 rounded-full bg-emerald-500/10 flex items-center justify-center mb-5">
         <CheckCircle2 size={40} className="text-emerald-500" />
       </div>
-      <h2 className="font-black text-2xl mb-2">Sesija užbaigta. Ačiū!</h2>
+      <h2 className="font-black text-2xl mb-2">{copy.session_ended_title}</h2>
       <p className="text-muted-foreground text-sm mb-8">
-        Sąskaita apmokėta. Labai džiaugiamės jus matę!
+        {copy.session_ended_sub}
       </p>
       <Link href="/menu">
-        <Button className="rounded-full px-8 h-12 font-bold">Grįžti į meniu</Button>
+        <Button className="rounded-full px-8 h-12 font-bold">{copy.back_to_menu}</Button>
       </Link>
     </div>
   );
