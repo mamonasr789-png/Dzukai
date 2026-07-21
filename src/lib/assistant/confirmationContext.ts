@@ -12,6 +12,7 @@
 import type { AssistantAction, ConversationState } from "./types.ts";
 import { findById } from "./menuSearch.ts";
 import { normalizeText } from "./synonyms.ts";
+import { tProduct } from "../product-translations.ts";
 
 // ── Patterns ──────────────────────────────────────────────────────────────────
 
@@ -70,12 +71,13 @@ export function tryResolveConfirmation(
   clearPendingSuggestion(state);
   const actions: AssistantAction[] = [{ type: "ADD_TO_CART", productId: product.id, quantity: 1 }];
   const lang = state.currentLanguage;
+  const productName = tProduct(product.id, lang, "name", product.name);
   const text =
     lang === "en"
-      ? `**${product.name}** added to your cart! 🛒 Anything else?`
+      ? `**${productName}** added to your cart! 🛒 Anything else?`
       : lang === "ru"
-      ? `**${product.name}** добавлен в корзину! 🛒 Что-нибудь ещё?`
-      : `**${product.name}** pridėta į krepšelį! 🛒 Ar reikia ko nors dar?`;
+      ? `**${productName}** добавлен в корзину! 🛒 Что-нибудь ещё?`
+      : `**${productName}** pridėta į krepšelį! 🛒 Ar reikia ko nors dar?`;
 
   return { resolved: true, text, actions };
 }

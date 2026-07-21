@@ -11,6 +11,7 @@ import { describe, it, expect, printResults } from "./runner.ts";
 import { processMessage, createState } from "../brain.ts";
 import { findById } from "../menuSearch.ts";
 import type { ConversationState } from "../types.ts";
+import { tProduct } from "../../product-translations.ts";
 
 function state(lang = "lt"): ConversationState {
   return createState(lang);
@@ -489,6 +490,57 @@ describe("Sim: greeting with filler prefix", () => {
     const s = state();
     processMessage("nu labas vakaras", s);
     expect(s.lastRecommendedIds.length).toBe(0);
+  });
+});
+
+describe("Audit: localized product names in chatbot replies", () => {
+  const englishPrompts = [
+    "Can you recommend something?",
+    "What fish dishes do you have?",
+    "Recommend a traditional Lithuanian dish.",
+    "Do you have anything under €15?",
+  ];
+
+  for (const prompt of englishPrompts) {
+    it(`localizes every recommended product for: ${prompt}`, () => {
+      const s = state("en");
+      const reply = processMessage(prompt, s);
+      expect(s.lastRecommendedIds.length).toBeGreaterThan(0);
+      for (const id of s.lastRecommendedIds) {
+        const product = findById(id);
+        expect(product).toBeTruthy();
+        if (!product) continue;
+        const englishName = tProduct(product.id, "en", "name", product.name);
+        expect(reply).toContain(englishName);
+        if (englishName !== product.name) expect(reply).notToContain(product.name);
+      }
+    });
+  }
+
+  it("keeps canonical Lithuanian names in Lithuanian replies", () => {
+    const s = state("lt");
+    const reply = processMessage("Ką rekomenduojate?", s);
+    for (const id of s.lastRecommendedIds) {
+      const product = findById(id);
+      if (product) expect(reply).toContain(product.name);
+    }
+  });
+
+  it("localizes add-to-cart confirmations and cart summaries", () => {
+    const s = state("en");
+    processMessage("Can you recommend something?", s);
+    const product = findById(s.lastRecommendedIds[0]);
+    expect(product).toBeTruthy();
+    if (!product) return;
+
+    const addReply = processMessage("I'll take the first one", s);
+    const englishName = tProduct(product.id, "en", "name", product.name);
+    expect(addReply).toContain(englishName);
+
+    s.cartItems = [{ productId: product.id, quantity: 1, name: product.name, price: product.price }];
+    const cartReply = processMessage("What's in my cart?", s);
+    expect(cartReply).toContain(englishName);
+    if (englishName !== product.name) expect(cartReply).notToContain(product.name);
   });
 });
 

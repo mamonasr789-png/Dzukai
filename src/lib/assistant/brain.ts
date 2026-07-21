@@ -52,6 +52,7 @@ import { keywordSearch, pickKeywordResults } from "./keywordSearch.ts";
 import { applyFilters, applyHardFilters } from "./filterEngine.ts";
 import type { AssistantAction, ConversationMode, ConversationState, NLUResult } from "./types.ts";
 import type { Category, Product } from "../data.ts";
+import { tProduct } from "../product-translations.ts";
 
 export type { ConversationState };
 export { createState };
@@ -331,10 +332,23 @@ function handleIngredients(nlu: NLUResult, state: ConversationState): string {
 function handlePrice(nlu: NLUResult, state: ConversationState): string {
   const product = findDishForTurn(nlu, state);
   if (!product) return buildResponse({ intent: "unknown" }, state);
+  const lang = state.currentLanguage;
   state.lastRecommendedIds = [];
   if (FOOD_CATEGORIES.includes(product.category as Category)) state.lastFoodDishId = product.id;
-  const price = product.price > 0 ? `${product.price.toFixed(2)} €` : "teirautis padavėjo";
-  return `**${product.name}** kainuoja ${price}${product.priceNote ? ` (${product.priceNote})` : ""}.`;
+  const productName = tProduct(product.id, lang, "name", product.name);
+  const price = product.price > 0
+    ? `${product.price.toFixed(2)} €`
+    : lang === "en"
+    ? "ask your waiter"
+    : lang === "ru"
+    ? "уточните у официанта"
+    : "teirautis padavėjo";
+  const priceNote = lang === "lt" && product.priceNote ? ` (${product.priceNote})` : "";
+  return lang === "en"
+    ? `**${productName}** costs ${price}${priceNote}.`
+    : lang === "ru"
+    ? `**${productName}** стоит ${price}${priceNote}.`
+    : `**${productName}** kainuoja ${price}${priceNote}.`;
 }
 
 function handleMenuSearch(nlu: NLUResult, state: ConversationState): string {
@@ -444,11 +458,12 @@ function handleAddToCart(nlu: NLUResult, state: ConversationState): string {
   state.hasUnclaimedRecommendation = false;
   const action: AssistantAction = { type: "ADD_TO_CART", productId: dish.id, quantity: 1 };
   state.pendingActions = [action];
+  const dishName = tProduct(dish.id, lang, "name", dish.name);
   return lang === "en"
-    ? `**${dish.name}** has been added to your cart! 🛒`
+    ? `**${dishName}** has been added to your cart! 🛒`
     : lang === "ru"
-    ? `**${dish.name}** добавлен в корзину! 🛒`
-    : `**${dish.name}** pridėta į krepšelį! 🛒`;
+    ? `**${dishName}** добавлен в корзину! 🛒`
+    : `**${dishName}** pridėta į krepšelį! 🛒`;
 }
 
 function handleRemoveFromCart(nlu: NLUResult, state: ConversationState): string {
@@ -472,12 +487,13 @@ function handleRemoveFromCart(nlu: NLUResult, state: ConversationState): string 
 
   state.pendingActions = [{ type: "REMOVE_FROM_CART", productId: product.id }];
   state.lastCartAddedProductId = undefined;
+  const productName = tProduct(product.id, lang, "name", product.name);
 
   return lang === "en"
-    ? `**${product.name}** removed from your cart.`
+    ? `**${productName}** removed from your cart.`
     : lang === "ru"
-    ? `**${product.name}** убран из корзины.`
-    : `**${product.name}** pašalintas iš krepšelio.`;
+    ? `**${productName}** убран из корзины.`
+    : `**${productName}** pašalintas iš krepšelio.`;
 }
 
 function handleCartSummary(state: ConversationState): string {
@@ -494,7 +510,7 @@ function handleCartSummary(state: ConversationState): string {
 
   const total = items.reduce((s, i) => s + i.price * i.quantity, 0);
   const lines = items.map(
-    (i) => `• **${i.name}** ×${i.quantity} — ${(i.price * i.quantity).toFixed(2)}€`
+    (i) => `• **${tProduct(i.productId, lang, "name", i.name)}** ×${i.quantity} — ${(i.price * i.quantity).toFixed(2)}€`
   );
   const header =
     lang === "en" ? "Your cart:" : lang === "ru" ? "Ваша корзина:" : "Jūsų krepšelyje:";

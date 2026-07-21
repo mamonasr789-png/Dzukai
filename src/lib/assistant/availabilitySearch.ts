@@ -3,6 +3,7 @@ import type { ConversationState } from "./types.ts";
 import { allProducts } from "./menuSearch.ts";
 import { productViolatesRestrictions } from "./restrictionEngine.ts";
 import { normalizeText } from "./normalizer.ts";
+import { tProduct } from "../product-translations.ts";
 
 export interface AvailabilityQuery {
   category?: Category[];
@@ -120,7 +121,7 @@ export function answerAvailability(input: string, state: ConversationState): Ava
       handled: true,
       found: shown,
       alternatives: [],
-      reply: `Taip, turime ${query.requestedLabel}:\n${formatProducts(shown)}`,
+      reply: buildFoundReply(query, shown, state.currentLanguage),
     };
   }
 
@@ -129,8 +130,17 @@ export function answerAvailability(input: string, state: ConversationState): Ava
     handled: true,
     found: [],
     alternatives,
-    reply: buildNotFoundReply(query, alternatives),
+    reply: buildNotFoundReply(query, alternatives, state.currentLanguage),
   };
+}
+
+function buildFoundReply(query: AvailabilityQuery, products: Product[], lang: string): string {
+  const intro = lang === "en"
+    ? "Yes, we have these options:"
+    : lang === "ru"
+    ? "Да, у нас есть такие варианты:"
+    : `Taip, turime ${query.requestedLabel}:`;
+  return `${intro}\n${formatProducts(products, lang)}`;
 }
 
 function parseAvailabilityQuery(text: string): AvailabilityQuery {
@@ -184,18 +194,28 @@ function closestAlternatives(query: AvailabilityQuery, categoryPool: Product[], 
   });
 }
 
-function buildNotFoundReply(query: AvailabilityQuery, alternatives: Product[]): string {
+function buildNotFoundReply(query: AvailabilityQuery, alternatives: Product[], lang: string): string {
+  if (lang === "en") {
+    return alternatives.length === 0
+      ? "I don't see an exact match on the menu, and there are no close alternatives right now."
+      : `I don't see an exact match on the menu. Here are the closest alternatives:\n${formatProducts(alternatives, lang)}`;
+  }
+  if (lang === "ru") {
+    return alternatives.length === 0
+      ? "Точного совпадения в меню нет, и сейчас нет близких альтернатив."
+      : `Точного совпадения в меню нет. Могу предложить ближайшие альтернативы:\n${formatProducts(alternatives, lang)}`;
+  }
   const base = `${capitalize(query.requestedLabel)} meniu nematau.`;
   if (alternatives.length === 0) {
     return `${base} Šiuo metu artimų alternatyvų pagal šį užklausimą neturiu.`;
   }
-  return `${base} Galiu pasiūlyti artimiausias alternatyvas:\n${formatProducts(alternatives)}`;
+  return `${base} Galiu pasiūlyti artimiausias alternatyvas:\n${formatProducts(alternatives, lang)}`;
 }
 
-function formatProducts(products: Product[]): string {
+function formatProducts(products: Product[], lang: string): string {
   return products.map((p) => {
     const price = p.price > 0 ? ` — **${p.price.toFixed(2)} €**` : "";
-    return `• **${p.name}**${price}`;
+    return `• **${tProduct(p.id, lang, "name", p.name)}**${price}`;
   }).join("\n");
 }
 

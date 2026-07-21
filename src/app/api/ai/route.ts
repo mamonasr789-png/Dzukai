@@ -1,16 +1,18 @@
 import { NextRequest } from "next/server";
 import { products } from "@/lib/data";
+import { tProduct } from "@/lib/product-translations";
 
 // ── Menu context ──────────────────────────────────────────────────────────────
 // Builds a compact but complete representation of every menu item.
 // Sent as part of the system prompt on every request.
 
-function buildMenuContext(): string {
+function buildMenuContext(lang: string): string {
   const lines = products.map((p) => {
     const price = p.price > 0 ? `${p.price.toFixed(2)}€` : "ask";
     const ing   = p.ingredients.join(", ") || "-";
     const alg   = p.allergens.join(", ")   || "none";
-    return `${p.id}|${p.name}|${price}|${p.category}|${ing}|${alg}|${p.description}`;
+    const name = tProduct(p.id, lang, "name", p.name);
+    return `${p.id}|${name}|${price}|${p.category}|${ing}|${alg}|${p.description}`;
   });
   return lines.join("\n");
 }
@@ -88,7 +90,8 @@ export async function POST(req: NextRequest) {
     lang: string;
   };
 
-  const system = buildSystemPrompt(lang ?? "en", buildMenuContext());
+  const responseLanguage = lang ?? "en";
+  const system = buildSystemPrompt(responseLanguage, buildMenuContext(responseLanguage));
 
   const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",

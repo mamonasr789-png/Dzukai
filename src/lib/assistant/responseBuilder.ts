@@ -10,18 +10,19 @@
  */
 
 import type { Product } from "../data.ts";
+import { tProduct } from "../product-translations.ts";
 import type { Intent, ConversationState, PairingResult, RecommendationResult } from "./types.ts";
 import { findById } from "./menuSearch.ts";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
-export function fmtProduct(p: Product): string {
+export function fmtProduct(p: Product, lang: string): string {
   const price = p.price > 0 ? ` — **${p.price.toFixed(2)} €**` : "";
-  return `• **${p.name}**${price}`;
+  return `• **${tProduct(p.id, lang, "name", p.name)}**${price}`;
 }
 
-export function fmtList(products: Product[]): string {
-  return products.map(fmtProduct).join("\n");
+export function fmtList(products: Product[], lang: string): string {
+  return products.map((product) => fmtProduct(product, lang)).join("\n");
 }
 
 function one<T>(arr: T[]): T {
@@ -72,7 +73,7 @@ function foodRecommendationResponse(
   };
 
   const intro = one(intros[lang as keyof typeof intros] ?? intros.lt);
-  const list = fmtList(products);
+  const list = fmtList(products, lang);
   const suffix = poolExhausted
     ? t(lang, {
         lt: "\n\nПерегледіл усе — починаємо спочатку 😊",
@@ -107,7 +108,7 @@ function changeResponse(
       lt: "Parodžiau viską — pradedu iš naujo:\n",
       en: "I've shown you everything — restarting:\n",
       ru: "Показал всё — начинаю сначала:\n",
-    }) + fmtList(products);
+    }) + fmtList(products, lang);
   }
 
   const intros = {
@@ -117,7 +118,7 @@ function changeResponse(
   };
 
   const intro = one(intros[lang as keyof typeof intros] ?? intros.lt);
-  return `${intro}\n${fmtList(products)}`;
+  return `${intro}\n${fmtList(products, lang)}`;
 }
 
 /** Drink / beer / wine / cocktail response */
@@ -130,7 +131,7 @@ function drinkResponse(
   const lang = state.currentLanguage;
 
   if (pairing?.explanation) {
-    const drinkList = pairing.drinks.length > 0 ? `\n${fmtList(pairing.drinks)}` : "";
+    const drinkList = pairing.drinks.length > 0 ? `\n${fmtList(pairing.drinks, lang)}` : "";
     return `${pairing.explanation}${drinkList}`;
   }
 
@@ -148,7 +149,7 @@ function drinkResponse(
     ru: ["Наши напитки:", "Предлагаю:", "Из напитков:"],
   };
 
-  return `${one(intros[lang as keyof typeof intros] ?? intros.lt)}\n${fmtList(products)}`;
+  return `${one(intros[lang as keyof typeof intros] ?? intros.lt)}\n${fmtList(products, lang)}`;
 }
 
 /** Beer recommendation — show all beers with tasting note */
@@ -171,7 +172,7 @@ function beerResponse(
     ru: "\n\nХотите попробовать все? **Дегустация пива** (14,00 €) — 6 бокалов сразу.",
   });
 
-  return `${intro}\n${fmtList(products)}${tail}`;
+  return `${intro}\n${fmtList(products, lang)}${tail}`;
 }
 
 /** Dessert response */
@@ -194,13 +195,13 @@ function dessertResponse(
     ru: "\n\nК десерту — эспрессо или тёплый чай.",
   });
 
-  return `${intro}\n${fmtList(products)}${tail}`;
+  return `${intro}\n${fmtList(products, lang)}${tail}`;
 }
 
 /** Pairing response (user asked "o prie šito?") */
 function pairingResponse(pairing: PairingResult, state: ConversationState): string {
   const lang = state.currentLanguage;
-  const drinkList = pairing.drinks.length > 0 ? `\n${fmtList(pairing.drinks)}` : "";
+  const drinkList = pairing.drinks.length > 0 ? `\n${fmtList(pairing.drinks, lang)}` : "";
   return `${pairing.explanation}${drinkList}`;
 }
 
@@ -232,7 +233,7 @@ function dietResponse(
     });
   }
 
-  return `${intro}\n${fmtList(products)}`;
+  return `${intro}\n${fmtList(products, lang)}`;
 }
 
 /** Cheap food response */
@@ -256,7 +257,7 @@ function cheapResponse(
     ? t(lang, { lt: `Iki **${budget} €**:`, en: `Under **€${budget}**:`, ru: `До **${budget} €**:` })
     : t(lang, { lt: "Ekonomiškai:", en: "Budget options:", ru: "Бюджетные варианты:" });
 
-  return `${intro}\n${fmtList(products)}`;
+  return `${intro}\n${fmtList(products, lang)}`;
 }
 
 /** Kids menu response */
@@ -281,7 +282,7 @@ function kidsResponse(
     ru: "Детское меню:",
   });
 
-  return `${intro}\n${fmtList(products)}`;
+  return `${intro}\n${fmtList(products, lang)}`;
 }
 
 /** Ingredient / allergen info for a specific product */
@@ -294,7 +295,8 @@ function ingredientResponse(product: Product, state: ConversationState): string 
   const ingLabel = t(lang, { lt: "Sudėtis", en: "Ingredients", ru: "Состав" });
   const algLabel = t(lang, { lt: "Alergenai", en: "Allergens", ru: "Аллергены" });
 
-  return `**${product.name}**\n${ingLabel}: ${product.ingredients.join(", ")}\n${algLabel}: ${alg}`;
+  const productName = tProduct(product.id, lang, "name", product.name);
+  return `**${productName}**\n${ingLabel}: ${product.ingredients.join(", ")}\n${algLabel}: ${alg}`;
 }
 
 /** Ask which dish when ingredient question but no dish context */
@@ -315,8 +317,11 @@ function restaurantInfoResponse(state: ConversationState, infoText: string): str
 /** Positive confirmation — user agreed to a suggestion */
 function confirmationResponse(state: ConversationState): string {
   const lang = state.currentLanguage;
-  const dish = state.lastRecommendedIds[0]
-    ? findById(state.lastRecommendedIds[0])?.name
+  const product = state.lastRecommendedIds[0]
+    ? findById(state.lastRecommendedIds[0])
+    : undefined;
+  const dish = product
+    ? tProduct(product.id, lang, "name", product.name)
     : null;
 
   // NOTE: this response carries no cart action, so it must never claim

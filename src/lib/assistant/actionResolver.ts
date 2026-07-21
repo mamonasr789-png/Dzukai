@@ -17,6 +17,7 @@ import { findById, findProductByInflectedName, FOOD_CATEGORIES } from "./menuSea
 import { normalizeText } from "./synonyms.ts";
 import { clearPendingSuggestion } from "./confirmationContext.ts";
 import type { Category } from "../data.ts";
+import { tProduct } from "../product-translations.ts";
 
 export interface CartResolution {
   text: string;
@@ -176,12 +177,13 @@ function buildResolution(
 
   const actions: AssistantAction[] = [{ type: "ADD_TO_CART", productId: product.id, quantity }];
   const qty = quantity > 1 ? ` ×${quantity}` : "";
+  const productName = tProduct(product.id, lang, "name", product.name);
   const text =
     lang === "en"
-      ? `**${product.name}**${qty} added to your cart! 🛒 Anything else?`
+      ? `**${productName}**${qty} added to your cart! 🛒 Anything else?`
       : lang === "ru"
-      ? `**${product.name}**${qty} добавлен в корзину! 🛒 Что-нибудь ещё?`
-      : `**${product.name}**${qty} pridėta į krepšelį! 🛒 Ar reikia ko nors dar?`;
+      ? `**${productName}**${qty} добавлен в корзину! 🛒 Что-нибудь ещё?`
+      : `**${productName}**${qty} pridėta į krepšelį! 🛒 Ar reikia ko nors dar?`;
 
   return { text, actions };
 }
@@ -221,12 +223,14 @@ export function resolveCartAction(
       if (old) {
         const swap = buildResolution(pick, parseQuantity(normalizedInput), lang, state);
         swap.actions.unshift({ type: "REMOVE_FROM_CART", productId: old.id });
+        const oldName = tProduct(old.id, lang, "name", old.name);
+        const pickName = tProduct(pick.id, lang, "name", pick.name);
         swap.text =
           lang === "en"
-            ? `Swapped **${old.name}** for **${pick.name}**! 🛒 Anything else?`
+            ? `Swapped **${oldName}** for **${pickName}**! 🛒 Anything else?`
             : lang === "ru"
-            ? `Заменил **${old.name}** на **${pick.name}**! 🛒 Что-нибудь ещё?`
-            : `Pakeičiau: **${old.name}** → **${pick.name}**! 🛒 Ar reikia ko nors dar?`;
+            ? `Заменил **${oldName}** на **${pickName}**! 🛒 Что-нибудь ещё?`
+            : `Pakeičiau: **${oldName}** → **${pickName}**! 🛒 Ar reikia ko nors dar?`;
         return swap;
       }
     }
