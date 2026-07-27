@@ -7,6 +7,45 @@ function safeSessionIdentifier(sessionId: DiningSessionId): string {
   return createHash("sha256").update(sessionId).digest("hex").slice(0, 12);
 }
 
+export interface SafeTurnLog {
+  turnId: string | null;
+  sessionId: DiningSessionId;
+  provider: string;
+  fallbackUsed: boolean;
+  toolNames: ToolName[];
+  toolRounds: number;
+  validationFailureCategory?: string;
+  totalMs: number;
+  providerMs: number;
+  toolMs: number;
+  status: "success" | "error";
+}
+
+export function logSafeTurnEvent(log: SafeTurnLog): void {
+  if (process.env.NODE_ENV === "test") return;
+  const entry = {
+    event: "waiter_turn_completed",
+    turnId: log.turnId,
+    session: safeSessionIdentifier(log.sessionId),
+    provider: log.provider,
+    fallbackUsed: log.fallbackUsed,
+    toolNames: log.toolNames,
+    toolRounds: log.toolRounds,
+    validationFailureCategory: log.validationFailureCategory,
+    totalMs: log.totalMs,
+    providerMs: log.providerMs,
+    toolMs: log.toolMs,
+    status: log.status,
+  };
+  if (log.status === "error") {
+    console.error("[ai-waiter]", entry);
+    return;
+  }
+  if (process.env.NODE_ENV !== "production") {
+    console.info("[ai-waiter]", entry);
+  }
+}
+
 export interface SafeToolLog {
   event:
     | "tool_started"

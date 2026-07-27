@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import {
   ConversationStateSchema,
   type ConversationState,
+  type ConversationStateUpdate,
   type DiningSessionId,
   type SupportedLanguage,
 } from "../schemas.ts";
@@ -27,11 +28,19 @@ export interface CreateSessionCommand {
 export interface ConversationPreferencesUpdate {
   language?: ConversationState["language"];
   preferences?: ConversationState["preferences"];
+  temporaryPreferences?: ConversationState["temporaryPreferences"];
   dislikedIngredients?: ConversationState["dislikedIngredients"];
   dietaryRequirements?: ConversationState["dietaryRequirements"];
   allergies?: ConversationState["allergies"];
   budget?: ConversationState["budget"];
+  budgetScope?: ConversationState["budgetScope"];
   hungerLevel?: ConversationState["hungerLevel"];
+}
+
+export interface ConversationTurnMetadataUpdate {
+  lastIntent: string | null;
+  lastToolNames: string[];
+  lastInteractionAt: string;
 }
 
 type SessionCleanupHandler = (sessionId: DiningSessionId) => void | Promise<void>;
@@ -44,6 +53,11 @@ export interface ConversationStateStore {
   updatePreferences(
     sessionId: DiningSessionId,
     update: ConversationPreferencesUpdate
+  ): Promise<SafeOperationResult<ConversationState>>;
+  applyTurnUpdate(
+    sessionId: DiningSessionId,
+    update: ConversationStateUpdate,
+    metadata: ConversationTurnMetadataUpdate
   ): Promise<SafeOperationResult<ConversationState>>;
   updateConversationStage(
     sessionId: DiningSessionId,
@@ -137,15 +151,25 @@ export class InMemoryConversationStateStore implements ConversationStateStore {
         preferredProteins: [],
         preferredDrinks: [],
       },
+      temporaryPreferences: {
+        preferredProductIds: [],
+        preferredCategories: [],
+        preferredProteins: [],
+        preferredDrinks: [],
+      },
       dislikedIngredients: [],
       dietaryRequirements: [],
       allergies: [],
       budget: null,
+      budgetScope: null,
       hungerLevel: null,
       latestReferencedProductIds: [],
       unresolvedQuestion: null,
       ambiguity: null,
       cartRevision: 0,
+      lastIntent: null,
+      lastToolNames: [],
+      lastInteractionAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
       expiresAt: new Date(now + this.ttlMs).toISOString(),
@@ -168,17 +192,68 @@ export class InMemoryConversationStateStore implements ConversationStateStore {
       ...state,
       language: update.language ?? state.language,
       preferences: update.preferences ?? state.preferences,
+      temporaryPreferences:
+        update.temporaryPreferences ?? state.temporaryPreferences,
       dislikedIngredients:
         update.dislikedIngredients ?? state.dislikedIngredients,
       dietaryRequirements:
         update.dietaryRequirements ?? state.dietaryRequirements,
       allergies: update.allergies ?? state.allergies,
       budget: update.budget === undefined ? state.budget : update.budget,
+      budgetScope:
+        update.budgetScope === undefined
+          ? state.budgetScope
+          : update.budgetScope,
       hungerLevel:
         update.hungerLevel === undefined
           ? state.hungerLevel
           : update.hungerLevel,
     }));
+  }
+
+  async applyTurnUpdate(
+    sessionId: DiningSessionId,
+    update: ConversationStateUpdate,
+    metadata: ConversationTurnMetadataUpdate
+  ): Promise<SafeOperationResult<ConversationState>> {
+    return this.mutateSession(
+      sessionId,
+      (state) => ({
+        ...state,
+        language: update.language ?? state.language,
+        stage: update.stage ?? state.stage,
+        preferences: update.preferences ?? state.preferences,
+        temporaryPreferences:
+          update.temporaryPreferences ?? state.temporaryPreferences,
+        dislikedIngredients:
+          update.dislikedIngredients ?? state.dislikedIngredients,
+        dietaryRequirements:
+          update.dietaryRequirements ?? state.dietaryRequirements,
+        allergies: update.allergies ?? state.allergies,
+        budget: update.budget === undefined ? state.budget : update.budget,
+        budgetScope:
+          update.budgetScope === undefined
+            ? state.budgetScope
+            : update.budgetScope,
+        hungerLevel:
+          update.hungerLevel === undefined
+            ? state.hungerLevel
+            : update.hungerLevel,
+        latestReferencedProductIds:
+          update.latestReferencedProductIds ??
+          state.latestReferencedProductIds,
+        unresolvedQuestion:
+          update.unresolvedQuestion === undefined
+            ? state.unresolvedQuestion
+            : update.unresolvedQuestion,
+        ambiguity:
+          update.ambiguity === undefined ? state.ambiguity : update.ambiguity,
+        lastIntent: metadata.lastIntent,
+        lastToolNames: metadata.lastToolNames.slice(0, 8),
+        lastInteractionAt: metadata.lastInteractionAt,
+      }),
+      true
+    );
   }
 
   async updateConversationStage(

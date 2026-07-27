@@ -8,6 +8,7 @@
     "src/lib/ai-waiter/**/*.ts",
     "src/app/api/ai/session/route.ts",
     "src/app/api/ai/tools/route.ts",
+    "src/app/api/ai/turn/route.ts",
     ".next/types/**/*.ts"
   ],
   "exclude": ["node_modules"]

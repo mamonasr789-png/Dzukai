@@ -59,6 +59,13 @@ export const IdempotencyKeySchema = z
   .min(8)
   .max(80)
   .regex(/^[A-Za-z0-9_-]+$/);
+export const ClientTurnIdSchema = z
+  .string()
+  .trim()
+  .min(8)
+  .max(80)
+  .regex(/^[A-Za-z0-9_-]+$/);
+export type ClientTurnId = z.infer<typeof ClientTurnIdSchema>;
 
 export const ProductReferenceSchema = z
   .object({
@@ -122,6 +129,13 @@ export const CustomerPreferencesSchema = z
   })
   .strict();
 
+export const BudgetScopeSchema = z
+  .object({
+    kind: z.enum(["total", "per_person"]),
+    partySize: z.number().int().positive().max(100).nullable(),
+  })
+  .strict();
+
 export const ConversationStageSchema = z.enum([
   "greeting",
   "discovering_preferences",
@@ -164,15 +178,25 @@ export const ConversationStateSchema = z
     language: SupportedLanguageSchema,
     stage: ConversationStageSchema,
     preferences: CustomerPreferencesSchema,
+    temporaryPreferences: CustomerPreferencesSchema.default({
+      preferredProductIds: [],
+      preferredCategories: [],
+      preferredProteins: [],
+      preferredDrinks: [],
+    }),
     dislikedIngredients: z.array(ShortTextSchema).max(30),
     dietaryRequirements: z.array(DietaryRequirementSchema).max(12),
     allergies: z.array(AllergySchema).max(20),
     budget: z.number().finite().positive().max(1_000).nullable(),
+    budgetScope: BudgetScopeSchema.nullable().default(null),
     hungerLevel: HungerLevelSchema.nullable(),
     latestReferencedProductIds: z.array(ProductIdSchema).max(10),
     unresolvedQuestion: UnresolvedQuestionSchema.nullable(),
     ambiguity: AmbiguityStateSchema.nullable(),
     cartRevision: RevisionSchema,
+    lastIntent: IdentifierSchema.nullable().default(null),
+    lastToolNames: z.array(IdentifierSchema).max(8).default([]),
+    lastInteractionAt: IsoDateSchema.nullable().default(null),
     createdAt: IsoDateSchema,
     updatedAt: IsoDateSchema,
     expiresAt: IsoDateSchema,
@@ -184,9 +208,40 @@ export const ConversationTurnRequestSchema = z
   .object({
     sessionId: DiningSessionIdSchema,
     message: CustomerMessageSchema,
-    language: SupportedLanguageSchema.optional(),
+    clientTurnId: ClientTurnIdSchema.optional(),
+    requestedLanguage: SupportedLanguageSchema.optional(),
   })
   .strict();
+export type ConversationTurnRequest = z.infer<
+  typeof ConversationTurnRequestSchema
+>;
+
+export const ConversationStateUpdateSchema = z
+  .object({
+    language: SupportedLanguageSchema.optional(),
+    stage: ConversationStageSchema.optional(),
+    preferences: CustomerPreferencesSchema.optional(),
+    temporaryPreferences: CustomerPreferencesSchema.optional(),
+    dislikedIngredients: z.array(ShortTextSchema).max(30).optional(),
+    dietaryRequirements: z
+      .array(DietaryRequirementSchema)
+      .max(12)
+      .optional(),
+    allergies: z.array(AllergySchema).max(20).optional(),
+    budget: z.number().finite().positive().max(1_000).nullable().optional(),
+    budgetScope: BudgetScopeSchema.nullable().optional(),
+    hungerLevel: HungerLevelSchema.nullable().optional(),
+    latestReferencedProductIds: z
+      .array(ProductIdSchema)
+      .max(10)
+      .optional(),
+    unresolvedQuestion: UnresolvedQuestionSchema.nullable().optional(),
+    ambiguity: AmbiguityStateSchema.nullable().optional(),
+  })
+  .strict();
+export type ConversationStateUpdate = z.infer<
+  typeof ConversationStateUpdateSchema
+>;
 
 export const AllergenCertaintySchema = z.enum(["confirmed", "incomplete", "unknown"]);
 export const AllergenStatusSchema = z
@@ -506,3 +561,162 @@ export const CreateDiningSessionResponseSchema = z
     state: ConversationStateSchema,
   })
   .strict();
+
+export const WaiterReferenceSchema = z
+  .object({
+    productId: ProductIdSchema,
+    name: ShortTextSchema,
+    officialUnitPrice: z.number().finite().nonnegative().max(100_000),
+    currency: z.literal("EUR"),
+  })
+  .strict();
+export type WaiterReference = z.infer<typeof WaiterReferenceSchema>;
+
+export const WaiterActionSchema = z
+  .object({
+    type: z.enum([
+      "cart_updated",
+      "staff_requested",
+      "clarification_required",
+    ]),
+    toolName: ToolNameSchema.optional(),
+    targetId: IdentifierSchema.nullable().default(null),
+  })
+  .strict();
+export type WaiterAction = z.infer<typeof WaiterActionSchema>;
+
+export const TurnResultStatusSchema = z.enum([
+  "success",
+  "success_with_response_fallback",
+  "partial_success_state_update_failed",
+  "clarification_required",
+  "rejected_action",
+  "provider_failed_without_side_effect",
+  "internal_failure_without_side_effect",
+]);
+export type TurnResultStatus = z.infer<typeof TurnResultStatusSchema>;
+
+export const ActionTypeSchema = z.enum([
+  "add_to_cart",
+  "update_cart_item",
+  "remove_from_cart",
+  "clear_cart",
+  "request_waiter",
+  "request_bill",
+]);
+export type ActionType = z.infer<typeof ActionTypeSchema>;
+
+export const ActionIntentSchema = z
+  .object({
+    actionType: ActionTypeSchema.nullable(),
+    affirmation: z.enum(["affirmative", "negative", "uncertain"]),
+    negated: z.boolean(),
+    hypothetical: z.boolean(),
+    ambiguous: z.boolean(),
+    informationalOnly: z.boolean(),
+    comparisonOnly: z.boolean(),
+    futureIntent: z.boolean(),
+    thirdPartyIntent: z.boolean(),
+    targetType: z
+      .enum(["product", "cart_line", "cart", "staff"])
+      .nullable(),
+    targetIds: z.array(IdentifierSchema).max(10),
+    quantity: z.number().int().positive().max(20).nullable(),
+    customerNote: CustomerNoteSchema.nullable(),
+    evidence: z.string().trim().max(500),
+    confidence: z.enum(["high", "medium", "low"]),
+    clarificationReason: IdentifierSchema.nullable(),
+  })
+  .strict();
+export type ActionIntent = z.infer<typeof ActionIntentSchema>;
+
+export const ActionLedgerEntrySchema = z
+  .object({
+    actionId: IdentifierSchema,
+    turnId: IdentifierSchema,
+    intent: ActionIntentSchema,
+    toolName: ActionTypeSchema,
+    canonicalInputFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    status: z.enum(["authorized", "executing", "succeeded", "failed"]),
+    result: z
+      .object({
+        ok: z.boolean(),
+        code: IdentifierSchema.nullable(),
+        replayed: z.boolean(),
+      })
+      .strict()
+      .nullable(),
+    affectedId: IdentifierSchema.nullable(),
+    timestamp: IsoDateSchema,
+  })
+  .strict();
+export type ActionLedgerEntry = z.infer<typeof ActionLedgerEntrySchema>;
+
+export const WaiterTurnDebugSchema = z
+  .object({
+    provider: IdentifierSchema,
+    fallbackUsed: z.boolean(),
+    toolNames: z.array(ToolNameSchema).max(8),
+    toolRounds: z.number().int().nonnegative().max(4),
+    totalMs: z.number().int().nonnegative(),
+    providerMs: z.number().int().nonnegative(),
+    toolMs: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const WaiterTurnDataSchema = z
+  .object({
+    message: safeText(1_500),
+    language: SupportedLanguageSchema,
+    stage: ConversationStageSchema,
+    references: z.array(WaiterReferenceSchema).max(10),
+    cart: CartSchema,
+    actions: z.array(WaiterActionSchema).max(8),
+    status: TurnResultStatusSchema.default("success"),
+    actionLedger: z.array(ActionLedgerEntrySchema).max(1).default([]),
+    fallbackUsed: z.boolean(),
+    replayed: z.boolean(),
+    debug: WaiterTurnDebugSchema.optional(),
+  })
+  .strict();
+export type WaiterTurnData = z.infer<typeof WaiterTurnDataSchema>;
+
+export const WaiterTurnSuccessSchema = z
+  .object({
+    ok: z.literal(true),
+    data: WaiterTurnDataSchema,
+  })
+  .strict();
+
+export const WaiterTurnErrorCodeSchema = z.enum([
+  "invalid_request",
+  "session_not_found",
+  "turn_id_conflict",
+  "rate_limited",
+  "storage_not_configured",
+  "storage_capacity_exceeded",
+  "provider_limit_exceeded",
+  "safe_fallback_failed",
+  "internal_error",
+]);
+export type WaiterTurnErrorCode = z.infer<
+  typeof WaiterTurnErrorCodeSchema
+>;
+
+export const WaiterTurnErrorSchema = z
+  .object({
+    ok: z.literal(false),
+    error: z
+      .object({
+        code: WaiterTurnErrorCodeSchema,
+        message: safeText(240),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const WaiterTurnResultSchema = z.union([
+  WaiterTurnSuccessSchema,
+  WaiterTurnErrorSchema,
+]);
+export type WaiterTurnResult = z.infer<typeof WaiterTurnResultSchema>;

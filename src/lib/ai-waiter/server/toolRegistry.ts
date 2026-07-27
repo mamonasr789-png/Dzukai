@@ -392,6 +392,7 @@ export class SafeToolRegistry {
           ...state.allergies,
           ...parsed.data.allergies,
         ]),
+        preferredProteins: state.preferences.preferredProteins,
       },
       state.language
     );

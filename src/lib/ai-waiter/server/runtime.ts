@@ -1,11 +1,17 @@
 import "server-only";
 
 import { StandaloneVaiseCartAdapter } from "./cartPort.ts";
+import { InMemoryActionLedger } from "./actionLedger.ts";
+import { AnthropicAIProvider } from "./anthropicProvider.ts";
 import { InMemoryConversationStateStore } from "./conversationStateStore.ts";
+import { DeterministicFallbackProvider } from "./deterministicFallbackProvider.ts";
 import { StaticMenuRepository } from "./menuRepository.ts";
 import { InMemoryRateLimitAdapter } from "./rateLimitPort.ts";
 import { InMemoryStaffTaskAdapter } from "./staffTaskPort.ts";
 import { SafeToolRegistry } from "./toolRegistry.ts";
+import { WaiterTurnController } from "./turnController.ts";
+import { InMemoryTurnIdempotencyStore } from "./turnIdempotencyStore.ts";
+import { InMemorySessionTurnCoordinator } from "./sessionTurnCoordinator.ts";
 
 export const runtimeStorageKind = "process-local-memory" as const;
 
@@ -41,12 +47,26 @@ export const cartPort = new StandaloneVaiseCartAdapter(
 export const staffTaskPort = new InMemoryStaffTaskAdapter(
   conversationStateStore
 );
+export const turnIdempotencyStore =
+  new InMemoryTurnIdempotencyStore();
+export const actionLedger = new InMemoryActionLedger();
+export const sessionTurnCoordinator =
+  new InMemorySessionTurnCoordinator();
 
 conversationStateStore.registerSessionCleanup((sessionId) =>
   cartPort.cleanupSession(sessionId)
 );
 conversationStateStore.registerSessionCleanup((sessionId) =>
   staffTaskPort.cleanupSession(sessionId)
+);
+conversationStateStore.registerSessionCleanup((sessionId) =>
+  turnIdempotencyStore.cleanupSession(sessionId)
+);
+conversationStateStore.registerSessionCleanup((sessionId) =>
+  actionLedger.cleanupSession(sessionId)
+);
+conversationStateStore.registerSessionCleanup((sessionId) =>
+  sessionTurnCoordinator.cleanupSession(sessionId)
 );
 
 export const safeToolRegistry = new SafeToolRegistry(
@@ -56,6 +76,20 @@ export const safeToolRegistry = new SafeToolRegistry(
   staffTaskPort,
   rateLimitPort
 );
+export const anthropicProvider = new AnthropicAIProvider();
+export const deterministicFallbackProvider =
+  new DeterministicFallbackProvider();
+export const waiterTurnController = new WaiterTurnController({
+  conversationStore: conversationStateStore,
+  menuRepository,
+  cartPort,
+  toolRegistry: safeToolRegistry,
+  provider: anthropicProvider,
+  fallbackProvider: deterministicFallbackProvider,
+  turnIdempotency: turnIdempotencyStore,
+  actionLedger,
+  sessionCoordinator: sessionTurnCoordinator,
+});
 
 export async function resetDevelopmentRuntime(): Promise<void> {
   if (process.env.NODE_ENV === "production") {
@@ -65,4 +99,7 @@ export async function resetDevelopmentRuntime(): Promise<void> {
   await cartPort.reset();
   await staffTaskPort.reset();
   await rateLimitPort.reset();
+  await turnIdempotencyStore.reset();
+  await actionLedger.reset();
+  await sessionTurnCoordinator.reset();
 }

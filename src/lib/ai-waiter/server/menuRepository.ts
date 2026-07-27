@@ -19,6 +19,7 @@ export interface RecommendationCandidateOptions {
   excludeProductIds: string[];
   dietaryRequirements: ConversationState["dietaryRequirements"];
   allergies: ConversationState["allergies"];
+  preferredProteins?: string[];
   limit: number;
 }
 
@@ -122,6 +123,13 @@ const ALCOHOL_TERMS = [
   "džinas",
   "dzinas",
 ];
+
+const PROTEIN_TERMS: Record<string, string[]> = {
+  beef: ["jautien"],
+  chicken: ["vistien"],
+  pork: ["kiaulien", "sonin", "kump"],
+  fish: ["zuv", "tunas", "lasis", "silk"],
+};
 
 function normalize(value: string): string {
   return value
@@ -301,6 +309,15 @@ export class StaticMenuRepository implements MenuRepository {
           )
       )
       .filter((product) => !hasExplicitAllergenConflict(product, options.allergies))
+      .filter((product) => {
+        if (!options.preferredProteins?.length) return true;
+        const searchable = productText(product);
+        return options.preferredProteins.some((protein) =>
+          (PROTEIN_TERMS[protein] ?? [normalize(protein)]).some((term) =>
+            searchable.includes(term)
+          )
+        );
+      })
       .slice(0, options.limit)
       .map(toDetails);
   }
