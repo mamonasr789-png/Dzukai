@@ -343,7 +343,11 @@ export function readStoredSessionId(
   } catch {
     // Invalid local display state is discarded below.
   }
-  storage.removeItem(LIVE_WAITER_SESSION_KEY);
+  try {
+    storage.removeItem(LIVE_WAITER_SESSION_KEY);
+  } catch {
+    // Session restore remains optional if browser storage is unavailable.
+  }
   return null;
 }
 
@@ -352,10 +356,14 @@ export function storeSessionId(
   sessionId: string
 ): void {
   const parsed = DiningSessionIdSchema.parse(sessionId);
-  storage.setItem(
-    LIVE_WAITER_SESSION_KEY,
-    JSON.stringify({ version: 1, sessionId: parsed })
-  );
+  try {
+    storage.setItem(
+      LIVE_WAITER_SESSION_KEY,
+      JSON.stringify({ version: 1, sessionId: parsed })
+    );
+  } catch {
+    // A later mutation turn still fails closed if its identity cannot persist.
+  }
 }
 
 export async function establishDiningSession(command: {
@@ -408,7 +416,11 @@ export async function establishDiningSession(command: {
       };
     }
     if (restored.error.code !== "session_not_found") return restored;
-    command.storage.removeItem(LIVE_WAITER_SESSION_KEY);
+    try {
+      command.storage.removeItem(LIVE_WAITER_SESSION_KEY);
+    } catch {
+      // Session restoration is optional; the replacement remains server-owned.
+    }
     const replacement = await command.client.createSession(
       command.language,
       null
@@ -460,7 +472,7 @@ export class TurnSubmissionGate {
     message: string,
     selectionHint?: ClientSelectionHint
   ): TurnAttempt | null {
-    if (this.active) return null;
+    if (this.active || this.retryableAttempt) return null;
     const attempt = {
       message,
       clientTurnId: this.createTurnId(),

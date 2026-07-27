@@ -57,6 +57,10 @@ const COPY = {
     clearDisplay: "Išvalyti rodomą pokalbį",
     unknownOutcome:
       "Ankstesnės užklausos rezultatas nežinomas. Saugiai pakartokite tą pačią žinutę.",
+    resolveUnknownFirst:
+      "Prieš siųsdami naują užklausą užbaikite arba pakartokite ankstesnę.",
+    retryProtectionUnavailable:
+      "Užklausa neišsiųsta, nes nepavyko saugiai išsaugoti pakartojimo apsaugos. Patikrinkite naršyklės saugyklą ir bandykite dar kartą.",
     cartRefreshFailed:
       "Krepšelio nepavyko saugiai atnaujinti. Atkurkite jį iš serverio prieš tęsdami.",
     preferencesReset:
@@ -118,6 +122,10 @@ const COPY = {
     clearDisplay: "Clear displayed conversation",
     unknownOutcome:
       "The previous request outcome is unknown. Safely retry the exact same message.",
+    resolveUnknownFirst:
+      "Resolve or retry the previous request before starting a new one.",
+    retryProtectionUnavailable:
+      "The request was not sent because secure retry protection could not be saved. Check browser storage and try again.",
     cartRefreshFailed:
       "The cart could not be refreshed safely. Restore it from the server before continuing.",
     preferencesReset:
@@ -179,6 +187,10 @@ const COPY = {
     clearDisplay: "Очистить отображаемый диалог",
     unknownOutcome:
       "Результат предыдущего запроса неизвестен. Безопасно повторите то же сообщение.",
+    resolveUnknownFirst:
+      "Завершите или повторите предыдущий запрос, прежде чем отправлять новый.",
+    retryProtectionUnavailable:
+      "Запрос не отправлен: не удалось сохранить защиту безопасного повтора. Проверьте хранилище браузера и повторите попытку.",
     cartRefreshFailed:
       "Не удалось безопасно обновить корзину. Восстановите её с сервера перед продолжением.",
     preferencesReset:

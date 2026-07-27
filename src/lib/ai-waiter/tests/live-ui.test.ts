@@ -15,6 +15,7 @@ import {
   type SessionStoragePort,
 } from "../client/liveWaiterClient.ts";
 import {
+  clearPendingTurn,
   cleanupExpiredPendingTurns,
   loadDisplayTranscript,
   readPendingTurn,
@@ -709,7 +710,7 @@ test("session client keeps table tokens and session capabilities out of request 
 test("pending turns survive ambiguous transport, expire, and retain exact retry identity", async () => {
   const storage = new MemorySessionStorage();
   const sessionId = "ds_00000000000000000000000000000098";
-  const pending = storePendingTurn(
+  const stored = storePendingTurn(
     storage,
     {
       version: 1,
@@ -722,7 +723,13 @@ test("pending turns survive ambiguous transport, expire, and retain exact retry 
     },
     1_001
   );
-  assert.deepEqual(readPendingTurn(storage, sessionId, 2_000), pending);
+  assert.equal(stored.persisted, true);
+  if (!stored.persisted) return;
+  const pending = stored.pending;
+  const restored = readPendingTurn(storage, sessionId, 2_000);
+  assert.equal(restored.found, true);
+  if (!restored.found) return;
+  assert.deepEqual(restored.pending, pending);
   const gate = new TurnSubmissionGate(() => "ui_fresh_001");
   assert.equal(
     gate.recover({
@@ -736,7 +743,176 @@ test("pending turns survive ambiguous transport, expire, and retain exact retry 
     clientTurnId: "ui_pending_001",
   });
   cleanupExpiredPendingTurns(storage, 1_000 + 20 * 60 * 1_000 + 1);
-  assert.equal(readPendingTurn(storage, sessionId, Date.now()), null);
+  assert.equal(
+    readPendingTurn(storage, sessionId, Date.now()).status,
+    "not_found"
+  );
+});
+
+test("submission gate rejects new turns until an ambiguous same-ID attempt is closed", () => {
+  const gate = new TurnSubmissionGate(() => "ui_fresh_after_close_001");
+  const unresolved = {
+    message: "Add the first recommendation",
+    clientTurnId: "ui_unresolved_001",
+  };
+  assert.equal(gate.recover(unresolved), true);
+  assert.equal(gate.beginNew("Replace the unresolved turn"), null);
+  assert.deepEqual(gate.beginRetry(), unresolved);
+  gate.complete(unresolved, false);
+  assert.deepEqual(gate.beginNew("Intentional fresh turn"), {
+    message: "Intentional fresh turn",
+    clientTurnId: "ui_fresh_after_close_001",
+  });
+});
+
+test("pending storage allows same-record updates, rejects conflicts, and permits replacement only after clear", () => {
+  const storage = new MemorySessionStorage();
+  const sessionId = "ds_00000000000000000000000000000093";
+  const original = {
+    version: 1 as const,
+    sessionId,
+    clientTurnId: "ui_pending_conflict_001",
+    message: "Add recommendation 1.",
+    selectionHint: {
+      actionType: "add_to_cart" as const,
+      referenceSetId: "refs_333333333333333333333333",
+      productId: "u1",
+      ordinal: 0,
+    },
+    createdAt: 1_000,
+    transportState: "sending" as const,
+    lastAttemptAt: 1_001,
+  };
+  const first = storePendingTurn(storage, original, 1_001);
+  assert.equal(first.persisted, true);
+  const updated = storePendingTurn(
+    storage,
+    {
+      ...original,
+      createdAt: 2_000,
+      transportState: "outcome_unknown",
+      lastAttemptAt: 2_001,
+    },
+    2_001
+  );
+  assert.equal(updated.persisted, true);
+  if (!updated.persisted) return;
+  assert.equal(updated.pending.createdAt, original.createdAt);
+  assert.equal(updated.pending.transportState, "outcome_unknown");
+
+  const conflicting = storePendingTurn(
+    storage,
+    {
+      ...original,
+      clientTurnId: "ui_pending_conflict_002",
+      message: "Add recommendation 2.",
+      selectionHint: {
+        ...original.selectionHint,
+        productId: "u2",
+        ordinal: 1,
+      },
+      transportState: "sending",
+    },
+    2_002
+  );
+  assert.deepEqual(conflicting, {
+    persisted: false,
+    status: "conflict",
+    reason: "pending_turn_conflict",
+  });
+  const retained = readPendingTurn(storage, sessionId, 2_003);
+  assert.equal(retained.found, true);
+  if (!retained.found) return;
+  assert.equal(retained.pending.clientTurnId, original.clientTurnId);
+  assert.equal(retained.pending.message, original.message);
+  assert.deepEqual(retained.pending.selectionHint, original.selectionHint);
+
+  assert.equal(clearPendingTurn(storage, sessionId).cleared, true);
+  const afterClose = storePendingTurn(
+    storage,
+    {
+      ...original,
+      clientTurnId: "ui_pending_conflict_003",
+      message: "Intentional new request",
+      selectionHint: undefined,
+      createdAt: 3_000,
+      transportState: "sending",
+    },
+    3_001
+  );
+  assert.equal(afterClose.persisted, true);
+});
+
+test("pending persistence verifies read-back and safely reports throwing, no-op, malformed, and blocked storage", () => {
+  const sessionId = "ds_00000000000000000000000000000092";
+  const pending = {
+    version: 1 as const,
+    sessionId,
+    clientTurnId: "ui_verified_pending_001",
+    message: "Add recommendation 1.",
+    createdAt: Date.now(),
+    transportState: "sending" as const,
+  };
+  const verifiedStorage = new MemorySessionStorage();
+  const verified = storePendingTurn(verifiedStorage, pending);
+  assert.equal(verified.persisted, true);
+  if (verified.persisted) {
+    assert.equal(verified.pending.clientTurnId, pending.clientTurnId);
+    assert.equal(verified.pending.transportState, "sending");
+  }
+
+  const throwingStorage: SessionStoragePort = {
+    getItem: () => null,
+    setItem: () => {
+      throw new Error("hidden set failure");
+    },
+    removeItem: () => undefined,
+  };
+  assert.deepEqual(storePendingTurn(throwingStorage, pending), {
+    persisted: false,
+    status: "storage_unavailable",
+    reason: "storage_unavailable",
+  });
+
+  const noOpStorage: SessionStoragePort = {
+    getItem: () => null,
+    setItem: () => undefined,
+    removeItem: () => undefined,
+  };
+  assert.deepEqual(storePendingTurn(noOpStorage, pending), {
+    persisted: false,
+    status: "storage_unavailable",
+    reason: "storage_unavailable",
+  });
+
+  const malformedValues = new Map<string, string>();
+  const malformedStorage: SessionStoragePort = {
+    getItem: (key) => malformedValues.get(key) ?? null,
+    setItem: (key) => {
+      malformedValues.set(key, "{malformed");
+    },
+    removeItem: (key) => {
+      malformedValues.delete(key);
+    },
+  };
+  assert.deepEqual(storePendingTurn(malformedStorage, pending), {
+    persisted: false,
+    status: "invalid_record",
+    reason: "invalid_record",
+  });
+
+  const blockedStorage: SessionStoragePort = {
+    getItem: () => {
+      throw new DOMException("hidden blocked detail", "NotAllowedError");
+    },
+    setItem: () => undefined,
+    removeItem: () => undefined,
+  };
+  assert.deepEqual(storePendingTurn(blockedStorage, pending), {
+    persisted: false,
+    status: "storage_unavailable",
+    reason: "storage_unavailable",
+  });
 });
 
 test("transcripts are session-scoped, bounded display data and never conversation authority", () => {

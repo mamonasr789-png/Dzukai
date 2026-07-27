@@ -55,8 +55,96 @@ export const PendingTurnSchema = z
   .strict();
 export type PendingTurn = z.infer<typeof PendingTurnSchema>;
 
+export type PendingTurnStorageFailureReason =
+  | "storage_unavailable"
+  | "invalid_record"
+  | "pending_turn_conflict";
+
+export type StorePendingTurnResult =
+  | {
+      persisted: true;
+      status: "success";
+      pending: PendingTurn;
+    }
+  | {
+      persisted: false;
+      status: "storage_unavailable" | "invalid_record" | "conflict";
+      reason: PendingTurnStorageFailureReason;
+    };
+
+export type ReadPendingTurnResult =
+  | {
+      found: true;
+      status: "success";
+      pending: PendingTurn;
+    }
+  | {
+      found: false;
+      status: "not_found" | "storage_unavailable" | "invalid_record";
+      reason?: Exclude<
+        PendingTurnStorageFailureReason,
+        "pending_turn_conflict"
+      >;
+    };
+
+export type ClearPendingTurnResult =
+  | {
+      cleared: true;
+      status: "success" | "not_found";
+    }
+  | {
+      cleared: false;
+      status: "storage_unavailable";
+      reason: "storage_unavailable";
+    };
+
 function pendingKey(sessionId: DiningSessionId): string {
   return `${PENDING_TURN_PREFIX}:${sessionId}`;
+}
+
+function safeRemoveItem(storage: SessionStoragePort, key: string): boolean {
+  try {
+    storage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sameSelectionHint(
+  first: PendingTurn["selectionHint"],
+  second: PendingTurn["selectionHint"]
+): boolean {
+  return JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
+}
+
+function samePendingIdentity(
+  first: PendingTurn,
+  second: PendingTurn
+): boolean {
+  return (
+    first.sessionId === second.sessionId &&
+    first.clientTurnId === second.clientTurnId &&
+    first.message === second.message &&
+    sameSelectionHint(first.selectionHint, second.selectionHint)
+  );
+}
+
+function verifiedPendingReadBack(
+  expected: PendingTurn,
+  value: unknown
+): PendingTurn | null {
+  const parsed = PendingTurnSchema.safeParse(value);
+  if (
+    !parsed.success ||
+    !samePendingIdentity(parsed.data, expected) ||
+    parsed.data.transportState !== expected.transportState ||
+    parsed.data.createdAt !== expected.createdAt ||
+    parsed.data.lastAttemptAt !== expected.lastAttemptAt
+  ) {
+    return null;
+  }
+  return parsed.data;
 }
 
 function transcriptKey(identity: {
@@ -78,7 +166,7 @@ function readTranscriptIndex(storage: SessionStoragePort): string[] {
         JSON.parse(storage.getItem(DISPLAY_TRANSCRIPT_INDEX_KEY) ?? "[]")
       );
   } catch {
-    storage.removeItem(DISPLAY_TRANSCRIPT_INDEX_KEY);
+    safeRemoveItem(storage, DISPLAY_TRANSCRIPT_INDEX_KEY);
     return [];
   }
 }
@@ -87,10 +175,14 @@ function writeTranscriptIndex(
   storage: SessionStoragePort,
   keys: string[]
 ): void {
-  storage.setItem(
-    DISPLAY_TRANSCRIPT_INDEX_KEY,
-    JSON.stringify([...new Set(keys)].slice(-50))
-  );
+  try {
+    storage.setItem(
+      DISPLAY_TRANSCRIPT_INDEX_KEY,
+      JSON.stringify([...new Set(keys)].slice(-50))
+    );
+  } catch {
+    // Display-only transcript indexing is best effort.
+  }
 }
 
 function readPendingIndex(storage: SessionStoragePort): DiningSessionId[] {
@@ -100,7 +192,7 @@ function readPendingIndex(storage: SessionStoragePort): DiningSessionId[] {
       .max(50)
       .parse(JSON.parse(storage.getItem(PENDING_TURN_INDEX_KEY) ?? "[]"));
   } catch {
-    storage.removeItem(PENDING_TURN_INDEX_KEY);
+    safeRemoveItem(storage, PENDING_TURN_INDEX_KEY);
     return [];
   }
 }
@@ -109,59 +201,217 @@ function writePendingIndex(
   storage: SessionStoragePort,
   sessionIds: DiningSessionId[]
 ): void {
-  storage.setItem(
-    PENDING_TURN_INDEX_KEY,
-    JSON.stringify([...new Set(sessionIds)].slice(-50))
-  );
+  try {
+    storage.setItem(
+      PENDING_TURN_INDEX_KEY,
+      JSON.stringify([...new Set(sessionIds)].slice(-50))
+    );
+  } catch {
+    // The session-scoped pending record remains authoritative.
+  }
 }
 
 export function storePendingTurn(
   storage: SessionStoragePort,
   pending: PendingTurn,
   now = Date.now()
-): PendingTurn {
+): StorePendingTurnResult {
   cleanupExpiredPendingTurns(storage, now);
-  const parsed = PendingTurnSchema.parse(pending);
-  storage.setItem(pendingKey(parsed.sessionId), JSON.stringify(parsed));
+  const parsed = PendingTurnSchema.safeParse(pending);
+  if (!parsed.success) {
+    return {
+      persisted: false,
+      status: "invalid_record",
+      reason: "invalid_record",
+    };
+  }
+
+  const existing = readPendingTurn(storage, parsed.data.sessionId, now);
+  if (existing.status === "storage_unavailable") {
+    return {
+      persisted: false,
+      status: "storage_unavailable",
+      reason: "storage_unavailable",
+    };
+  }
+  if (existing.status === "invalid_record") {
+    return {
+      persisted: false,
+      status: "invalid_record",
+      reason: "invalid_record",
+    };
+  }
+  if (
+    existing.found &&
+    existing.pending.transportState === "outcome_unknown" &&
+    !samePendingIdentity(existing.pending, parsed.data)
+  ) {
+    return {
+      persisted: false,
+      status: "conflict",
+      reason: "pending_turn_conflict",
+    };
+  }
+  if (
+    existing.found &&
+    existing.pending.transportState === "outcome_unknown" &&
+    samePendingIdentity(existing.pending, parsed.data)
+  ) {
+    return {
+      persisted: true,
+      status: "success",
+      pending: existing.pending,
+    };
+  }
+
+  const record =
+    existing.found && samePendingIdentity(existing.pending, parsed.data)
+      ? { ...parsed.data, createdAt: existing.pending.createdAt }
+      : parsed.data;
+  const key = pendingKey(record.sessionId);
+  try {
+    storage.setItem(key, JSON.stringify(record));
+  } catch {
+    return {
+      persisted: false,
+      status: "storage_unavailable",
+      reason: "storage_unavailable",
+    };
+  }
+
+  let raw: string | null;
+  try {
+    raw = storage.getItem(key);
+  } catch {
+    return {
+      persisted: false,
+      status: "storage_unavailable",
+      reason: "storage_unavailable",
+    };
+  }
+  if (raw === null) {
+    return {
+      persisted: false,
+      status: "storage_unavailable",
+      reason: "storage_unavailable",
+    };
+  }
+
+  let readBack: unknown;
+  try {
+    readBack = JSON.parse(raw);
+  } catch {
+    safeRemoveItem(storage, key);
+    return {
+      persisted: false,
+      status: "invalid_record",
+      reason: "invalid_record",
+    };
+  }
+  const verified = verifiedPendingReadBack(record, readBack);
+  if (!verified) {
+    safeRemoveItem(storage, key);
+    return {
+      persisted: false,
+      status: "invalid_record",
+      reason: "invalid_record",
+    };
+  }
+
   writePendingIndex(storage, [
     ...readPendingIndex(storage),
-    parsed.sessionId,
+    verified.sessionId,
   ]);
-  return parsed;
+  return {
+    persisted: true,
+    status: "success",
+    pending: verified,
+  };
 }
 
 export function readPendingTurn(
   storage: SessionStoragePort,
   sessionId: DiningSessionId,
   now = Date.now()
-): PendingTurn | null {
+): ReadPendingTurnResult {
+  let raw: string | null;
   try {
-    const parsed = PendingTurnSchema.safeParse(
-      JSON.parse(storage.getItem(pendingKey(sessionId)) ?? "null")
-    );
-    if (
-      !parsed.success ||
-      now - parsed.data.createdAt > PENDING_TURN_TTL_MS
-    ) {
-      clearPendingTurn(storage, sessionId);
-      return null;
-    }
-    return parsed.data;
+    raw = storage.getItem(pendingKey(sessionId));
   } catch {
-    clearPendingTurn(storage, sessionId);
-    return null;
+    return {
+      found: false,
+      status: "storage_unavailable",
+      reason: "storage_unavailable",
+    };
   }
+  if (raw === null) {
+    return { found: false, status: "not_found" };
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    safeRemoveItem(storage, pendingKey(sessionId));
+    return {
+      found: false,
+      status: "invalid_record",
+      reason: "invalid_record",
+    };
+  }
+  const parsed = PendingTurnSchema.safeParse(value);
+  if (!parsed.success) {
+    safeRemoveItem(storage, pendingKey(sessionId));
+    return {
+      found: false,
+      status: "invalid_record",
+      reason: "invalid_record",
+    };
+  }
+  if (now - parsed.data.createdAt > PENDING_TURN_TTL_MS) {
+    const cleared = clearPendingTurn(storage, sessionId);
+    return cleared.cleared
+      ? { found: false, status: "not_found" }
+      : {
+          found: false,
+          status: "storage_unavailable",
+          reason: "storage_unavailable",
+        };
+  }
+  return { found: true, status: "success", pending: parsed.data };
 }
 
 export function clearPendingTurn(
   storage: SessionStoragePort,
   sessionId: DiningSessionId
-): void {
-  storage.removeItem(pendingKey(sessionId));
+): ClearPendingTurnResult {
+  const key = pendingKey(sessionId);
+  let existing: string | null;
+  try {
+    existing = storage.getItem(key);
+    storage.removeItem(key);
+    if (storage.getItem(key) !== null) {
+      return {
+        cleared: false,
+        status: "storage_unavailable",
+        reason: "storage_unavailable",
+      };
+    }
+  } catch {
+    return {
+      cleared: false,
+      status: "storage_unavailable",
+      reason: "storage_unavailable",
+    };
+  }
   writePendingIndex(
     storage,
     readPendingIndex(storage).filter((candidate) => candidate !== sessionId)
   );
+  return {
+    cleared: true,
+    status: existing === null ? "not_found" : "success",
+  };
 }
 
 export function cleanupExpiredPendingTurns(
@@ -180,10 +430,10 @@ export function cleanupExpiredPendingTurns(
       ) {
         retained.push(sessionId);
       } else {
-        storage.removeItem(pendingKey(sessionId));
+        safeRemoveItem(storage, pendingKey(sessionId));
       }
     } catch {
-      storage.removeItem(pendingKey(sessionId));
+      safeRemoveItem(storage, pendingKey(sessionId));
     }
   }
   writePendingIndex(storage, retained);
@@ -201,7 +451,7 @@ export function loadDisplayTranscript(
   try {
     const raw = storage.getItem(key);
     if (!raw || raw.length > MAXIMUM_TRANSCRIPT_BYTES) {
-      if (raw) storage.removeItem(key);
+      if (raw) safeRemoveItem(storage, key);
       return null;
     }
     const parsed = DisplayTranscriptSchema.safeParse(JSON.parse(raw));
@@ -209,12 +459,12 @@ export function loadDisplayTranscript(
       !parsed.success ||
       now - parsed.data.savedAt > TRANSCRIPT_TTL_MS
     ) {
-      storage.removeItem(key);
+      safeRemoveItem(storage, key);
       return null;
     }
     return parsed.data.messages;
   } catch {
-    storage.removeItem(key);
+    safeRemoveItem(storage, key);
     return null;
   }
 }
@@ -236,7 +486,11 @@ export function saveDisplayTranscript(
   const serialized = JSON.stringify(parsed);
   if (serialized.length <= MAXIMUM_TRANSCRIPT_BYTES) {
     const key = transcriptKey(identity);
-    storage.setItem(key, serialized);
+    try {
+      storage.setItem(key, serialized);
+    } catch {
+      return;
+    }
     writeTranscriptIndex(storage, [...readTranscriptIndex(storage), key]);
   }
 }
@@ -249,7 +503,7 @@ export function clearDisplayTranscript(
   }
 ): void {
   const key = transcriptKey(identity);
-  storage.removeItem(key);
+  safeRemoveItem(storage, key);
   writeTranscriptIndex(
     storage,
     readTranscriptIndex(storage).filter((candidate) => candidate !== key)
@@ -264,7 +518,7 @@ export function clearDisplayTranscriptsForSession(
   const retained: string[] = [];
   for (const key of readTranscriptIndex(storage)) {
     if (key.endsWith(suffix)) {
-      storage.removeItem(key);
+      safeRemoveItem(storage, key);
     } else {
       retained.push(key);
     }

@@ -80,25 +80,13 @@ function makeGreeting(language: SupportedLanguage): Message {
 function safeSessionStorage(): SessionStoragePort {
   return {
     getItem(key) {
-      try {
-        return sessionStorage.getItem(key);
-      } catch {
-        return null;
-      }
+      return sessionStorage.getItem(key);
     },
     setItem(key, value) {
-      try {
-        sessionStorage.setItem(key, value);
-      } catch {
-        // Session restore remains optional if browser storage is unavailable.
-      }
+      sessionStorage.setItem(key, value);
     },
     removeItem(key) {
-      try {
-        sessionStorage.removeItem(key);
-      } catch {
-        // Nothing else needs to be done.
-      }
+      sessionStorage.removeItem(key);
     },
   };
 }
@@ -411,6 +399,8 @@ export function AIPageClient({
   const initialLanguageRef = useRef<SupportedLanguage>(language);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const recoveryNoticeRef = useRef<HTMLDivElement>(null);
+  const persistenceErrorRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(true);
   const activeRequestAbortRef = useRef<AbortController | null>(null);
   const transcriptIdentityRef = useRef<{
@@ -439,6 +429,7 @@ export function AIPageClient({
   const [cartOpen, setCartOpen] = useState(false);
   const [transcriptReady, setTranscriptReady] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
 
   const updateRetryMode = useCallback(
     (mode: "same_id" | "new_id" | null) => {
@@ -480,6 +471,7 @@ export function AIPageClient({
       if (mountedRef.current) {
         setSessionStatus("initializing");
         setSessionNotice(null);
+        setPersistenceError(null);
         setTranscriptReady(false);
       }
       if (force) initializationRef.current = undefined;
@@ -549,11 +541,12 @@ export function AIPageClient({
         storedMessages && storedMessages.length > 0
           ? storedMessages
           : [makeGreeting(restoredLanguage)];
-      const pending = readPendingTurn(
+      const pendingResult = readPendingTurn(
         storageRef.current,
         snapshot.state.sessionId
       );
-      if (pending) {
+      if (pendingResult.found) {
+        const pending = pendingResult.pending;
         storePendingTurn(storageRef.current, {
           ...pending,
           transportState: "outcome_unknown",
@@ -579,8 +572,12 @@ export function AIPageClient({
         }
         updateRetryMode("same_id");
         setRetryMessageId(userMessageId);
-        setSessionNotice(
-          liveWaiterCopy(restoredLanguage).unknownOutcome
+      } else if (
+        pendingResult.status === "storage_unavailable" ||
+        pendingResult.status === "invalid_record"
+      ) {
+        setPersistenceError(
+          liveWaiterCopy(restoredLanguage).retryProtectionUnavailable
         );
       }
       setMessages(nextMessages);
@@ -632,13 +629,25 @@ export function AIPageClient({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, transcriptReady, typing]);
 
+  useEffect(() => {
+    if (persistenceError) {
+      window.setTimeout(() => persistenceErrorRef.current?.focus(), 0);
+    } else if (retryModeDisplay === "same_id") {
+      window.setTimeout(() => recoveryNoticeRef.current?.focus(), 0);
+    }
+  }, [persistenceError, retryModeDisplay]);
+
   const recoverExpiredSession = useCallback(async () => {
     const priorIdentity = transcriptIdentityRef.current;
     if (priorIdentity) {
       clearDisplayTranscript(storageRef.current, priorIdentity);
       clearPendingTurn(storageRef.current, priorIdentity.sessionId);
     }
-    storageRef.current.removeItem(LIVE_WAITER_SESSION_KEY);
+    try {
+      storageRef.current.removeItem(LIVE_WAITER_SESSION_KEY);
+    } catch {
+      // The replacement session still proceeds without browser restoration.
+    }
     initializationRef.current = undefined;
     const established = await establishDiningSession({
       client: clientRef.current,
@@ -740,9 +749,6 @@ export function AIPageClient({
         gateRef.current.cancel();
         return;
       }
-      const sequence = ++requestSequenceRef.current;
-      const abortController = new AbortController();
-      activeRequestAbortRef.current = abortController;
       let gateSettled = false;
       const pending = {
         version: 1 as const,
@@ -756,7 +762,20 @@ export function AIPageClient({
         transportState: "sending" as const,
         lastAttemptAt: Date.now(),
       };
-      storePendingTurn(storageRef.current, pending);
+      const persisted = storePendingTurn(storageRef.current, pending);
+      if (!persisted.persisted) {
+        gateRef.current.cancel();
+        if (mountedRef.current) {
+          setTyping(false);
+          setPersistenceError(copy.retryProtectionUnavailable);
+        }
+        return;
+      }
+      const durablePending = persisted.pending;
+      const sequence = ++requestSequenceRef.current;
+      const abortController = new AbortController();
+      activeRequestAbortRef.current = abortController;
+      setPersistenceError(null);
       if (appendUserMessage) {
         setMessages((previous) => [
           ...previous,
@@ -791,7 +810,7 @@ export function AIPageClient({
         if (!result.ok) {
           if (retryMode === "same_id") {
             storePendingTurn(storageRef.current, {
-              ...pending,
+              ...durablePending,
               transportState: "outcome_unknown",
             });
             gateRef.current.complete(attempt, true);
@@ -902,7 +921,7 @@ export function AIPageClient({
         }
       } catch {
         storePendingTurn(storageRef.current, {
-          ...pending,
+          ...durablePending,
           transportState: "outcome_unknown",
         });
         gateRef.current.complete(attempt, true);
@@ -935,6 +954,7 @@ export function AIPageClient({
       copy.cartRefreshFailed,
       copy.genericError,
       copy.noSideEffect,
+      copy.retryProtectionUnavailable,
       copy.unknownOutcome,
       language,
       recoverExpiredSession,
@@ -945,7 +965,13 @@ export function AIPageClient({
   const sendMessage = useCallback(
     (rawText: string, selectionHint?: TurnAttempt["selectionHint"]) => {
       const text = rawText.trim();
-      if (!text || sessionStatus !== "ready") return;
+      if (
+        !text ||
+        sessionStatus !== "ready" ||
+        retryModeRef.current === "same_id"
+      ) {
+        return;
+      }
       const attempt = gateRef.current.beginNew(text, selectionHint);
       if (!attempt) return;
       void executeAttempt(attempt, true);
@@ -1024,6 +1050,7 @@ export function AIPageClient({
   const totalItems = cart ? cartItemCount(cart) : 0;
   const showSuggestions = messages.length <= 2;
   const busy = typing || sessionStatus !== "ready";
+  const newTurnBlocked = retryModeDisplay === "same_id";
   const modeLabel = staffRequestsAvailable
     ? copy.tableMode
     : copy.demoMode;
@@ -1098,6 +1125,34 @@ export function AIPageClient({
         </div>
       )}
 
+      {newTurnBlocked && (
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2">
+          <div
+            ref={recoveryNoticeRef}
+            data-testid="pending-turn-recovery"
+            role="alert"
+            tabIndex={-1}
+            className="mx-auto max-w-lg text-xs leading-relaxed text-amber-800 outline-none focus-visible:ring-2 focus-visible:ring-primary dark:text-amber-300"
+          >
+            {copy.unknownOutcome} {copy.resolveUnknownFirst}
+          </div>
+        </div>
+      )}
+
+      {persistenceError && (
+        <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2">
+          <div
+            ref={persistenceErrorRef}
+            data-testid="pending-storage-error"
+            role="alert"
+            tabIndex={-1}
+            className="mx-auto max-w-lg text-xs leading-relaxed text-destructive outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            {persistenceError}
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <div
           className="mx-auto max-w-lg space-y-4"
@@ -1109,7 +1164,7 @@ export function AIPageClient({
               <MessageBubble
                 message={message}
                 language={language}
-                disabled={busy}
+                disabled={busy || newTurnBlocked}
                 onAsk={askAbout}
                 onAdd={addReference}
               />
@@ -1165,7 +1220,7 @@ export function AIPageClient({
                 key={suggestion}
                 type="button"
                 onClick={() => sendMessage(suggestion)}
-                disabled={busy}
+                disabled={busy || newTurnBlocked}
                 className="shrink-0 whitespace-nowrap rounded-full border border-border/50 bg-secondary px-3 py-2 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary active:border-primary/30 active:bg-primary/10 disabled:opacity-40"
               >
                 {suggestion}
@@ -1192,14 +1247,14 @@ export function AIPageClient({
               placeholder={copy.placeholder}
               aria-label={copy.placeholder}
               className="flex-1 bg-transparent text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary placeholder:text-muted-foreground"
-              disabled={busy}
+              disabled={busy || newTurnBlocked}
             />
           </div>
           <button
             type="button"
             data-testid="send-turn"
             onClick={() => sendMessage(input)}
-            disabled={!input.trim() || busy}
+            disabled={!input.trim() || busy || newTurnBlocked}
             aria-label={copy.send}
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
           >

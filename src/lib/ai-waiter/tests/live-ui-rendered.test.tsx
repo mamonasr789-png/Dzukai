@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import type { ReactNode } from "react";
 
 import {
   LiveWaiterClient,
+  readStoredSessionId,
   storeSessionId,
   type DiningSessionSnapshot,
   type SessionStoragePort,
@@ -72,6 +76,52 @@ class MemorySessionStorage implements SessionStoragePort {
 
   removeItem(key: string): void {
     this.values.delete(key);
+  }
+}
+
+const PENDING_RECORD_KEY_PREFIX = "vaise-ai-waiter-pending-turn-v1:";
+
+class ThrowingPendingStorage extends MemorySessionStorage {
+  pendingWriteAttempts = 0;
+
+  constructor(
+    private readonly errorFactory: () => Error = () =>
+      new Error("hidden browser storage failure")
+  ) {
+    super();
+  }
+
+  override setItem(key: string, value: string): void {
+    if (key.startsWith(PENDING_RECORD_KEY_PREFIX)) {
+      this.pendingWriteAttempts += 1;
+      throw this.errorFactory();
+    }
+    super.setItem(key, value);
+  }
+}
+
+class NoOpPendingStorage extends MemorySessionStorage {
+  pendingWriteAttempts = 0;
+
+  override setItem(key: string, value: string): void {
+    if (key.startsWith(PENDING_RECORD_KEY_PREFIX)) {
+      this.pendingWriteAttempts += 1;
+      return;
+    }
+    super.setItem(key, value);
+  }
+}
+
+class MalformedPendingStorage extends MemorySessionStorage {
+  pendingWriteAttempts = 0;
+
+  override setItem(key: string, value: string): void {
+    if (key.startsWith(PENDING_RECORD_KEY_PREFIX)) {
+      this.pendingWriteAttempts += 1;
+      super.setItem(key, "{malformed");
+      return;
+    }
+    super.setItem(key, value);
   }
 }
 
@@ -214,7 +264,7 @@ function jsonSnapshot(value: DiningSessionSnapshot, status = 200): Response {
 
 function renderPage(
   client: LiveWaiterClient,
-  storage: MemorySessionStorage,
+  storage: SessionStoragePort,
   extra: {
     strict?: boolean;
     createBroadcastChannel?: (
@@ -236,6 +286,110 @@ function renderPage(
   return render(
     extra.strict ? <React.StrictMode>{content}</React.StrictMode> : content
   );
+}
+
+function pendingValue(
+  storage: SessionStoragePort,
+  sessionId: DiningSessionId
+) {
+  const result = readPendingTurn(storage, sessionId);
+  return result.found ? result.pending : null;
+}
+
+async function assertPersistenceFailureBlocksDispatch(
+  storage:
+    | ThrowingPendingStorage
+    | NoOpPendingStorage
+    | MalformedPendingStorage,
+  language: "lt" | "en" | "ru" = "en"
+) {
+  setLanguage(language);
+  let turnCalls = 0;
+  const client = new LiveWaiterClient({
+    fetchImplementation: (async (input) => {
+      if (String(input).endsWith("/session")) {
+        return jsonSnapshot(snapshot({ language }), 201);
+      }
+      turnCalls += 1;
+      return Response.json({
+        ok: true,
+        data: turnData(emptyCart()),
+      });
+    }) as typeof fetch,
+  });
+
+  renderPage(client, storage);
+  const input = await screen.findByTestId("waiter-input");
+  const message =
+    language === "ru"
+      ? "Добавь первое предложение"
+      : language === "lt"
+        ? "Pridėk pirmą pasiūlymą"
+        : "Add the first recommendation";
+  fireEvent.change(input, { target: { value: message } });
+  fireEvent.click(screen.getByTestId("send-turn"));
+
+  const error = await screen.findByTestId("pending-storage-error");
+  assert.equal(error.getAttribute("role"), "alert");
+  assert.ok(document.activeElement === error);
+  assert.equal(turnCalls, 0);
+  assert.equal(screen.queryByText(message), null);
+  assert.equal((input as HTMLInputElement).value, message);
+  assert.equal((input as HTMLInputElement).disabled, false);
+  assert.equal(
+    (screen.getByTestId("send-turn") as HTMLButtonElement).disabled,
+    false
+  );
+  assert.equal(screen.queryByTestId("waiter-typing"), null);
+  assert.equal(pendingValue(storage, SESSION_A), null);
+
+  fireEvent.click(screen.getByTestId("send-turn"));
+  await waitFor(() => assert.equal(storage.pendingWriteAttempts, 2));
+  assert.equal(turnCalls, 0);
+}
+
+async function startRouteTestHost(): Promise<{
+  baseUrl: string;
+  close(): Promise<void>;
+}> {
+  const child = spawn(
+    process.execPath,
+    [
+      "--conditions=react-server",
+      "--experimental-strip-types",
+      fileURLToPath(new URL("./route-test-host.ts", import.meta.url)),
+    ],
+    {
+      env: { ...process.env, NODE_ENV: "test" },
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+  const line = await Promise.race([
+    once(child.stdout!, "data").then(([chunk]) =>
+      String(chunk).split(/\r?\n/u)[0]
+    ),
+    once(child, "exit").then(([code]) => {
+      throw new Error(`Route test host exited before startup (${String(code)}).`);
+    }),
+    new Promise<never>((_resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Route test host startup timed out.")),
+        5_000
+      );
+      timer.unref();
+    }),
+  ]);
+  const parsed = JSON.parse(line) as { port?: unknown };
+  assert.equal(typeof parsed.port, "number");
+  return {
+    baseUrl: `http://127.0.0.1:${String(parsed.port)}`,
+    async close() {
+      if (child.exitCode !== null) return;
+      const exited = once(child, "exit");
+      child.kill("SIGTERM");
+      await exited;
+    },
+  };
 }
 
 function setLanguage(language: "lt" | "en" | "ru") {
@@ -302,10 +456,20 @@ test("refresh recovery keeps a pending turn, does not auto-send, and retries the
         role: "assistant",
         content: "Prior safe message",
         time: "12:00",
+        references: [
+          {
+            productId: "u2",
+            name: "Shared official dish deluxe",
+            officialUnitPrice: 10,
+            currency: "EUR",
+            referenceSetId: "refs_222222222222222222222222",
+            ordinal: 1,
+          },
+        ],
       },
     ]
   );
-  storePendingTurn(storage, {
+  const storedPending = storePendingTurn(storage, {
     version: 1,
     sessionId: SESSION_A,
     clientTurnId: "render_pending_001",
@@ -319,6 +483,8 @@ test("refresh recovery keeps a pending turn, does not auto-send, and retries the
     createdAt: Date.now(),
     transportState: "sending",
   });
+  assert.equal(storedPending.persisted, true);
+  if (!storedPending.persisted) return;
   const turnBodies: Array<Record<string, unknown>> = [];
   const client = new LiveWaiterClient({
     fetchImplementation: (async (input, init) => {
@@ -334,9 +500,41 @@ test("refresh recovery keeps a pending turn, does not auto-send, and retries the
   });
 
   renderPage(client, storage);
-  await screen.findByText(/previous request outcome is unknown/iu);
+  const recoveryNotice = await screen.findByTestId("pending-turn-recovery");
+  await waitFor(() => assert.ok(document.activeElement === recoveryNotice));
   assert.equal(turnBodies.length, 0);
-  fireEvent.click(screen.getByTestId("retry-turn"));
+  const input = screen.getByTestId("waiter-input") as HTMLInputElement;
+  const send = screen.getByTestId("send-turn") as HTMLButtonElement;
+  const suggestion = screen.getByRole("button", {
+    name: "What do you recommend?",
+  }) as HTMLButtonElement;
+  const card = screen.getByTestId("product-reference-u2");
+  const ask = within(card).getByRole("button", {
+    name: "Ask: Shared official dish deluxe",
+  }) as HTMLButtonElement;
+  const add = within(card).getByRole("button", {
+    name: "Add: Shared official dish deluxe",
+  }) as HTMLButtonElement;
+  const retry = screen.getByTestId("retry-turn") as HTMLButtonElement;
+  assert.equal(input.disabled, true);
+  assert.equal(send.disabled, true);
+  assert.equal(suggestion.disabled, true);
+  assert.equal(ask.disabled, true);
+  assert.equal(add.disabled, true);
+  assert.equal(retry.disabled, false);
+  assert.match(retry.getAttribute("aria-label") ?? "", /Try again/iu);
+
+  fireEvent.change(input, { target: { value: "Replace the pending turn" } });
+  fireEvent.click(send);
+  fireEvent.click(suggestion);
+  fireEvent.click(add);
+  assert.equal(turnBodies.length, 0);
+  assert.deepEqual(pendingValue(storage, SESSION_A), {
+    ...storedPending.pending,
+    transportState: "outcome_unknown",
+  });
+
+  fireEvent.click(retry);
   await screen.findByText("Safe rendered response.");
   assert.equal(turnBodies.length, 1);
   assert.equal(turnBodies[0].clientTurnId, "render_pending_001");
@@ -351,7 +549,146 @@ test("refresh recovery keeps a pending turn, does not auto-send, and retries the
     screen.getAllByText("Add the exact previous item").length,
     1
   );
-  assert.equal(readPendingTurn(storage, SESSION_A), null);
+  assert.equal(readPendingTurn(storage, SESSION_A).status, "not_found");
+});
+
+test("throwing pending storage blocks dispatch and clears the submission gate", async () => {
+  await assertPersistenceFailureBlocksDispatch(
+    new ThrowingPendingStorage(),
+    "en"
+  );
+  assert.match(
+    screen.getByTestId("pending-storage-error").textContent ?? "",
+    /request was not sent.*retry protection could not be saved/iu
+  );
+});
+
+test("no-op pending storage fails read-back verification and blocks dispatch", async () => {
+  await assertPersistenceFailureBlocksDispatch(
+    new NoOpPendingStorage(),
+    "lt"
+  );
+  assert.match(
+    screen.getByTestId("pending-storage-error").textContent ?? "",
+    /užklausa neišsiųsta.*pakartojimo apsaugos/iu
+  );
+});
+
+test("malformed pending read-back blocks dispatch without a misleading user message", async () => {
+  await assertPersistenceFailureBlocksDispatch(
+    new MalformedPendingStorage(),
+    "ru"
+  );
+  assert.match(
+    screen.getByTestId("pending-storage-error").textContent ?? "",
+    /запрос не отправлен.*защиту безопасного повтора/iu
+  );
+});
+
+test("quota-exceeded pending storage blocks dispatch with a safe localized error", async () => {
+  await assertPersistenceFailureBlocksDispatch(
+    new ThrowingPendingStorage(
+      () => new DOMException("hidden quota detail", "QuotaExceededError")
+    ),
+    "en"
+  );
+  assert.doesNotMatch(
+    screen.getByTestId("pending-storage-error").textContent ?? "",
+    /quota|hidden/iu
+  );
+});
+
+test("route-backed lost add response recreates the page and replays to exactly one line", async () => {
+  const host = await startRouteTestHost();
+  try {
+    setLanguage("en");
+    const storage = new MemorySessionStorage();
+    let lostAddResponse = false;
+    let addRequests = 0;
+    const routeFetch = (async (input, init) => {
+      const path = String(input);
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as {
+            message?: string;
+            clientTurnId?: string;
+          })
+        : {};
+      const response = await fetch(new URL(path, host.baseUrl), init);
+      if (
+        path.endsWith("/turn") &&
+        body.message === "Add recommendation 1."
+      ) {
+        addRequests += 1;
+        if (!lostAddResponse) {
+          lostAddResponse = true;
+          await response.arrayBuffer();
+          throw new Error("simulated response loss after route completion");
+        }
+      }
+      return response;
+    }) as typeof fetch;
+    const firstClient = new LiveWaiterClient({
+      fetchImplementation: routeFetch,
+      deterministicDevelopmentMode: true,
+    });
+
+    const firstPage = renderPage(firstClient, storage);
+    const input = await screen.findByTestId("waiter-input");
+    await waitFor(() =>
+      assert.equal((input as HTMLInputElement).disabled, false)
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "What do you recommend?" })
+    );
+    const firstCard = await screen.findByTestId("product-reference-u1");
+    fireEvent.click(
+      within(firstCard).getByRole("button", {
+        name: "Add: Silkė su marinuotais svogūnais ir karštomis bulvėmis",
+      })
+    );
+    await screen.findByTestId("pending-turn-recovery");
+    const routeSessionId = readStoredSessionId(storage);
+    assert.ok(routeSessionId);
+    const pendingBeforeRecreation = pendingValue(
+      storage,
+      routeSessionId as DiningSessionId
+    );
+    assert.ok(pendingBeforeRecreation);
+    assert.equal(addRequests, 1);
+    firstPage.unmount();
+
+    const secondClient = new LiveWaiterClient({
+      fetchImplementation: (async (input, init) =>
+        fetch(new URL(String(input), host.baseUrl), init)) as typeof fetch,
+      deterministicDevelopmentMode: true,
+    });
+    renderPage(secondClient, storage);
+    await screen.findByTestId("pending-turn-recovery");
+    assert.equal(addRequests, 1);
+    fireEvent.click(screen.getByTestId("retry-turn"));
+    await screen.findByText(
+      /added.*Silkė su marinuotais svogūnais ir karštomis bulvėmis.*cart/iu
+    );
+
+    fireEvent.click(screen.getByLabelText("Cart"));
+    const cartLines = screen.getAllByTestId(/^cart-line-/u);
+    assert.equal(cartLines.length, 1);
+    assert.match(
+      cartLines[0].textContent ?? "",
+      /Silkė su marinuotais svogūnais ir karštomis bulvėmis/iu
+    );
+    assert.match(cartLines[0].textContent ?? "", /1 ×/u);
+    assert.equal(
+      screen.getAllByText("Add recommendation 1.").length,
+      1
+    );
+    assert.equal(
+      readPendingTurn(storage, routeSessionId as DiningSessionId).status,
+      "not_found"
+    );
+  } finally {
+    await host.close();
+  }
 });
 
 test("confirmed no-side-effect retry uses a new turn ID without duplicating the user transcript", async () => {
@@ -607,7 +944,7 @@ test("unmount abort retains the pending identity without leaking UI updates", as
   rendered.unmount();
   await waitFor(() => assert.equal(abortObserved, true));
   assert.ok(turnBody);
-  assert.ok(readPendingTurn(storage, SESSION_A));
+  assert.ok(pendingValue(storage, SESSION_A));
   assert.equal(document.body.textContent, "");
 });
 
@@ -656,7 +993,7 @@ test("a malformed duplicate-line cart preserves the last good cart and the same-
   await screen.findByText(/cart could not be refreshed safely/iu);
   assert.ok(screen.getByTestId("retry-turn"));
   assert.equal(
-    readPendingTurn(storage, SESSION_A)?.clientTurnId,
+    pendingValue(storage, SESSION_A)?.clientTurnId,
     capturedTurnId
   );
   fireEvent.click(screen.getByLabelText("Cart"));
@@ -685,11 +1022,11 @@ test("rendered timeout settles typing and preserves manual same-ID retry state",
   const input = await screen.findByTestId("waiter-input");
   fireEvent.change(input, { target: { value: "Timeout mutation" } });
   fireEvent.click(screen.getByTestId("send-turn"));
-  await screen.findByText(/previous request outcome is unknown/iu);
+  await screen.findByTestId("pending-turn-recovery");
   assert.equal(screen.queryByTestId("waiter-typing"), null);
   assert.ok(screen.getByTestId("retry-turn"));
   assert.equal(
-    readPendingTurn(storage, SESSION_A)?.message,
+    pendingValue(storage, SESSION_A)?.message,
     "Timeout mutation"
   );
 });
