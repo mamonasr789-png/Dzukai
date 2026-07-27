@@ -6,10 +6,12 @@ import {
   type ActionIntent,
   type ActionType,
   type Cart,
+  type ClientSelectionHint,
   type ConversationState,
   type ProductDetails,
 } from "../schemas.ts";
 import type { GroundedProductProvenance } from "./aiProvider.ts";
+import { referenceSetIdFor } from "./referenceSet.ts";
 
 function normalize(value: string): string {
   return value
@@ -22,24 +24,32 @@ function normalize(value: string): string {
 function actionTypesIn(message: string): ActionType[] {
   const value = normalize(message);
   const types: ActionType[] = [];
-  if (/\b(pridek|prideti|add|put in|imsiu|take)\b|nepridek/u.test(value)) {
+  if (
+    /\b(pridek|prideti|add|put in|imsiu|take)\b|nepridek|добав|полож/u.test(
+      value
+    )
+  ) {
     types.push("add_to_cart");
   }
-  if (/\b(pakeisk|atnaujink|update|change)\b/u.test(value)) {
+  if (/\b(pakeisk|atnaujink|update|change)\b|измен|обнов/u.test(value)) {
     types.push("update_cart_item");
   }
-  if (/\b(pasalink|isimk|remove|delete item)\b/u.test(value)) {
+  if (
+    /\b(pasalink|isimk|remove|delete item)\b|удал|убер/u.test(value)
+  ) {
     types.push("remove_from_cart");
   }
   if (
-    /\b(isvalyk|istustink|clear|empty)\b[^.!?]{0,30}\b(krepsel|cart)\b/u.test(
+    /(?:\b(isvalyk|istustink|clear|empty)\b|очист|опустош)[^.!?]{0,30}(?:\b(krepsel\w*|cart)\b|корзин)/u.test(
       value
     )
   ) {
     types.push("clear_cart");
   }
-  if (/\b(padavej\w*|waiter)\b/u.test(value)) types.push("request_waiter");
-  if (/\b(saskait\w*|bill|check please)\b/u.test(value)) {
+  if (/\b(padavej\w*|waiter)\b|официант/u.test(value)) {
+    types.push("request_waiter");
+  }
+  if (/\b(saskait\w*|bill|check please)\b|сч[её]т/u.test(value)) {
     types.push("request_bill");
   }
   return [...new Set(types)];
@@ -53,17 +63,17 @@ function quantityIn(message: string): number | null {
     return quantity >= 1 && quantity <= 20 ? quantity : null;
   }
   const words: Array<[RegExp, number]> = [
-    [/\b(viena|viena porcija|one)\b/u, 1],
-    [/\b(du|dvi|two)\b/u, 2],
-    [/\b(trys|tris|three)\b/u, 3],
-    [/\b(keturi|keturias|four)\b/u, 4],
+    [/\b(viena|viena porcija|one)\b|один|одну/u, 1],
+    [/\b(du|dvi|two)\b|два|две/u, 2],
+    [/\b(trys|tris|three)\b|три/u, 3],
+    [/\b(keturi|keturias|four)\b|четыр/u, 4],
   ];
   return words.find(([pattern]) => pattern.test(value))?.[1] ?? null;
 }
 
 function explicitNote(message: string): string | null {
   const match = message.match(
-    /(?:pastaba|note)\s*:\s*([^.!?\n]{1,180})/iu
+    /(?:pastaba|note|примечание)\s*:\s*([^.!?\n]{1,180})/iu
   );
   return match?.[1]?.trim() ?? null;
 }
@@ -75,11 +85,34 @@ function productTargets(
   permittedIds: ReadonlySet<string>
 ): string[] {
   const value = normalize(message);
-  if (/\b(antr\w*|second)\b/u.test(value)) {
+  const numericOrdinal = value.match(
+    /(?:recommendation|pasiul\w*|предлож)[^\d]{0,12}([1-9])|([1-9])[^\d]{0,12}(?:recommendation|pasiul\w*|предлож)/u
+  );
+  const ordinal = numericOrdinal
+    ? Number(numericOrdinal[1] ?? numericOrdinal[2]) - 1
+    : /\b(antr\w*|second)\b|втор/u.test(value)
+      ? 1
+      : /\b(pirm\w*|first)\b|перв/u.test(value)
+        ? 0
+        : null;
+  if (ordinal !== null) {
+    const target = state.latestReferencedProductIds[ordinal];
+    return target && permittedIds.has(target) ? [target] : [];
+  }
+  if (/\b(sita|sitas|this one|that one|toki pat|same)\b|эт[оа]|тако[йе]\s+же/u.test(value)) {
+    if (state.latestReferencedProductIds.length !== 1) return [];
+    const target = state.latestReferencedProductIds[0];
+    return target && permittedIds.has(target) ? [target] : [];
+  }
+  if (/\b(antr\w*|second)\b|втор/u.test(value)) {
     const target = state.latestReferencedProductIds[1];
     return target && permittedIds.has(target) ? [target] : [];
   }
-  if (/\b(pirm\w*|first|sita|sitas|this one|that one|toki pat|same)\b/u.test(value)) {
+  if (/\b(pirm\w*|first)\b/u.test(value)) {
+    const target = state.latestReferencedProductIds[0];
+    return target && permittedIds.has(target) ? [target] : [];
+  }
+  if (/\b(sita|sitas|this one|that one|toki pat|same)\b/u.test(value)) {
     if (state.latestReferencedProductIds.length !== 1) return [];
     const target = state.latestReferencedProductIds[0];
     return target && permittedIds.has(target) ? [target] : [];
@@ -113,10 +146,10 @@ function productTargets(
 function cartLineTargets(message: string, cart: Cart): string[] {
   const value = normalize(message);
   if (cart.lines.length === 1) return [cart.lines[0].lineId];
-  if (/\b(pirm\w*|first)\b/u.test(value)) {
+  if (/\b(pirm\w*|first)\b|перв/u.test(value)) {
     return cart.lines[0] ? [cart.lines[0].lineId] : [];
   }
-  if (/\b(antr\w*|second)\b/u.test(value)) {
+  if (/\b(antr\w*|second)\b|втор/u.test(value)) {
     return cart.lines[1] ? [cart.lines[1].lineId] : [];
   }
   const matching = cart.lines.filter((line) =>
@@ -134,6 +167,7 @@ export interface ActionIntentContext {
   cart: Cart;
   products: ProductDetails[];
   productProvenance: GroundedProductProvenance[];
+  selectionHint?: ClientSelectionHint;
 }
 
 export interface ActionAuthorizationDecision {
@@ -148,15 +182,15 @@ export class ActionAuthorizationPolicy {
     const actionTypes = actionTypesIn(context.message);
     const actionType = actionTypes.length === 1 ? actionTypes[0] : null;
     const negated =
-      /\b(nepridek|ne pridek|nekviesk|ne kviesk|nereikia|neuzsak\w*|dont|do not|not add|not call|without ordering)\b/u.test(
+      /\b(nepridek|ne pridek|nekviesk|ne kviesk|nereikia|neuzsak\w*|dont|do not|not add|not call|without ordering)\b|не\s+(?:добав|клади|зови|вызывай|заказывай)|не\s+надо/u.test(
         normalized
       );
     const hypothetical =
-      /\b(kas nutiktu|jei uzsak\w*|what if|if i ordered|would happen|hypothetical)\b/u.test(
+      /\b(kas nutiktu|jei uzsak\w*|what if|if i ordered|would happen|hypothetical)\b|что\s+будет\s+если|если\s+закаж/u.test(
         normalized
       );
     const futureIntent =
-      /\b(gal veliau|veliau|rytoj|planuoju|maybe later|later|tomorrow|will add|going to order)\b/u.test(
+      /\b(gal veliau|veliau|rytoj|planuoju|maybe later|later|tomorrow|will add|going to order)\b|может\s+позже|потом|завтра/u.test(
         normalized
       );
     const thirdPartyIntent =
@@ -164,13 +198,13 @@ export class ActionAuthorizationPolicy {
         normalized
       );
     const informationalOnly =
-      /\b(tik parodyk|tik informacija|kiek kainuoja|ar galiu|ar galima|show me only|just show|how much|can i|could i)\b/u.test(
+      /\b(tik parodyk|tik informacija|kiek kainuoja|ar galiu|ar galima|show me only|just show|how much|can i|could i)\b|только\s+покаж|сколько\s+стоит|можно\s+ли/u.test(
         normalized
       );
     const comparisonOnly =
-      /\b(palygink|kuo skiriasi|compare|difference between)\b/u.test(normalized);
+      /\b(palygink|kuo skiriasi|compare|difference between)\b|сравни|чем\s+отлич/u.test(normalized);
     const unsupportedModifier =
-      /\b(be\s+\S+|without\s+\S+|papildomai\s+\S+|extra\s+\S+|gerai iske\w*|well[- ]done)\b/u.test(
+      /\b(be\s+\S+|without\s+\S+|papildomai\s+\S+|extra\s+\S+|gerai iske\w*|well[- ]done)\b|без\s+\S+|добав(?:ьте|ь)?\s+ещ[её]/u.test(
         normalized
       );
     const permittedIds = new Set(
@@ -186,17 +220,34 @@ export class ActionAuthorizationPolicy {
         )
         .map((item) => item.productId)
     );
+    const selectionHintValid =
+      context.selectionHint?.actionType === "add_to_cart" &&
+      context.selectionHint.referenceSetId ===
+        referenceSetIdFor(
+          context.state.sessionId,
+          context.state.latestReferencedProductIds
+        ) &&
+      context.state.latestReferencedProductIds[context.selectionHint.ordinal] ===
+        context.selectionHint.productId &&
+      permittedIds.has(context.selectionHint.productId);
+    const invalidSelectionHint =
+      context.selectionHint !== undefined && !selectionHintValid;
 
     let targetType: ActionIntent["targetType"] = null;
     let targetIds: string[] = [];
     if (actionType === "add_to_cart") {
       targetType = "product";
-      targetIds = productTargets(
-        context.message,
-        context.state,
-        context.products,
-        permittedIds
-      );
+      targetIds =
+        context.selectionHint && selectionHintValid
+          ? [context.selectionHint.productId]
+          : context.selectionHint
+            ? []
+            : productTargets(
+                context.message,
+                context.state,
+                context.products,
+                permittedIds
+              );
     } else if (
       actionType === "update_cart_item" ||
       actionType === "remove_from_cart"
@@ -234,6 +285,7 @@ export class ActionAuthorizationPolicy {
       thirdPartyIntent ||
       informationalOnly ||
       comparisonOnly ||
+      invalidSelectionHint ||
       ambiguous;
     const clarificationReason =
       actionType === null
@@ -249,8 +301,10 @@ export class ActionAuthorizationPolicy {
                 : informationalOnly
                   ? "informational_only"
                   : comparisonOnly
-                    ? "comparison_only"
-                    : unsupportedModifier
+                  ? "comparison_only"
+                  : invalidSelectionHint
+                    ? "stale_reference_selection"
+                  : unsupportedModifier
                       ? "unsupported_modifier"
                       : ambiguous
                         ? "ambiguous_action"
@@ -268,7 +322,12 @@ export class ActionAuthorizationPolicy {
       thirdPartyIntent,
       targetType,
       targetIds,
-      quantity: actionType === "add_to_cart" ? quantityIn(context.message) ?? 1 : quantityIn(context.message),
+      quantity:
+        actionType === "add_to_cart"
+          ? context.selectionHint
+            ? 1
+            : quantityIn(context.message) ?? 1
+          : quantityIn(context.message),
       customerNote: unsupportedModifier ? null : explicitNote(context.message),
       evidence: context.message.slice(0, 500),
       confidence: blocked ? "low" : "high",

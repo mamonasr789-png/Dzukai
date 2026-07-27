@@ -8,6 +8,7 @@ import {
 import { requestFingerprint } from "../../../../lib/ai-waiter/server/rateLimitPort.ts";
 import {
   conversationStateStore,
+  deterministicWaiterTurnController,
   getAiWaiterRuntimeAvailability,
   rateLimitPort,
   waiterTurnController,
@@ -148,7 +149,13 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const result = await waiterTurnController.handleWaiterTurn(parsed.data);
+    const useDeterministicTestMode =
+      process.env.NODE_ENV !== "production" &&
+      request.headers.get("x-ai-waiter-test-mode") === "deterministic";
+    const controller = useDeterministicTestMode
+      ? deterministicWaiterTurnController
+      : waiterTurnController;
+    const result = await controller.handleWaiterTurn(parsed.data);
     return safeJsonResponse(result, { status: statusForResult(result) });
   } catch {
     return safeJsonResponse(

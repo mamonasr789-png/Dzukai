@@ -10,6 +10,7 @@
     "test": "node --experimental-strip-types src/lib/assistant/tests/brain.test.ts && node --experimental-strip-types src/lib/assistant/tests/conversations.test.ts && node --experimental-strip-types src/lib/assistant/tests/keyword-search.test.ts && node --experimental-strip-types src/lib/assistant/tests/waiter-audit.test.ts && node --experimental-strip-types src/lib/tests/storage-flows.test.ts",
     "test:phase2a": "NODE_ENV=test node --conditions=react-server --experimental-strip-types --test src/lib/ai-waiter/tests/foundation.test.ts",
     "test:phase2b1": "NODE_ENV=test node --conditions=react-server --experimental-strip-types --test src/lib/ai-waiter/tests/turn-controller.test.ts src/lib/ai-waiter/tests/corrective.test.ts",
+    "test:phase2b2": "NODE_ENV=test node --conditions=react-server --experimental-strip-types --test src/lib/ai-waiter/tests/live-ui.test.ts && NODE_ENV=test node --import tsx --test src/lib/ai-waiter/tests/live-ui-rendered.test.tsx",
     "eval:phase2b1": "NODE_ENV=test node --conditions=react-server --experimental-strip-types src/lib/ai-waiter/eval/run-waiter-eval.ts",
     "typecheck:phase2a": "tsc --noEmit -p tsconfig.phase2a.json"
   },
@@ -30,12 +31,16 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@testing-library/react": "^16.3.2",
+    "@types/jsdom": "^28.0.3",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "jsdom": "^29.1.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.1",
     "typescript": "^5"
   }
 }

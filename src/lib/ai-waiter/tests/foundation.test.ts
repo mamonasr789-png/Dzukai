@@ -1256,6 +1256,7 @@ test("route methods, signed session creation, and table override rejection", asy
   });
   const created = await sessionPost(
     jsonRequest("http://test/api/ai/session", {
+      action: "create_table_session",
       language: "lt",
       tableToken: token,
     })
@@ -1270,6 +1271,7 @@ test("route methods, signed session creation, and table override rejection", asy
 
   const tampered = await sessionPost(
     jsonRequest("http://test/api/ai/session", {
+      action: "create_table_session",
       language: "lt",
       tableToken: `${token}x`,
     })
@@ -1278,15 +1280,41 @@ test("route methods, signed session creation, and table override rejection", asy
 
   const override = await sessionPost(
     jsonRequest("http://test/api/ai/session", {
+      action: "create_table_session",
       language: "lt",
       tableToken: token,
       tableNumber: "99",
     })
   );
   assert.equal(override.status, 400);
+  const restored = await sessionPost(
+    jsonRequest("http://test/api/ai/session", {
+      action: "restore_session",
+      sessionId: createdBody.state.sessionId,
+    })
+  );
+  assert.equal(restored.status, 200);
+  const restoredBody = (await restored.json()) as {
+    state: ConversationState;
+    cart: { lines: unknown[] };
+    capabilities: { staffRequestsAvailable: boolean };
+  };
+  assert.equal(restoredBody.state.sessionId, createdBody.state.sessionId);
+  assert.deepEqual(restoredBody.cart.lines, []);
+  assert.equal(restoredBody.capabilities.staffRequestsAvailable, true);
+  const invalidRestore = await sessionPost(
+    jsonRequest("http://test/api/ai/session", {
+      action: "restore_session",
+      sessionId: "invalid",
+    })
+  );
+  assert.equal(invalidRestore.status, 400);
   assert.equal(sessionGet().status, 405);
   assert.equal(sessionDelete().status, 405);
-  assert.equal(sessionGet().headers.get("allow"), "OPTIONS, POST");
+  assert.equal(
+    sessionDelete().headers.get("allow"),
+    "OPTIONS, POST"
+  );
   assert.equal(sessionOptions().status, 204);
   assert.equal(toolsGet().status, 405);
 });
@@ -1294,7 +1322,10 @@ test("route methods, signed session creation, and table override rejection", asy
 test("route-level tool execution and malformed HTTP responses are structured", async () => {
   await resetDevelopmentRuntime();
   const session = await sessionPost(
-    jsonRequest("http://test/api/ai/session", { language: "lt" })
+    jsonRequest("http://test/api/ai/session", {
+      action: "create_demo_session",
+      language: "lt",
+    })
   );
   const sessionBody = (await session.json()) as {
     state: ConversationState;
@@ -1312,7 +1343,7 @@ test("route-level tool execution and malformed HTTP responses are structured", a
   const wrongMedia = await sessionPost(
     jsonRequest(
       "http://test/api/ai/session",
-      { language: "lt" },
+      { action: "create_demo_session", language: "lt" },
       "text/application/json"
     )
   );
@@ -1335,7 +1366,7 @@ test("session route enforces charset JSON, empty, declared, and chunked body rul
   const charset = await sessionPost(
     jsonRequest(
       "http://test/api/ai/session",
-      { language: "lt" },
+      { action: "create_demo_session", language: "lt" },
       "application/json; charset=utf-8"
     )
   );
@@ -1396,7 +1427,10 @@ test("session creation route returns 429 after the development limit", async () 
   let lastStatus = 0;
   for (let index = 0; index < 21; index += 1) {
     const response = await sessionPost(
-      jsonRequest("http://test/api/ai/session", { language: "lt" })
+      jsonRequest("http://test/api/ai/session", {
+        action: "create_demo_session",
+        language: "lt",
+      })
     );
     lastStatus = response.status;
   }
@@ -1415,7 +1449,10 @@ test("production guard returns an explicit 503 and cannot use memory", async () 
   environment.NODE_ENV = "production";
   try {
     const response = await sessionPost(
-      jsonRequest("http://test/api/ai/session", { language: "lt" })
+      jsonRequest("http://test/api/ai/session", {
+        action: "create_demo_session",
+        language: "lt",
+      })
     );
     assert.equal(response.status, 503);
     const body = (await response.json()) as {

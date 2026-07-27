@@ -90,6 +90,17 @@ export const waiterTurnController = new WaiterTurnController({
   actionLedger,
   sessionCoordinator: sessionTurnCoordinator,
 });
+export const deterministicWaiterTurnController = new WaiterTurnController({
+  conversationStore: conversationStateStore,
+  menuRepository,
+  cartPort,
+  toolRegistry: safeToolRegistry,
+  provider: deterministicFallbackProvider,
+  fallbackProvider: deterministicFallbackProvider,
+  turnIdempotency: turnIdempotencyStore,
+  actionLedger,
+  sessionCoordinator: sessionTurnCoordinator,
+});
 
 export async function resetDevelopmentRuntime(): Promise<void> {
   if (process.env.NODE_ENV === "production") {

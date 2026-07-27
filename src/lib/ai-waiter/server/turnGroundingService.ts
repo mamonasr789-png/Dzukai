@@ -13,6 +13,7 @@ import type {
 } from "./aiProvider.ts";
 import { buildGroundedWaiterContext } from "./grounding.ts";
 import type { MenuRepository } from "./menuRepository.ts";
+import { referenceSetIdFor } from "./referenceSet.ts";
 
 export class TurnGroundingService {
   private readonly menuRepository: MenuRepository;
@@ -25,7 +26,8 @@ export class TurnGroundingService {
     message: string,
     state: ConversationState,
     cart: Cart,
-    context: GroundedWaiterContext
+    context: GroundedWaiterContext,
+    selectionHint?: ConversationTurnRequest["selectionHint"]
   ): ActionIntentContext {
     return {
       message,
@@ -33,6 +35,7 @@ export class TurnGroundingService {
       cart,
       products: context.relevantProducts,
       productProvenance: context.productProvenance,
+      selectionHint,
     };
   }
 
@@ -100,13 +103,14 @@ export class TurnGroundingService {
     productIds: string[],
     state: ConversationState
   ): Promise<WaiterReference[] | null> {
+    const referenceSetId = referenceSetIdFor(state.sessionId, productIds);
     const details = await Promise.all(
       productIds.map((productId) =>
         this.menuRepository.getProductDetails(productId, state.language)
       )
     );
     if (details.some((product) => product === null)) return null;
-    return details.flatMap((product) =>
+    return details.flatMap((product, ordinal) =>
       product
         ? [
             {
@@ -114,6 +118,8 @@ export class TurnGroundingService {
               name: product.name,
               officialUnitPrice: product.officialUnitPrice,
               currency: product.currency,
+              referenceSetId,
+              ordinal,
             },
           ]
         : []

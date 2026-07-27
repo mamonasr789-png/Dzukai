@@ -67,6 +67,19 @@ export const ClientTurnIdSchema = z
   .regex(/^[A-Za-z0-9_-]+$/);
 export type ClientTurnId = z.infer<typeof ClientTurnIdSchema>;
 
+export const ReferenceSetIdSchema = z.string().regex(/^refs_[a-f0-9]{24}$/);
+export type ReferenceSetId = z.infer<typeof ReferenceSetIdSchema>;
+
+export const ClientSelectionHintSchema = z
+  .object({
+    actionType: z.literal("add_to_cart"),
+    referenceSetId: ReferenceSetIdSchema,
+    productId: ProductIdSchema,
+    ordinal: z.number().int().nonnegative().max(9),
+  })
+  .strict();
+export type ClientSelectionHint = z.infer<typeof ClientSelectionHintSchema>;
+
 export const ProductReferenceSchema = z
   .object({
     productId: ProductIdSchema,
@@ -210,6 +223,7 @@ export const ConversationTurnRequestSchema = z
     message: CustomerMessageSchema,
     clientTurnId: ClientTurnIdSchema.optional(),
     requestedLanguage: SupportedLanguageSchema.optional(),
+    selectionHint: ClientSelectionHintSchema.optional(),
   })
   .strict();
 export type ConversationTurnRequest = z.infer<
@@ -363,7 +377,38 @@ export const CartSchema = z
     currency: z.literal("EUR"),
     updatedAt: IsoDateSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((cart, context) => {
+    const lineIds = new Set(cart.lines.map((line) => line.lineId));
+    if (lineIds.size !== cart.lines.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["lines"],
+        message: "Cart line IDs must be unique.",
+      });
+    }
+    for (const [index, line] of cart.lines.entries()) {
+      if (line.productId !== line.product.productId) {
+        context.addIssue({
+          code: "custom",
+          path: ["lines", index, "productId"],
+          message: "Cart line product identity must match its official snapshot.",
+        });
+      }
+    }
+    const expectedTotalCents = cart.lines.reduce(
+      (total, line) =>
+        total + Math.round(line.product.officialUnitPrice * 100) * line.quantity,
+      0
+    );
+    if (Math.round(cart.total * 100) !== expectedTotalCents) {
+      context.addIssue({
+        code: "custom",
+        path: ["total"],
+        message: "Cart total must match its official line snapshots.",
+      });
+    }
+  });
 export type Cart = z.infer<typeof CartSchema>;
 
 export const SearchMenuInputSchema = z
@@ -548,19 +593,55 @@ export const StaffRequestOutputSchema = z
   })
   .strict();
 
-export const CreateDiningSessionRequestSchema = z
+export const CreateDiningSessionRequestSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("create_demo_session"),
+      language: SupportedLanguageSchema.default("lt"),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("create_table_session"),
+      language: SupportedLanguageSchema.default("lt"),
+      tableToken: SignedTableTokenSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("restore_session"),
+      sessionId: DiningSessionIdSchema,
+    })
+    .strict(),
+]);
+export type DiningSessionRequest = z.infer<
+  typeof CreateDiningSessionRequestSchema
+>;
+
+export const DiningSessionCapabilitiesSchema = z
   .object({
-    language: SupportedLanguageSchema.default("lt"),
-    tableToken: SignedTableTokenSchema.nullable().default(null),
+    mode: z.enum(["demo", "table"]),
+    staffRequestsAvailable: z.boolean(),
   })
   .strict();
+export type DiningSessionCapabilities = z.infer<
+  typeof DiningSessionCapabilitiesSchema
+>;
 
-export const CreateDiningSessionResponseSchema = z
+export const DiningSessionSnapshotResponseSchema = z
   .object({
     ok: z.literal(true),
     state: ConversationStateSchema,
+    cart: CartSchema,
+    capabilities: DiningSessionCapabilitiesSchema,
   })
   .strict();
+export type DiningSessionSnapshotResponse = z.infer<
+  typeof DiningSessionSnapshotResponseSchema
+>;
+
+export const CreateDiningSessionResponseSchema =
+  DiningSessionSnapshotResponseSchema;
 
 export const WaiterReferenceSchema = z
   .object({
@@ -568,6 +649,8 @@ export const WaiterReferenceSchema = z
     name: ShortTextSchema,
     officialUnitPrice: z.number().finite().nonnegative().max(100_000),
     currency: z.literal("EUR"),
+    referenceSetId: ReferenceSetIdSchema.optional(),
+    ordinal: z.number().int().nonnegative().max(9).optional(),
   })
   .strict();
 export type WaiterReference = z.infer<typeof WaiterReferenceSchema>;

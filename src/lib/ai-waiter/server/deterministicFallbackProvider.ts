@@ -15,6 +15,16 @@ function normalize(value: string): string {
     .toLowerCase();
 }
 
+function referencedOrdinal(message: string): number {
+  const numeric = message.match(
+    /(?:recommendation|pasiul\w*|предлож)[^\d]{0,12}([1-9])|([1-9])[^\d]{0,12}(?:recommendation|pasiul\w*|предлож)/u
+  );
+  if (numeric) return Number(numeric[1] ?? numeric[2]) - 1;
+  if (/\b(antr\w*|second)\b|втор/u.test(message)) return 1;
+  if (/\b(treci\w*|third)\b|трет/u.test(message)) return 2;
+  return 0;
+}
+
 const text = {
   lt: {
     clarifyReference: "Kurį konkretų patiekalą turite omenyje?",
@@ -28,6 +38,8 @@ const text = {
     added: "Pasirinkimas saugiai pridėtas į krepšelį.",
     staff: "Prašymas perduotas darbuotojams.",
     viewedCart: "Parodžiau dabartinį krepšelį.",
+    staffUnavailable:
+      "Šiame demonstraciniame režime padavėjo ir sąskaitos užklausos nepasiekiamos.",
     generic: "Kuo galėčiau padėti išsirinkti: maistu, gėrimu ar užsakymu?",
   },
   en: {
@@ -42,6 +54,8 @@ const text = {
     added: "The selection was safely added to your cart.",
     staff: "The request has been sent to staff.",
     viewedCart: "I’ve shown the current cart.",
+    staffUnavailable:
+      "Waiter and bill requests are unavailable in this demo session.",
     generic: "How can I help: choosing food, a drink, or managing the order?",
   },
   ru: {
@@ -56,6 +70,8 @@ const text = {
     added: "Выбранная позиция безопасно добавлена в корзину.",
     staff: "Запрос передан сотрудникам.",
     viewedCart: "Я показал текущую корзину.",
+    staffUnavailable:
+      "В демонстрационном режиме вызов официанта и запрос счёта недоступны.",
     generic: "С чем помочь: выбрать еду, напиток или изменить заказ?",
   },
 } as const;
@@ -149,13 +165,18 @@ function resultStep(
   }
   const error = results.find((item) => !item.result.ok);
   if (error && !error.result.ok) {
+    const staffUnavailable =
+      error.result.error.code === "table_context_required" &&
+      ["request_waiter", "request_bill"].includes(error.toolName);
     const requiredVariant = error.result.error.code === "required_variant_missing";
     const modifier =
       error.result.error.code === "unsupported_modifier" ||
       error.result.error.code === "requires_staff_confirmation";
     return {
       kind: "clarification",
-      message: requiredVariant
+      message: staffUnavailable
+        ? copy.staffUnavailable
+        : requiredVariant
         ? copy.clarifyVariant
         : modifier
           ? copy.clarifyModifier
@@ -163,11 +184,15 @@ function resultStep(
       unresolvedQuestion: {
         kind: requiredVariant
           ? "product_reference"
+          : staffUnavailable
+            ? "other"
           : modifier
             ? "modifier_confirmation"
             : "other",
         promptKey: requiredVariant
           ? "required_variant"
+          : staffUnavailable
+            ? "demo_staff_unavailable"
           : modifier
             ? "unsupported_modifier"
             : "tool_error",
@@ -206,7 +231,7 @@ export class DeterministicFallbackProvider implements AIProvider {
     const { context } = request;
     const copy = text[context.language];
     const message = normalize(context.customerMessage);
-    if (/\b(saskait\w*|bill)\b/u.test(message)) {
+    if (/\b(saskait\w*|bill)\b|сч[её]т/u.test(message)) {
       return Promise.resolve({
         kind: "tool_requests",
         toolCalls: [
@@ -214,7 +239,7 @@ export class DeterministicFallbackProvider implements AIProvider {
         ],
       } satisfies ProviderStep);
     }
-    if (/\b(padavej\w*|waiter)\b/u.test(message)) {
+    if (/\b(padavej\w*|waiter)\b|официант/u.test(message)) {
       return Promise.resolve({
         kind: "tool_requests",
         toolCalls: [
@@ -227,7 +252,7 @@ export class DeterministicFallbackProvider implements AIProvider {
       } satisfies ProviderStep);
     }
     if (
-      /\b(parodyk|show|view)\b[^.!?]{0,40}\b(krepsel\w*|cart)\b/u.test(
+      /(?:\b(parodyk|show|view)\b|покаж)[^.!?]{0,40}(?:\b(krepsel\w*|cart)\b|корзин)/u.test(
         message
       )
     ) {
@@ -238,8 +263,53 @@ export class DeterministicFallbackProvider implements AIProvider {
         ],
       } satisfies ProviderStep);
     }
-    if (/\b(pasalink|remove)\b/u.test(message)) {
-      const secondLine = /\b(antr\w*|second)\b/u.test(message);
+    if (
+      /(?:\b(isvalyk|istustink|clear|empty)\b|очист|опустош)[^.!?]{0,30}(?:\b(krepsel\w*|cart)\b|корзин)/u.test(
+        message
+      )
+    ) {
+      return Promise.resolve({
+        kind: "tool_requests",
+        toolCalls: [
+          {
+            callId: "fallback_clear",
+            toolName: "clear_cart",
+            input: { confirm: true },
+          },
+        ],
+      } satisfies ProviderStep);
+    }
+    if (/\b(pakeisk|atnaujink|update|change)\b|измен|обнов/u.test(message)) {
+      const secondLine = /\b(antr\w*|second)\b|втор/u.test(message);
+      const line = secondLine ? context.cart.lines[1] : context.cart.lines[0];
+      const quantityMatch = message.match(/\b(\d{1,2})\b/u);
+      const quantity = quantityMatch ? Number(quantityMatch[1]) : null;
+      if (!line || !quantity || quantity < 1 || quantity > 20) {
+        return Promise.resolve({
+          kind: "clarification",
+          message: copy.clarifyReference,
+          unresolvedQuestion: {
+            kind: "cart_line_reference",
+            promptKey: "missing_cart_line_or_quantity",
+            relatedProductIds: [],
+          },
+          ambiguity: null,
+          stateUpdate: { stage: "clarifying" },
+        } satisfies ProviderStep);
+      }
+      return Promise.resolve({
+        kind: "tool_requests",
+        toolCalls: [
+          {
+            callId: "fallback_update",
+            toolName: "update_cart_item",
+            input: { lineId: line.lineId, quantity },
+          },
+        ],
+      } satisfies ProviderStep);
+    }
+    if (/\b(pasalink|remove)\b|удал|убер/u.test(message)) {
+      const secondLine = /\b(antr\w*|second)\b|втор/u.test(message);
       const line = secondLine ? context.cart.lines[1] : context.cart.lines[0];
       if (!line) {
         return Promise.resolve({
@@ -266,12 +336,12 @@ export class DeterministicFallbackProvider implements AIProvider {
       } satisfies ProviderStep);
     }
     const foodSafetyOrSelection =
-      /\b(valgyti|patiekal|maist|eat|food|dish|safe|saug\w*|recommend|pasiulyk|noriu)\b/u.test(
+      /\b(valgyti|patiekal|maist|eat|food|dish|safe|saug\w*|recommend|pasiulyk|noriu)\b|ед|блюд|безопас|рекоменд|хочу/u.test(
         message
       );
     if (
       (context.state.allergies.length > 0 && foodSafetyOrSelection) ||
-      /\b(alerg\w*|allerg\w*)\b/u.test(message)
+      /\b(alerg\w*|allerg\w*)\b|аллерг/u.test(message)
     ) {
       return Promise.resolve({
         kind: "staff_escalation",
@@ -281,7 +351,7 @@ export class DeterministicFallbackProvider implements AIProvider {
       } satisfies ProviderStep);
     }
     if (
-      /\b(be |without|papildomai |extra |gerai iske|well[- ]done)\S+/u.test(
+      /\b(be |without|papildomai |extra |gerai iske|well[- ]done)\S+|без\s+\S+|добав(?:ьте|ь)?\s+ещ[её]/u.test(
         message
       )
     ) {
@@ -298,12 +368,11 @@ export class DeterministicFallbackProvider implements AIProvider {
       } satisfies ProviderStep);
     }
 
-    const second = /\b(antr\w*|second)\b/u.test(message);
-    const same = /\b(tok[iy] pat|same)\b/u.test(message);
-    const add = /\b(pridek|add|imsiu|take)\b/u.test(message);
-    const reference = second
-      ? context.state.latestReferencedProductIds[1]
-      : context.state.latestReferencedProductIds[0];
+    const same =
+      /\b(tok[iy] pat|same)\b|тако[йе]\s+же/u.test(message);
+    const add = /\b(pridek|add|imsiu|take)\b|добав|полож/u.test(message);
+    const reference =
+      context.state.latestReferencedProductIds[referencedOrdinal(message)];
     if ((add || same) && reference) {
       const grounded = context.relevantProducts.find(
         (product) => product.productId === reference
@@ -331,7 +400,10 @@ export class DeterministicFallbackProvider implements AIProvider {
               productId: reference,
               quantity: 1,
               modifiers: [],
-              customerNote: null,
+              customerNote:
+                context.customerMessage.match(
+                  /(?:pastaba|note|примечание)\s*:\s*([^.!?\n]{1,180})/iu
+                )?.[1]?.trim() ?? null,
             },
           },
         ],
@@ -352,8 +424,9 @@ export class DeterministicFallbackProvider implements AIProvider {
     }
 
     if (
-      /\b(labas|sveiki|hello|hi|hey)\b/u.test(message) &&
-      !/\b(noriu|want|recommend|pasiulyk|parodyk|something|kazko)\b/u.test(
+      (/\b(labas|sveiki|hello|hi|hey)\b/u.test(message) ||
+        /привет|здравств/u.test(message)) &&
+      !/\b(noriu|want|recommend|pasiulyk|parodyk|something|kazko)\b|хочу|рекоменд|покаж/u.test(
         message
       )
     ) {
@@ -388,7 +461,7 @@ export class DeterministicFallbackProvider implements AIProvider {
     }
 
     if (
-      /\b(noriu|want|recommend|pasiulyk|parodyk|something|kazko|vegetar\w*|beef|jautien\w*)\b/u.test(
+      /\b(noriu|want|recommend|pasiulyk|parodyk|something|kazko|vegetar\w*|beef|jautien\w*)\b|хочу|рекоменд|посовет|покаж|вегетари|говядин/u.test(
         message
       )
     ) {
@@ -405,7 +478,7 @@ export class DeterministicFallbackProvider implements AIProvider {
               excludeProductIds: [],
               dietaryRequirements: context.state.dietaryRequirements,
               allergies: context.state.allergies,
-              limit: 3,
+              limit: /\b(du|dvi|two)\b/u.test(message) ? 2 : 3,
             },
           },
         ],

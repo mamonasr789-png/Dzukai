@@ -44,9 +44,9 @@ export function detectLanguage(
 function partySize(message: string): number | null {
   const normalized = normalize(message);
   const numeric = normalized.match(
-    /\b(\d{1,2})\s*(?:zmon(?:ems|iu|es)|people|persons?)\b/u
+    /\b(\d{1,2})\s*(?:zmon(?:ems|iu|es)|people|persons?)\b|(\d{1,2})\s*(?:человек|персон)/u
   );
-  if (numeric) return Number(numeric[1]);
+  if (numeric) return Number(numeric[1] ?? numeric[2]);
   const words: Array<[RegExp, number]> = [
     [/\b(dviem|dviese|two people)\b/u, 2],
     [/\b(trims|trise|three people)\b/u, 3],
@@ -61,7 +61,7 @@ function extractBudget(
   const normalized = normalize(message).replace(",", ".");
   const match =
     normalized.match(
-      /(?:iki|under|up to|budget(?:as)?|biudzetas)\s*(?:€|eur)?\s*(\d{1,4}(?:\.\d{1,2})?)/u
+      /(?:iki|under|up to|budget(?:as)?|biudzetas|до|бюджет)\s*(?:€|eur)?\s*(\d{1,4}(?:\.\d{1,2})?)/u
     ) ??
     normalized.match(
       /(\d{1,4}(?:\.\d{1,2})?)\s*(?:€|eur)\b/u
@@ -73,11 +73,11 @@ function extractBudget(
 }
 
 const allergens = [
-  { allergen: "nuts" as const, pattern: /\b(riesut\w*|nuts?|peanut\w*)\b/u },
-  { allergen: "milk" as const, pattern: /\b(pien\w*|milk|dairy)\b/u },
-  { allergen: "gluten" as const, pattern: /\b(glitim\w*|gluten)\b/u },
-  { allergen: "eggs" as const, pattern: /\b(kiausin\w*|eggs?)\b/u },
-  { allergen: "fish" as const, pattern: /\b(zuv\w*|fish)\b/u },
+  { allergen: "nuts" as const, pattern: /\b(riesut\w*|nuts?|peanut\w*)\b|орех|арахис/u },
+  { allergen: "milk" as const, pattern: /\b(pien\w*|milk|dairy)\b|молок|молоч/u },
+  { allergen: "gluten" as const, pattern: /\b(glitim\w*|gluten)\b|глютен/u },
+  { allergen: "eggs" as const, pattern: /\b(kiausin\w*|eggs?)\b|яйц/u },
+  { allergen: "fish" as const, pattern: /\b(zuv\w*|fish)\b|рыб/u },
 ];
 
 const proteins = [
@@ -93,7 +93,7 @@ const ingredientTerms = [
 ];
 
 export function messageUsesPriorReference(message: string): boolean {
-  return /\b(sita|sitas|this one|that one|antr\w*|second|pirm\w*|first|toki pat|same)\b/u.test(
+  return /\b(sita|sitas|this one|that one|antr\w*|second|pirm\w*|first|toki pat|same)\b|эт[оа]|перв|втор|трет|тако[йе]\s+же|предлож/u.test(
     normalize(message)
   );
 }
@@ -127,7 +127,7 @@ export function extractTurnState(
         partySize: budget.partySize,
       },
     });
-  } else if (/\b(pamirsk biudzeta|clear (?:my )?budget|be biudzeto)\b/u.test(normalized)) {
+  } else if (/\b(pamirsk biudzeta|clear (?:my )?budget|be biudzeto)\b|забудь\s+бюджет|без\s+бюджета/u.test(normalized)) {
     operations.push({ kind: "clear_budget" });
   }
 
@@ -173,9 +173,9 @@ export function extractTurnState(
   }
 
   const negativeVegetarian =
-    /\b(ne(?:su )?vegetar\w*|not (?:a )?vegetarian)\b/u.test(normalized);
+    /\b(ne(?:su )?vegetar\w*|not (?:a )?vegetarian)\b|я\s+не\s+вегетари/u.test(normalized);
   const positiveVegetarian =
-    /\b(esu vegetar\w*|noriu vegetar\w*|i am (?:a )?vegetarian|(?:want|need) vegetar\w*|vegetarian (?:food|dish|meal))\b/u.test(
+    /\b(esu vegetar\w*|noriu vegetar\w*|i am (?:a )?vegetarian|(?:want|need) vegetar\w*|vegetarian (?:food|dish|meal))\b|я\s+вегетари|хочу\s+вегетари/u.test(
       normalized
     );
   if (negativeVegetarian) {
@@ -189,16 +189,16 @@ export function extractTurnState(
       requirement: "vegetarian",
     });
   }
-  if (/\b(esu veganas|i am vegan|vegan (?:food|dish|meal))\b/u.test(normalized)) {
+  if (/\b(esu veganas|i am vegan|vegan (?:food|dish|meal))\b|я\s+веган/u.test(normalized)) {
     operations.push({ kind: "add_dietary_requirement", requirement: "vegan" });
   }
-  if (/\b(be glitimo|gluten[- ]?free)\b/u.test(normalized)) {
+  if (/\b(be glitimo|gluten[- ]?free)\b|без\s+глютена/u.test(normalized)) {
     operations.push({
       kind: "add_dietary_requirement",
       requirement: "gluten_free",
     });
   }
-  if (/\b(be laktozes|lactose[- ]?free)\b/u.test(normalized)) {
+  if (/\b(be laktozes|lactose[- ]?free)\b|без\s+лактозы/u.test(normalized)) {
     operations.push({
       kind: "add_dietary_requirement",
       requirement: "lactose_free",
@@ -211,26 +211,27 @@ export function extractTurnState(
     operations.push({ kind: "add_dietary_requirement", requirement: "kosher" });
   }
 
-  const allergyMentioned = /\b(alerg\w*|allerg\w*)\b/u.test(normalized);
+  const allergyMentioned =
+    /\b(alerg\w*|allerg\w*)\b|аллерг/u.test(normalized);
   const thirdPartyAllergy =
-    /\b(draug\w*|friend|jis|ji|he|she|vaikas|child)\b[^.!?]{0,80}\b(alerg\w*|allerg\w*)\b/u.test(
+    /(?:\b(draug\w*|friend|jis|ji|he|she|vaikas|child)\b|друг|подруг|ребен|ребён)[^.!?]{0,80}(?:\b(alerg\w*|allerg\w*)\b|аллерг)/u.test(
       normalized
     );
   const negatedAllergy =
-    /\b(nesu|neesu|ne) alerg\w*|not allerg\w*|dont have an allerg\w*|do not have an allerg\w*/u.test(
+    /\b(nesu|neesu|ne) alerg\w*|not allerg\w*|dont have an allerg\w*|do not have an allerg\w*|у\s+меня\s+нет\s+аллерг|я\s+не\s+аллерг/u.test(
       normalized
     );
   const correctedAllergy =
-    /\b(nebesu alerg\w*|i am no longer allerg\w*|remove my allerg\w*)\b/u.test(
+    /\b(nebesu alerg\w*|i am no longer allerg\w*|remove my allerg\w*)\b|аллергии\s+больше\s+нет/u.test(
       normalized
     );
   const uncertainAllergy =
     allergyMentioned &&
-    /\b(gal|galbut|itariu|nezinau ar|maybe|might|possibly|not sure)\b/u.test(
+    /\b(gal|galbut|itariu|nezinau ar|maybe|might|possibly|not sure)\b|возможно|может\s+быть|не\s+уверен/u.test(
       normalized
     );
   const explicitFirstPersonAllergy =
-    /\b(esu alerg\w*|as alerg\w*|man alerg\w*|i am allerg\w*|im allerg\w*)\b/u.test(
+    /\b(esu alerg\w*|as alerg\w*|man alerg\w*|i am allerg\w*|im allerg\w*)\b|у\s+меня\s+аллерг|я\s+аллерг/u.test(
       normalized
     );
   let unresolvedAllergy = false;
@@ -284,22 +285,30 @@ export function extractTurnState(
 
   let intent = "unknown";
   let stage: ConversationState["stage"] | null = null;
-  if (/\b(labas|sveiki|hello|hi|hey)\b/u.test(normalized)) {
+  if (/\b(labas|sveiki|hello|hi|hey)\b|привет|здравств/u.test(normalized)) {
     intent = "greeting";
     stage = "greeting";
   }
   if (
-    /\b(noriu|want|recommend|pasiulyk|parodyk|something|kazko)\b/u.test(
+    /\b(noriu|want|recommend|pasiulyk|parodyk|something|kazko)\b|хочу|рекоменд|посовет|покаж/u.test(
       normalized
     )
   ) {
     intent = "recommendation";
     stage = "discovering_preferences";
   }
-  if (/\b(pridek|add|imsiu|take)\b/u.test(normalized)) intent = "add_to_cart";
-  if (/\b(pasalink|remove)\b/u.test(normalized)) intent = "remove_from_cart";
-  if (/\b(saskait\w*|bill)\b/u.test(normalized)) intent = "request_bill";
-  if (/\b(padavej\w*|waiter)\b/u.test(normalized)) intent = "request_waiter";
+  if (/\b(pridek|add|imsiu|take)\b|добав|полож/u.test(normalized)) {
+    intent = "add_to_cart";
+  }
+  if (/\b(pasalink|remove)\b|удал|убер/u.test(normalized)) {
+    intent = "remove_from_cart";
+  }
+  if (/\b(saskait\w*|bill)\b|сч[её]т/u.test(normalized)) {
+    intent = "request_bill";
+  }
+  if (/\b(padavej\w*|waiter)\b|официант/u.test(normalized)) {
+    intent = "request_waiter";
+  }
   if (allergyMentioned && !thirdPartyAllergy && !negatedAllergy) {
     intent = "allergy";
     stage = "clarifying";
@@ -311,7 +320,7 @@ export function extractTurnState(
   if (
     state.latestReferencedProductIds.length > 0 &&
     !messageUsesPriorReference(message) &&
-    !/\b(pridek|add|imsiu|take)\b/u.test(normalized)
+    !/\b(pridek|add|imsiu|take)\b|добав|полож/u.test(normalized)
   ) {
     operations.push({ kind: "update_references", productIds: [] });
     operations.push({ kind: "set_ambiguity", ambiguity: null });

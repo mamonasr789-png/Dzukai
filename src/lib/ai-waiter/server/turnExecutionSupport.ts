@@ -22,6 +22,8 @@ export const TURN_COPY = {
       "Šiuo metu negaliu saugiai užbaigti atsakymo. Pabandykite dar kartą.",
     toolFailure:
       "Veiksmo atlikti nepavyko. Patikrinkite pasirinkimą ir bandykite dar kartą.",
+    staffUnavailable:
+      "Šiame demonstraciniame režime padavėjo ir sąskaitos užklausos nepasiekiamos.",
     limit: "Kad išvengčiau klaidos, patikslinkite vieną konkretų pasirinkimą.",
     uncertainAllergy:
       "Ar alergija taikoma jums? Patvirtinkite alergeną, kad galėčiau tai saugiai pasižymėti.",
@@ -31,6 +33,8 @@ export const TURN_COPY = {
       "I cannot safely complete the response right now. Please try again.",
     toolFailure:
       "The action could not be completed. Check the selection and try again.",
+    staffUnavailable:
+      "Waiter and bill requests are unavailable in this demo session.",
     limit: "To avoid a mistake, please clarify one specific selection.",
     uncertainAllergy:
       "Does the allergy apply to you? Please confirm the allergen so I can record it safely.",
@@ -40,6 +44,8 @@ export const TURN_COPY = {
       "Сейчас я не могу безопасно завершить ответ. Попробуйте ещё раз.",
     toolFailure:
       "Не удалось выполнить действие. Проверьте выбор и попробуйте ещё раз.",
+    staffUnavailable:
+      "В демонстрационном режиме вызов официанта и запрос счёта недоступны.",
     limit: "Чтобы избежать ошибки, уточните один конкретный вариант.",
     uncertainAllergy:
       "Аллергия относится к вам? Подтвердите аллерген, чтобы я мог безопасно это записать.",

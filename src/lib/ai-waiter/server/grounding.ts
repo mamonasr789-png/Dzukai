@@ -25,12 +25,12 @@ function normalize(value: string): string {
 
 function categoryFor(message: string, state: ConversationState): string | undefined {
   const value = normalize(message);
-  if (/\b(jautien\w*|beef)\b/u.test(value)) return "jautiena";
-  if (/\b(vistien\w*|chicken)\b/u.test(value)) return "vistiena";
-  if (/\b(kiaulien\w*|pork)\b/u.test(value)) return "kiauliena";
-  if (/\b(pica|pizza)\b/u.test(value)) return "picos";
-  if (/\b(desert|dessert)\b/u.test(value)) return "desertai";
-  if (/\b(alus|beer)\b/u.test(value)) return "alus";
+  if (/\b(jautien\w*|beef)\b|говядин/u.test(value)) return "jautiena";
+  if (/\b(vistien\w*|chicken)\b|куриц/u.test(value)) return "vistiena";
+  if (/\b(kiaulien\w*|pork)\b|свинин/u.test(value)) return "kiauliena";
+  if (/\b(pica|pizza)\b|пицц/u.test(value)) return "picos";
+  if (/\b(desert|dessert)\b|десерт/u.test(value)) return "desertai";
+  if (/\b(alus|beer)\b|пив/u.test(value)) return "alus";
   return state.preferences.preferredCategories.at(-1);
 }
 
@@ -40,11 +40,11 @@ function knowledgeFor(
 ): GroundedRestaurantRecord[] {
   const value = normalize(message);
   const keys: string[] = [];
-  if (/\b(adres|address|kur|where)\b/u.test(value)) keys.push("address");
-  if (/\b(valand|hours|open|dirb)\b/u.test(value)) keys.push("hours");
-  if (/\b(park|parking)\b/u.test(value)) keys.push("parking");
-  if (/\b(alaus darykl|brewery|alus|beer)\b/u.test(value)) keys.push("brewery");
-  if (keys.length === 0 && /\b(restoran|restaurant)\b/u.test(value)) {
+  if (/\b(adres|address|kur|where)\b|адрес|где/u.test(value)) keys.push("address");
+  if (/\b(valand|hours|open|dirb)\b|час|открыт|работ/u.test(value)) keys.push("hours");
+  if (/\b(park|parking)\b|парков/u.test(value)) keys.push("parking");
+  if (/\b(alaus darykl|brewery|alus|beer)\b|пивовар|пив/u.test(value)) keys.push("brewery");
+  if (keys.length === 0 && (/\b(restoran|restaurant)\b/u.test(value) || /ресторан/u.test(value))) {
     keys.push("name");
   }
   return [...new Set(keys)].slice(0, 3).map((key) => ({
@@ -91,7 +91,7 @@ async function relevantProducts(
 
   const normalizedMessage = normalize(message);
   const shouldRetrieveCandidates =
-    /\b(noriu|want|recommend|pasiulyk|parodyk|show|maist|food|patiekal|dish|burger|pica|pizza|jautien|beef|vistien|chicken|kiaulien|pork|zuv|fish|silk|desert|dessert|alus|beer|pridek|add|imsiu|take|sot|hungry|vegetar|vegan)\w*\b/u.test(
+    /\b(noriu|want|recommend|pasiulyk|parodyk|show|maist|food|patiekal|dish|burger|pica|pizza|jautien|beef|vistien|chicken|kiaulien|pork|zuv|fish|silk|desert|dessert|alus|beer|pridek|add|imsiu|take|sot|hungry|vegetar|vegan)\w*\b|хочу|рекоменд|посовет|покаж|ед|блюд|бургер|пицц|говядин|куриц|свинин|рыб|сел[её]д|десерт|пив|добав|сыт|голод|вегетари|веган/u.test(
       normalizedMessage
     );
   const candidates = shouldRetrieveCandidates

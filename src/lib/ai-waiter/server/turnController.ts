@@ -338,7 +338,8 @@ export class WaiterTurnController {
         command.message,
         state,
         currentCart,
-        context
+        context,
+        command.selectionHint
       )
     );
     if (
@@ -590,7 +591,8 @@ export class WaiterTurnController {
               command.message,
               state,
               currentCart,
-              context
+              context,
+              command.selectionHint
             )
           );
         }
@@ -679,11 +681,17 @@ export class WaiterTurnController {
             );
           }
           if (!result.ok) {
+            const staffUnavailable =
+              result.error.code === "table_context_required" &&
+              (toolName === "request_waiter" ||
+                toolName === "request_bill");
             return this.controlledResult({
               command,
               state,
               cart: currentCart,
-              message: TURN_COPY[state.language].toolFailure,
+              message: staffUnavailable
+                ? TURN_COPY[state.language].staffUnavailable
+                : TURN_COPY[state.language].toolFailure,
               status: "rejected_action",
               fallbackUsed: runtime.providerLoop.fallbackUsed,
               actionLedger: [completed.entry],

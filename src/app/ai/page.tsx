@@ -1,147 +1,283 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
-import { Send, ChefHat, RotateCcw, ArrowLeft, ShoppingCart, Check } from "lucide-react";
+import {
+  ArrowLeft,
+  ChefHat,
+  RotateCcw,
+  Send,
+  ShoppingCart,
+  X,
+} from "lucide-react";
+import {
+  LIVE_WAITER_SESSION_KEY,
+  LiveWaiterClient,
+  TurnSubmissionGate,
+  cartItemCount,
+  establishDiningSession,
+  readStoredSessionId,
+  reconcileServerCart,
+  retryModeForTurnResult,
+  tableTokenFromUrl,
+  type DiningSessionSnapshot,
+  type LiveWaiterTurnResult,
+  type SessionStoragePort,
+  type TurnAttempt,
+} from "@/lib/ai-waiter/client/liveWaiterClient";
+import {
+  clearDisplayTranscript,
+  clearDisplayTranscriptsForSession,
+  clearPendingTurn,
+  loadDisplayTranscript,
+  readPendingTurn,
+  saveDisplayTranscript,
+  storePendingTurn,
+  type StoredDisplayMessage,
+} from "@/lib/ai-waiter/client/liveWaiterStorage";
+import {
+  friendlyClientError,
+  liveWaiterCopy,
+  turnPresentation,
+  type TurnNoticeTone,
+} from "@/lib/ai-waiter/client/liveWaiterUi";
+import type {
+  Cart,
+  SupportedLanguage,
+  WaiterReference,
+} from "@/lib/ai-waiter/schemas";
 import { useCartStore } from "@/lib/store";
 import { useT } from "@/lib/i18n";
-import { products } from "@/lib/data";
-import {
-  WaiterContext,
-  emptyContext,
-  updateContext,
-  generateReply,
-} from "@/lib/ai-engine";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+type Message = StoredDisplayMessage;
 
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  time: string;
+type SessionStatus = "initializing" | "ready" | "unavailable";
+
+function timestamp(language: SupportedLanguage): string {
+  const locale =
+    language === "lt" ? "lt-LT" : language === "ru" ? "ru-RU" : "en-GB";
+  return new Date().toLocaleTimeString(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-function timestamp() {
-  return new Date().toLocaleTimeString("lt-LT", { hour: "2-digit", minute: "2-digit" });
+function makeGreeting(language: SupportedLanguage): Message {
+  return {
+    id: `greeting-${language}`,
+    role: "assistant",
+    content: liveWaiterCopy(language).greeting,
+    time: timestamp(language),
+  };
 }
 
-// Strip [ADD:id] tokens from visible text
-function stripAddTags(text: string): string {
-  return text.replace(/\[ADD:[^\]]+\]/g, "").trim();
+function safeSessionStorage(): SessionStoragePort {
+  return {
+    getItem(key) {
+      try {
+        return sessionStorage.getItem(key);
+      } catch {
+        return null;
+      }
+    },
+    setItem(key, value) {
+      try {
+        sessionStorage.setItem(key, value);
+      } catch {
+        // Session restore remains optional if browser storage is unavailable.
+      }
+    },
+    removeItem(key) {
+      try {
+        sessionStorage.removeItem(key);
+      } catch {
+        // Nothing else needs to be done.
+      }
+    },
+  };
 }
 
-function extractAddIds(text: string): string[] {
-  return [...text.matchAll(/\[ADD:([^\]]+)\]/g)].map((m) => m[1]);
+interface BroadcastChannelPort {
+  postMessage(message: unknown): void;
+  close(): void;
+  onmessage: ((event: MessageEvent<unknown>) => void) | null;
 }
 
-// ── Render bold (**text**) ────────────────────────────────────────────────────
+export interface AIPageClientProps {
+  client?: LiveWaiterClient;
+  storage?: SessionStoragePort;
+  createBroadcastChannel?: (name: string) => BroadcastChannelPort | null;
+}
 
 function renderContent(text: string): React.ReactNode {
-  // Split on **...** for bold, keep bullets
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, i) => {
+  return parts.map((part, index) => {
     if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={i}>{part.slice(2, -2)}</strong>;
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
     }
-    // Render line breaks
-    return part.split("\n").map((line, j, arr) => (
-      <span key={`${i}-${j}`}>
+    return part.split("\n").map((line, lineIndex, lines) => (
+      <span key={`${index}-${lineIndex}`}>
         {line}
-        {j < arr.length - 1 && <br />}
+        {lineIndex < lines.length - 1 && <br />}
       </span>
     ));
   });
 }
 
-// ── Suggestion chips ──────────────────────────────────────────────────────────
+function formatPrice(
+  amount: number,
+  language: SupportedLanguage
+): string {
+  const locale =
+    language === "lt" ? "lt-LT" : language === "ru" ? "ru-RU" : "en-GB";
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "EUR",
+  }).format(amount);
+}
 
-const SUGGESTIONS: Record<string, string[]> = {
-  lt: ["Ką rekomenduojate?", "Noriu sočiai pavalgyti", "Ką valgyti prie alaus?", "Esu vegetaras", "Turiu €25 biudžetą", "Tik užkandžiams"],
-  en: ["What do you recommend?", "I want something filling", "What goes with beer?", "I'm vegetarian", "Budget is €25", "Just a snack"],
-  ru: ["Что порекомендуете?", "Хочу что-то сытное", "Что идёт с пивом?", "Я вегетарианец", "Бюджет €25", "Только закуску"],
-};
+function noticeClasses(tone: TurnNoticeTone): string {
+  switch (tone) {
+    case "success":
+      return "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300";
+    case "warning":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300";
+    case "error":
+      return "border-destructive/30 bg-destructive/10 text-destructive";
+    case "info":
+      return "border-primary/25 bg-primary/5 text-muted-foreground";
+  }
+}
 
-const GREETING: Record<string, string> = {
-  lt: "Sveiki! Ko norėtumėte šiandien — ko nors sočaus, lengvo, gal aštraus?",
-  en: "Welcome! What are you in the mood for — something hearty, light, or a little spicy?",
-  ru: "Добро пожаловать! Что вам по настроению — сытное, лёгкое или острое?",
-};
-
-// ── Add-to-cart chip ──────────────────────────────────────────────────────────
-
-function AddCartButton({ productId, onAdded }: { productId: string; onAdded: () => void }) {
-  const addItem = useCartStore((s) => s.addItem);
-  const [done, setDone] = useState(false);
-  const product = products.find((p) => p.id === productId);
-  if (!product) return null;
-
-  const handle = () => {
-    addItem(product);
-    setDone(true);
-    onAdded();
-  };
-
+function ProductReferenceRow({
+  reference,
+  language,
+  disabled,
+  onAsk,
+  onAdd,
+}: {
+  reference: WaiterReference;
+  language: SupportedLanguage;
+  disabled: boolean;
+  onAsk: (reference: WaiterReference) => void;
+  onAdd: (reference: WaiterReference) => void;
+}) {
+  const copy = liveWaiterCopy(language);
   return (
-    <button
-      onClick={handle}
-      disabled={done}
-      className={`mt-2 flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
-        done
-          ? "bg-green-500/20 text-green-600 dark:text-green-400 cursor-default"
-          : "bg-primary/10 text-primary hover:bg-primary/20 active:scale-95"
-      }`}
+    <div
+      data-testid={`product-reference-${reference.productId}`}
+      className="rounded-2xl border border-border/60 bg-card px-3 py-3 shadow-sm"
     >
-      {done ? <Check size={13} /> : <ShoppingCart size={13} />}
-      {done ? "Pridėta ✓" : product.name.length > 38 ? product.name.slice(0, 38) + "…" : product.name}
-      {!done && product.price > 0 && (
-        <span className="ml-auto font-bold">{product.price.toFixed(2)} €</span>
-      )}
-    </button>
+      <div className="flex items-start justify-between gap-3">
+        <Link
+          href={`/product/${encodeURIComponent(reference.productId)}`}
+          className="min-w-0 flex-1"
+        >
+          <p className="text-sm font-semibold leading-snug">{reference.name}</p>
+          <p className="mt-1 text-xs font-bold text-primary">
+            {formatPrice(reference.officialUnitPrice, language)}
+          </p>
+        </Link>
+        <div className="flex shrink-0 gap-1.5">
+          <button
+            type="button"
+            onClick={() => onAsk(reference)}
+            disabled={disabled}
+            aria-label={`${copy.ask}: ${reference.name}`}
+            className="rounded-full bg-secondary px-2.5 py-1.5 text-[11px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40"
+          >
+            {copy.ask}
+          </button>
+          <button
+            type="button"
+            onClick={() => onAdd(reference)}
+            disabled={
+              disabled ||
+              reference.referenceSetId === undefined ||
+              reference.ordinal === undefined
+            }
+            aria-label={`${copy.add}: ${reference.name}`}
+            className="rounded-full bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40"
+          >
+            {copy.add}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
-// ── Message bubble ────────────────────────────────────────────────────────────
-
 function MessageBubble({
-  msg,
-  onCartAdd,
+  message,
+  language,
+  disabled,
+  onAsk,
+  onAdd,
 }: {
-  msg: Message;
-  onCartAdd: () => void;
+  message: Message;
+  language: SupportedLanguage;
+  disabled: boolean;
+  onAsk: (reference: WaiterReference) => void;
+  onAdd: (reference: WaiterReference) => void;
 }) {
-  const isUser = msg.role === "user";
-  const visibleText = stripAddTags(msg.content);
-  const addIds = extractAddIds(msg.content);
-
+  const isUser = message.role === "user";
   return (
-    <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
+    <div
+      data-testid={`message-${message.role}`}
+      className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : "flex-row"}`}
+    >
       {!isUser && (
-        <div className="w-8 h-8 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0 mt-1">
+        <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
           <ChefHat size={15} className="text-primary" />
         </div>
       )}
-      <div className="max-w-[80%] flex flex-col">
+      <div className="flex max-w-[84%] flex-col">
         <div
-          className={`px-4 py-3 rounded-3xl text-sm leading-relaxed ${
+          className={`rounded-3xl px-4 py-3 text-sm leading-relaxed ${
             isUser
-              ? "bg-primary text-primary-foreground rounded-tr-lg"
-              : "bg-card border border-border/50 text-foreground rounded-tl-lg shadow-sm"
+              ? "rounded-tr-lg bg-primary text-primary-foreground"
+              : "rounded-tl-lg border border-border/50 bg-card text-foreground shadow-sm"
           }`}
         >
-          <p className="whitespace-pre-wrap">{renderContent(visibleText)}</p>
+          <p className="whitespace-pre-wrap">{renderContent(message.content)}</p>
           <p
-            className={`text-[10px] mt-1.5 ${
-              isUser ? "text-primary-foreground/60 text-right" : "text-muted-foreground"
+            className={`mt-1.5 text-[10px] ${
+              isUser
+                ? "text-right text-primary-foreground/60"
+                : "text-muted-foreground"
             }`}
           >
-            {msg.time}
+            {message.time}
           </p>
         </div>
-        {!isUser && addIds.length > 0 && (
-          <div className="mt-1 px-1 flex flex-col gap-1">
-            {addIds.map((id) => (
-              <AddCartButton key={id} productId={id} onAdded={onCartAdd} />
+        {!isUser && message.notice && (
+          <div
+            data-testid="turn-notice"
+            role={message.noticeTone === "error" ? "alert" : "status"}
+            className={`mt-1.5 rounded-xl border px-3 py-2 text-[11px] leading-relaxed ${noticeClasses(
+              message.noticeTone ?? "info"
+            )}`}
+          >
+            {message.notice}
+          </div>
+        )}
+        {!isUser && message.references && message.references.length > 0 && (
+          <div className="mt-2 flex flex-col gap-2">
+            {message.references.map((reference) => (
+              <ProductReferenceRow
+                key={reference.productId}
+                reference={reference}
+                language={language}
+                disabled={disabled}
+                onAsk={onAsk}
+                onAdd={onAdd}
+              />
             ))}
           </div>
         )}
@@ -150,21 +286,24 @@ function MessageBubble({
   );
 }
 
-// ── Typing dots ───────────────────────────────────────────────────────────────
-
-function TypingDots() {
+function TypingDots({ label }: { label: string }) {
   return (
-    <div className="flex gap-2.5">
-      <div className="w-8 h-8 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+    <div
+      data-testid="waiter-typing"
+      role="status"
+      aria-label={label}
+      className="flex gap-2.5"
+    >
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
         <ChefHat size={15} className="text-primary" />
       </div>
-      <div className="bg-card border border-border/50 rounded-3xl rounded-tl-lg px-4 py-3 shadow-sm">
-        <div className="flex gap-1 items-center h-5">
-          {[0, 1, 2].map((i) => (
+      <div className="rounded-3xl rounded-tl-lg border border-border/50 bg-card px-4 py-3 shadow-sm">
+        <div className="flex h-5 items-center gap-1">
+          {[0, 1, 2].map((index) => (
             <span
-              key={i}
-              className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce"
-              style={{ animationDelay: `${i * 0.15}s` }}
+              key={index}
+              className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/40"
+              style={{ animationDelay: `${index * 0.15}s` }}
             />
           ))}
         </div>
@@ -173,270 +312,896 @@ function TypingDots() {
   );
 }
 
-// ── Session persistence (survives SPA navigation, resets on tab close) ────────
-
-const CHAT_MESSAGES_KEY = "dzukai-chat-messages";
-const CHAT_STATE_KEY    = "dzukai-chat-state";
-
-function saveChat(msgs: Message[], ctx: WaiterContext) {
-  try {
-    sessionStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(msgs));
-    // Omit cartItems (rebuilt each turn from cart store) and pendingActions
-    const { cartItems: _ci, pendingActions: _pa, ...persistable } = ctx;
-    sessionStorage.setItem(CHAT_STATE_KEY, JSON.stringify(persistable));
-  } catch { /* storage full or SSR */ }
+function CartPanel({
+  cart,
+  language,
+  onClose,
+}: {
+  cart: Cart;
+  language: SupportedLanguage;
+  onClose: () => void;
+}) {
+  const copy = liveWaiterCopy(language);
+  return (
+    <div
+      data-testid="server-cart"
+      className="absolute inset-x-0 top-full z-20 border-b border-border bg-background/98 px-4 py-4 shadow-xl backdrop-blur"
+    >
+      <div className="mx-auto max-w-lg">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-bold">{copy.cart}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 hover:bg-secondary"
+            aria-label={copy.closeCart}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        {cart.lines.length === 0 ? (
+          <p className="py-3 text-sm text-muted-foreground">
+            {copy.cartEmpty}
+          </p>
+        ) : (
+          <div className="max-h-[45vh] space-y-2 overflow-y-auto">
+            {cart.lines.map((line) => (
+              <div
+                key={line.lineId}
+                data-testid={`cart-line-${line.lineId}`}
+                className="rounded-2xl border border-border/60 bg-card p-3"
+              >
+                <div className="flex justify-between gap-3 text-sm">
+                  <div>
+                    <p className="font-semibold">{line.product.name}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {line.quantity} ×{" "}
+                      {formatPrice(
+                        line.product.officialUnitPrice,
+                        language
+                      )}
+                    </p>
+                  </div>
+                  <p className="shrink-0 font-bold">
+                    {formatPrice(
+                      line.product.officialUnitPrice * line.quantity,
+                      language
+                    )}
+                  </p>
+                </div>
+                {line.customerNote && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {copy.note}: {line.customerNote}
+                  </p>
+                )}
+                {line.requiresStaffConfirmation && (
+                  <p className="mt-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                    {copy.staffConfirmation}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 flex justify-between border-t border-border pt-3 text-sm font-bold">
+          <span>{copy.total}</span>
+          <span>{formatPrice(cart.total, language)}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function loadChat(): { msgs: Message[] | null; ctx: Partial<WaiterContext> | null } {
-  try {
-    const rawMsgs = sessionStorage.getItem(CHAT_MESSAGES_KEY);
-    const rawCtx  = sessionStorage.getItem(CHAT_STATE_KEY);
-    return {
-      msgs: rawMsgs ? (JSON.parse(rawMsgs) as Message[]) : null,
-      ctx:  rawCtx  ? (JSON.parse(rawCtx)  as Partial<WaiterContext>) : null,
-    };
-  } catch { return { msgs: null, ctx: null }; }
-}
-
-function clearChat() {
-  try {
-    sessionStorage.removeItem(CHAT_MESSAGES_KEY);
-    sessionStorage.removeItem(CHAT_STATE_KEY);
-  } catch { /* ignore */ }
-}
-
-// ── Page ──────────────────────────────────────────────────────────────────────
-
-export default function AIPage() {
-  const lang = useCartStore((s) => s.lang);
-  const addItem = useCartStore((s) => s.addItem);
-  const removeItem = useCartStore((s) => s.removeItem);
-  const updateQuantity = useCartStore((s) => s.updateQuantity);
-  const clearCartStore = useCartStore((s) => s.clearCart);
-  const tr = useT(lang);
-
-  const makeGreeting = (l = lang): Message => ({
-    id: "greeting-" + l,
-    role: "assistant",
-    content: GREETING[l] ?? GREETING.lt,
-    time: timestamp(),
-  });
-
-  // Restore chat from sessionStorage on first mount
-  const [messages, setMessages] = useState<Message[]>(() => {
-    const { msgs } = loadChat();
-    return msgs ?? [makeGreeting()];
-  });
-  const [input, setInput] = useState("");
-  const [typing, setTyping] = useState(false);
-  const [cartCount, setCartCount] = useState(0);
-
-  // Restore conversation state from sessionStorage, falling back to fresh state.
-  // useState with lazy initializer so sessionStorage is only read once on mount.
-  const [initialCtx] = useState<WaiterContext>(() => {
-    const { ctx } = loadChat();
-    const fresh = emptyContext();
-    return ctx ? { ...fresh, ...ctx } : fresh;
-  });
-  const ctxRef = useRef<WaiterContext>(initialCtx);
-
+export function AIPageClient({
+  client,
+  storage,
+  createBroadcastChannel,
+}: AIPageClientProps = {}) {
+  const language = useCartStore((state) => state.lang);
+  const tr = useT(language);
+  const copy = liveWaiterCopy(language);
+  const clientRef = useRef(client ?? new LiveWaiterClient());
+  const storageRef = useRef(storage ?? safeSessionStorage());
+  const gateRef = useRef(new TurnSubmissionGate());
+  const sessionRef = useRef<DiningSessionSnapshot | null>(null);
+  const tableTokenRef = useRef<string | null | undefined>(undefined);
+  const initializationRef = useRef<
+    ReturnType<typeof establishDiningSession> | undefined
+  >(undefined);
+  const initialLanguageRef = useRef<SupportedLanguage>(language);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+  const activeRequestAbortRef = useRef<AbortController | null>(null);
+  const transcriptIdentityRef = useRef<{
+    sessionId: DiningSessionSnapshot["state"]["sessionId"];
+    restaurantId: string | null;
+  } | null>(null);
+  const retryModeRef = useRef<"same_id" | "new_id" | null>(null);
+  const freshRetryAttemptRef = useRef<TurnAttempt | null>(null);
+  const requestSequenceRef = useRef(0);
+  const acceptedResponseSequenceRef = useRef(0);
+  const broadcastRef = useRef<BroadcastChannelPort | null>(null);
 
-  // When language changes, only reset if the chat was in a different language
-  useEffect(() => {
-    const savedLang = ctxRef.current.currentLanguage;
-    if (savedLang && savedLang !== lang) {
-      ctxRef.current = emptyContext(lang);
-      const greeting = makeGreeting(lang);
-      setMessages([greeting]);
-      clearChat();
-      setInput("");
-    }
-  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [typing, setTyping] = useState(false);
+  const [sessionStatus, setSessionStatus] =
+    useState<SessionStatus>("initializing");
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  const [cart, setCart] = useState<Cart | null>(null);
+  const [staffRequestsAvailable, setStaffRequestsAvailable] =
+    useState(false);
+  const [retryMessageId, setRetryMessageId] = useState<string | null>(null);
+  const [retryModeDisplay, setRetryModeDisplay] = useState<
+    "same_id" | "new_id" | null
+  >(null);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [transcriptReady, setTranscriptReady] = useState(false);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, typing]);
+  const updateRetryMode = useCallback(
+    (mode: "same_id" | "new_id" | null) => {
+      retryModeRef.current = mode;
+      if (mountedRef.current) setRetryModeDisplay(mode);
+    },
+    []
+  );
 
-  const sendMessage = useCallback(
-    (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed || typing) return;
+  const applySnapshot = useCallback(
+    (snapshot: DiningSessionSnapshot): boolean => {
+      const current = sessionRef.current;
+      let authoritativeCart: Cart;
+      try {
+        authoritativeCart = reconcileServerCart(snapshot.cart, {
+          expectedSessionId: snapshot.state.sessionId,
+          ...(current?.state.sessionId === snapshot.state.sessionId
+            ? { minimumRevision: current.cart.revision }
+            : {}),
+        });
+      } catch {
+        return false;
+      }
+      sessionRef.current = { ...snapshot, cart: authoritativeCart };
+      if (!mountedRef.current) return true;
+      setCart(authoritativeCart);
+      setActiveSessionId(snapshot.state.sessionId);
+      setStaffRequestsAvailable(
+        snapshot.capabilities.staffRequestsAvailable
+      );
+      setSessionStatus("ready");
+      return true;
+    },
+    []
+  );
 
-      const userMsg: Message = {
-        id: Date.now().toString(),
-        role: "user",
-        content: trimmed,
-        time: timestamp(),
+  const initializeSession = useCallback(
+    async (force = false) => {
+      if (mountedRef.current) {
+        setSessionStatus("initializing");
+        setSessionNotice(null);
+        setTranscriptReady(false);
+      }
+      if (force) initializationRef.current = undefined;
+      if (tableTokenRef.current === undefined) {
+        const token = tableTokenFromUrl(window.location.href);
+        tableTokenRef.current = token.tableToken;
+        window.history.replaceState(window.history.state, "", token.cleanedUrl);
+      }
+      const priorStoredSessionId = readStoredSessionId(storageRef.current);
+      initializationRef.current ??= establishDiningSession({
+        client: clientRef.current,
+        storage: storageRef.current,
+        language: initialLanguageRef.current,
+        tableToken: tableTokenRef.current,
+      });
+      const established = await initializationRef.current;
+      if (!mountedRef.current) return;
+      if (!established.ok) {
+        setSessionStatus("unavailable");
+        setMessages([makeGreeting(initialLanguageRef.current)]);
+        setSessionNotice(
+          friendlyClientError(
+            established.error.code,
+            initialLanguageRef.current
+          )
+        );
+        return;
+      }
+
+      const snapshot = established.data.snapshot;
+      if (
+        priorStoredSessionId &&
+        priorStoredSessionId !== snapshot.state.sessionId
+      ) {
+        clearDisplayTranscriptsForSession(
+          storageRef.current,
+          priorStoredSessionId
+        );
+        clearPendingTurn(storageRef.current, priorStoredSessionId);
+      }
+      if (!applySnapshot(snapshot)) {
+        setSessionStatus("unavailable");
+        setSessionNotice(
+          liveWaiterCopy(initialLanguageRef.current).cartRefreshFailed
+        );
+        setMessages([makeGreeting(initialLanguageRef.current)]);
+        return;
+      }
+      tableTokenRef.current = null;
+      const restoredLanguage = snapshot.state.language;
+      if (
+        established.data.source === "restored" &&
+        useCartStore.getState().lang !== restoredLanguage
+      ) {
+        useCartStore.setState({ lang: restoredLanguage });
+      }
+      const identity = {
+        sessionId: snapshot.state.sessionId,
+        restaurantId: snapshot.state.restaurantId,
       };
-      setMessages((prev) => [...prev, userMsg]);
+      transcriptIdentityRef.current = identity;
+      const storedMessages =
+        established.data.source === "restored"
+          ? loadDisplayTranscript(storageRef.current, identity)
+          : null;
+      let nextMessages =
+        storedMessages && storedMessages.length > 0
+          ? storedMessages
+          : [makeGreeting(restoredLanguage)];
+      const pending = readPendingTurn(
+        storageRef.current,
+        snapshot.state.sessionId
+      );
+      if (pending) {
+        storePendingTurn(storageRef.current, {
+          ...pending,
+          transportState: "outcome_unknown",
+        });
+        gateRef.current.recover({
+          message: pending.message,
+          clientTurnId: pending.clientTurnId,
+          ...(pending.selectionHint
+            ? { selectionHint: pending.selectionHint }
+            : {}),
+        });
+        const userMessageId = `user-${pending.clientTurnId}`;
+        if (!nextMessages.some((message) => message.id === userMessageId)) {
+          nextMessages = [
+            ...nextMessages,
+            {
+              id: userMessageId,
+              role: "user",
+              content: pending.message,
+              time: timestamp(restoredLanguage),
+            },
+          ];
+        }
+        updateRetryMode("same_id");
+        setRetryMessageId(userMessageId);
+        setSessionNotice(
+          liveWaiterCopy(restoredLanguage).unknownOutcome
+        );
+      }
+      setMessages(nextMessages);
+      setTranscriptReady(true);
+      if (established.data.warningCode === "invalid_table_token") {
+        setSessionNotice(
+          liveWaiterCopy(restoredLanguage).invalidTable
+        );
+      } else if (established.data.source === "recovered_expired") {
+        setSessionNotice(
+          liveWaiterCopy(restoredLanguage).preferencesReset
+        );
+      }
+    },
+    [applySnapshot, updateRetryMode]
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    let timer: number | null = null;
+    const start = () => {
+      initialLanguageRef.current = useCartStore.getState().lang;
+      timer = window.setTimeout(() => {
+        void initializeSession();
+      }, 0);
+    };
+    let unsubscribe: (() => void) | undefined;
+    if (useCartStore.persist.hasHydrated()) {
+      start();
+    } else {
+      unsubscribe = useCartStore.persist.onFinishHydration(start);
+    }
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      unsubscribe?.();
+      mountedRef.current = false;
+      activeRequestAbortRef.current?.abort();
+    };
+  }, [initializeSession]);
+
+  useEffect(() => {
+    if (transcriptReady && transcriptIdentityRef.current) {
+      saveDisplayTranscript(
+        storageRef.current,
+        transcriptIdentityRef.current,
+        messages
+      );
+    }
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, transcriptReady, typing]);
+
+  const recoverExpiredSession = useCallback(async () => {
+    const priorIdentity = transcriptIdentityRef.current;
+    if (priorIdentity) {
+      clearDisplayTranscript(storageRef.current, priorIdentity);
+      clearPendingTurn(storageRef.current, priorIdentity.sessionId);
+    }
+    storageRef.current.removeItem(LIVE_WAITER_SESSION_KEY);
+    initializationRef.current = undefined;
+    const established = await establishDiningSession({
+      client: clientRef.current,
+      storage: storageRef.current,
+      language,
+      tableToken: tableTokenRef.current ?? null,
+    });
+    if (!mountedRef.current) return false;
+    if (!established.ok || !applySnapshot(established.data.snapshot)) {
+      setSessionStatus("unavailable");
+      setSessionNotice(
+        established.ok
+          ? copy.cartRefreshFailed
+          : friendlyClientError(established.error.code, language)
+      );
+      return false;
+    }
+    const snapshot = established.data.snapshot;
+    tableTokenRef.current = null;
+    transcriptIdentityRef.current = {
+      sessionId: snapshot.state.sessionId,
+      restaurantId: snapshot.state.restaurantId,
+    };
+    setMessages([makeGreeting(snapshot.state.language)]);
+    setTranscriptReady(true);
+    setSessionNotice(copy.preferencesReset);
+    return true;
+  }, [
+    applySnapshot,
+    copy.cartRefreshFailed,
+    copy.preferencesReset,
+    language,
+  ]);
+
+  const refreshAuthoritativeSession = useCallback(async () => {
+    const current = sessionRef.current;
+    if (!current) return false;
+    const restored = await clientRef.current.restoreSession(
+      current.state.sessionId
+    );
+    if (!restored.ok || !mountedRef.current) return false;
+    if (!applySnapshot(restored.data)) {
+      setSessionNotice(
+        liveWaiterCopy(restored.data.state.language).cartRefreshFailed
+      );
+      return false;
+    }
+    return true;
+  }, [applySnapshot]);
+
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const factory =
+      createBroadcastChannel ??
+      ((name: string) =>
+        typeof BroadcastChannel === "undefined"
+          ? null
+          : new BroadcastChannel(name));
+    const channel = factory(`vaise-ai-waiter-cart:${activeSessionId}`);
+    broadcastRef.current = channel;
+    if (channel) {
+      channel.onmessage = (event) => {
+        const message = event.data as {
+          type?: unknown;
+          sessionId?: unknown;
+          revision?: unknown;
+        };
+        if (
+          message.type !== "cart-invalidated" ||
+          message.sessionId !== activeSessionId ||
+          typeof message.revision !== "number" ||
+          message.revision <= (sessionRef.current?.cart.revision ?? -1)
+        ) {
+          return;
+        }
+        void refreshAuthoritativeSession();
+      };
+    }
+    const onFocus = () => {
+      void refreshAuthoritativeSession();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      if (channel) channel.onmessage = null;
+      channel?.close();
+      if (broadcastRef.current === channel) broadcastRef.current = null;
+    };
+  }, [
+    activeSessionId,
+    createBroadcastChannel,
+    refreshAuthoritativeSession,
+  ]);
+
+  const executeAttempt = useCallback(
+    async (attempt: TurnAttempt, appendUserMessage: boolean) => {
+      const session = sessionRef.current;
+      if (!session) {
+        gateRef.current.cancel();
+        return;
+      }
+      const sequence = ++requestSequenceRef.current;
+      const abortController = new AbortController();
+      activeRequestAbortRef.current = abortController;
+      let gateSettled = false;
+      const pending = {
+        version: 1 as const,
+        sessionId: session.state.sessionId,
+        clientTurnId: attempt.clientTurnId,
+        message: attempt.message,
+        ...(attempt.selectionHint
+          ? { selectionHint: attempt.selectionHint }
+          : {}),
+        createdAt: Date.now(),
+        transportState: "sending" as const,
+        lastAttemptAt: Date.now(),
+      };
+      storePendingTurn(storageRef.current, pending);
+      if (appendUserMessage) {
+        setMessages((previous) => [
+          ...previous,
+          {
+            id: `user-${attempt.clientTurnId}`,
+            role: "user",
+            content: attempt.message,
+            time: timestamp(language),
+          },
+        ]);
+      }
+      setRetryMessageId(null);
       setInput("");
       setTyping(true);
 
-      updateContext(ctxRef.current, trimmed);
+      try {
+        const result: LiveWaiterTurnResult =
+          await clientRef.current.sendTurn(
+            {
+          sessionId: session.state.sessionId,
+          message: attempt.message,
+          clientTurnId: attempt.clientTurnId,
+          requestedLanguage: language,
+          ...(attempt.selectionHint
+            ? { selectionHint: attempt.selectionHint }
+            : {}),
+            },
+            { signal: abortController.signal }
+          );
 
-      const delay = 600 + Math.random() * 300;
-      setTimeout(() => {
-        // Sync cart into context before each reply
-        ctxRef.current.cartItems = useCartStore.getState().items.map((i) => ({
-          productId: i.product.id,
-          quantity: i.quantity,
-          name: i.product.name,
-          price: i.product.price,
-        }));
-
-        const { text: reply, actions } = generateReply(trimmed, ctxRef.current, lang);
-
-        // Execute cart actions returned by the assistant
-        let cartDelta = 0;
-        for (const action of actions ?? []) {
-          if (action.type === "ADD_TO_CART") {
-            const product = products.find((p) => p.id === action.productId);
-            if (product) { addItem(product, action.quantity); cartDelta++; }
-          } else if (action.type === "REMOVE_FROM_CART") {
-            removeItem(action.productId);
-            cartDelta--;
-          } else if (action.type === "DECREASE_QUANTITY") {
-            const current = useCartStore.getState().items.find(
-              (i) => i.product.id === action.productId
-            );
-            if (current) {
-              if (current.quantity > 1) updateQuantity(action.productId, current.quantity - 1);
-              else { removeItem(action.productId); cartDelta--; }
-            }
-          } else if (action.type === "CLEAR_CART") {
-            clearCartStore();
-            cartDelta = -useCartStore.getState().items.length;
+        const retryMode = retryModeForTurnResult(result);
+        if (!result.ok) {
+          if (retryMode === "same_id") {
+            storePendingTurn(storageRef.current, {
+              ...pending,
+              transportState: "outcome_unknown",
+            });
+            gateRef.current.complete(attempt, true);
+          } else {
+            clearPendingTurn(storageRef.current, session.state.sessionId);
+            gateRef.current.complete(attempt, false);
           }
+          gateSettled = true;
+          if (!mountedRef.current) return;
+          if (result.error.code === "session_not_found") {
+            const recovered = await recoverExpiredSession();
+            updateRetryMode(null);
+            freshRetryAttemptRef.current = null;
+            setRetryMessageId(null);
+            if (recovered) return;
+          }
+          updateRetryMode(retryMode);
+          freshRetryAttemptRef.current =
+            retryMode === "new_id" ? attempt : null;
+          const errorMessage: Message = {
+            id: `assistant-error-${attempt.clientTurnId}-${Date.now()}`,
+            role: "assistant",
+            content: friendlyClientError(result.error.code, language),
+            time: timestamp(language),
+            notice:
+              retryMode === "same_id"
+                ? result.error.code === "invalid_response"
+                  ? `${copy.cartRefreshFailed} ${copy.unknownOutcome}`
+                  : copy.unknownOutcome
+                : retryMode === "new_id"
+                  ? copy.noSideEffect
+                  : null,
+            noticeTone: "error",
+          };
+          setMessages((previous) => [...previous, errorMessage]);
+          if (retryMode) setRetryMessageId(errorMessage.id);
+          return;
         }
-        if (cartDelta > 0) setCartCount((c) => c + cartDelta);
-        else if (cartDelta < 0) setCartCount((c) => Math.max(0, c + cartDelta));
 
-        const assistantMsg: Message = {
-          id: (Date.now() + 1).toString(),
+        clearPendingTurn(storageRef.current, session.state.sessionId);
+        const presentation = turnPresentation(
+          result.data,
+          result.data.language
+        );
+        const retryModeForSuccess = retryModeForTurnResult(result);
+        gateRef.current.complete(attempt, false);
+        gateSettled = true;
+        updateRetryMode(retryModeForSuccess);
+        freshRetryAttemptRef.current =
+          retryModeForSuccess === "new_id" ? attempt : null;
+        if (
+          sequence < acceptedResponseSequenceRef.current ||
+          !mountedRef.current
+        ) {
+          return;
+        }
+        acceptedResponseSequenceRef.current = sequence;
+
+        let authoritativeCart: Cart | null = null;
+        try {
+          authoritativeCart = reconcileServerCart(result.data.cart, {
+            expectedSessionId: session.state.sessionId,
+            minimumRevision:
+              sessionRef.current?.state.sessionId === session.state.sessionId
+                ? sessionRef.current.cart.revision
+                : 0,
+          });
+        } catch {
+          setSessionNotice(copy.cartRefreshFailed);
+        }
+        if (authoritativeCart) {
+          setCart(authoritativeCart);
+          sessionRef.current = {
+            ...session,
+            cart: authoritativeCart,
+            state: {
+              ...session.state,
+              language: result.data.language,
+              stage: result.data.stage,
+              cartRevision: authoritativeCart.revision,
+            },
+          };
+        }
+        const assistantMessage: Message = {
+          id: `assistant-${attempt.clientTurnId}-${Date.now()}`,
           role: "assistant",
-          content: reply,
-          time: timestamp(),
+          content: result.data.message,
+          time: timestamp(result.data.language),
+          references: result.data.references,
+          notice: authoritativeCart
+            ? presentation.notice
+            : copy.cartRefreshFailed,
+          noticeTone: authoritativeCart ? presentation.tone : "error",
         };
-        setTyping(false);
-        setMessages((prev) => {
-          const next = [...prev, assistantMsg];
-          saveChat(next, ctxRef.current);
-          return next;
+        setMessages((previous) => [...previous, assistantMessage]);
+        if (retryModeForSuccess === "new_id") {
+          setRetryMessageId(assistantMessage.id);
+        }
+        if (
+          authoritativeCart &&
+          result.data.actions.some((action) => action.type === "cart_updated")
+        ) {
+          broadcastRef.current?.postMessage({
+            type: "cart-invalidated",
+            sessionId: session.state.sessionId,
+            revision: authoritativeCart.revision,
+          });
+        }
+      } catch {
+        storePendingTurn(storageRef.current, {
+          ...pending,
+          transportState: "outcome_unknown",
         });
-        setTimeout(() => inputRef.current?.focus(), 50);
-      }, delay);
+        gateRef.current.complete(attempt, true);
+        gateSettled = true;
+        updateRetryMode("same_id");
+        if (mountedRef.current) {
+          const errorMessage: Message = {
+            id: `assistant-error-${attempt.clientTurnId}-${Date.now()}`,
+            role: "assistant",
+            content: copy.genericError,
+            time: timestamp(language),
+            notice: copy.unknownOutcome,
+            noticeTone: "error",
+          };
+          setMessages((previous) => [...previous, errorMessage]);
+          setRetryMessageId(errorMessage.id);
+        }
+      } finally {
+        if (!gateSettled) gateRef.current.cancel();
+        if (activeRequestAbortRef.current === abortController) {
+          activeRequestAbortRef.current = null;
+        }
+        if (mountedRef.current) {
+          setTyping(false);
+          window.setTimeout(() => inputRef.current?.focus(), 50);
+        }
+      }
     },
-    [typing, lang, addItem, removeItem, updateQuantity, clearCartStore]
+    [
+      copy.cartRefreshFailed,
+      copy.genericError,
+      copy.noSideEffect,
+      copy.unknownOutcome,
+      language,
+      recoverExpiredSession,
+      updateRetryMode,
+    ]
   );
 
-  const reset = () => {
-    ctxRef.current = emptyContext(lang);
-    const greeting = makeGreeting();
-    setMessages([greeting]);
-    clearChat();
-    setInput("");
-  };
+  const sendMessage = useCallback(
+    (rawText: string, selectionHint?: TurnAttempt["selectionHint"]) => {
+      const text = rawText.trim();
+      if (!text || sessionStatus !== "ready") return;
+      const attempt = gateRef.current.beginNew(text, selectionHint);
+      if (!attempt) return;
+      void executeAttempt(attempt, true);
+    },
+    [executeAttempt, sessionStatus]
+  );
 
-  const suggestions = SUGGESTIONS[lang] ?? SUGGESTIONS.lt;
+  const retryLastTurn = useCallback(() => {
+    const retryMode = retryModeRef.current;
+    const prior = freshRetryAttemptRef.current;
+    const attempt =
+      retryMode === "same_id"
+        ? gateRef.current.beginRetry()
+        : retryMode === "new_id" && prior
+          ? gateRef.current.beginNew(prior.message, prior.selectionHint)
+          : null;
+    if (!attempt || sessionStatus !== "ready") return;
+    updateRetryMode(null);
+    freshRetryAttemptRef.current = null;
+    void executeAttempt(attempt, false);
+  }, [executeAttempt, sessionStatus, updateRetryMode]);
+
+  const askAbout = useCallback(
+    (reference: WaiterReference) => {
+      const prompt =
+        language === "lt"
+          ? `Papasakokite apie „${reference.name}“.`
+          : language === "ru"
+            ? `Расскажите о «${reference.name}».`
+            : `Tell me about “${reference.name}”.`;
+      setInput(prompt);
+      setTimeout(() => inputRef.current?.focus(), 0);
+    },
+    [language]
+  );
+
+  const addReference = useCallback(
+    (reference: WaiterReference) => {
+      if (
+        reference.referenceSetId === undefined ||
+        reference.ordinal === undefined
+      ) {
+        return;
+      }
+      const ordinal = reference.ordinal + 1;
+      const prompt =
+        language === "lt"
+          ? `Pridėk ${ordinal} pasiūlymą.`
+          : language === "ru"
+            ? `Добавь ${ordinal} предложение.`
+            : `Add recommendation ${ordinal}.`;
+      sendMessage(prompt, {
+        actionType: "add_to_cart",
+        referenceSetId: reference.referenceSetId,
+        productId: reference.productId,
+        ordinal: reference.ordinal,
+      });
+    },
+    [language, sendMessage]
+  );
+
+  const clearDisplayedConversation = useCallback(() => {
+    if (retryModeRef.current === "same_id") return;
+    const next = [makeGreeting(language)];
+    setMessages(next);
+    if (transcriptIdentityRef.current) {
+      clearDisplayTranscript(
+        storageRef.current,
+        transcriptIdentityRef.current
+      );
+    }
+    setRetryMessageId(null);
+    setInput("");
+  }, [language]);
+
+  const totalItems = cart ? cartItemCount(cart) : 0;
   const showSuggestions = messages.length <= 2;
+  const busy = typing || sessionStatus !== "ready";
+  const modeLabel = staffRequestsAvailable
+    ? copy.tableMode
+    : copy.demoMode;
+  const modeDot = staffRequestsAvailable ? "bg-green-500" : "bg-amber-500";
+  const suggestions = useMemo(() => [...copy.suggestions], [copy.suggestions]);
 
   return (
-    <div className="flex flex-col h-screen bg-background">
-      {/* Header */}
-      <header className="px-4 pt-12 pb-3 border-b border-border/50 bg-background/95 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-lg mx-auto flex items-center gap-3">
-          <Link href="/menu">
-            <button className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center shrink-0 active:scale-95 transition-transform">
-              <ArrowLeft size={16} />
-            </button>
+    <div className="relative flex h-screen flex-col bg-background">
+      <header className="sticky top-0 z-10 border-b border-border/50 bg-background/95 px-4 pb-3 pt-12 backdrop-blur">
+        <div className="mx-auto flex max-w-lg items-center gap-3">
+          <Link
+            href="/menu"
+            aria-label={copy.back}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary transition-transform focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary active:scale-95"
+          >
+            <ArrowLeft size={16} />
           </Link>
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-md shrink-0">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-primary/70 shadow-md">
             <ChefHat size={20} className="text-primary-foreground" />
           </div>
-          <div className="flex-1 min-w-0">
-            <h1 className="font-bold text-base leading-tight">{tr.nav_ai}</h1>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-base font-bold leading-tight">{tr.nav_ai}</h1>
             <div className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-              <span className="text-xs text-muted-foreground">
-                {lang === "lt" ? "Padavėjas" : lang === "en" ? "Waiter" : "Официант"}
+              <span className={`h-1.5 w-1.5 rounded-full ${modeDot}`} />
+              <span data-testid="session-mode" className="text-xs text-muted-foreground">
+                {copy.waiter} · {modeLabel}
               </span>
             </div>
           </div>
-          {cartCount > 0 && (
-            <Link href="/cart">
-              <div className="relative">
-                <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
-                  <ShoppingCart size={16} className="text-primary" />
-                </div>
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-primary-foreground text-[9px] font-bold rounded-full flex items-center justify-center">
-                  {cartCount}
-                </span>
-              </div>
-            </Link>
-          )}
           <button
-            onClick={reset}
-            className="p-2 rounded-full hover:bg-secondary transition-colors active:scale-95"
+            type="button"
+            onClick={() => setCartOpen((open) => !open)}
+            className="relative flex h-9 w-9 items-center justify-center rounded-full bg-primary/10"
+            aria-label={copy.cart}
+          >
+            <ShoppingCart size={16} className="text-primary" />
+            {totalItems > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
+                {totalItems}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={clearDisplayedConversation}
+            title={copy.clearDisplay}
+            aria-label={copy.clearDisplay}
+            disabled={retryModeDisplay === "same_id"}
+            className="rounded-full p-2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary hover:bg-secondary active:scale-95 disabled:opacity-40"
           >
             <RotateCcw size={15} className="text-muted-foreground" />
           </button>
         </div>
+        {cartOpen && cart && (
+          <CartPanel
+            cart={cart}
+            language={language}
+            onClose={() => setCartOpen(false)}
+          />
+        )}
       </header>
 
-      {/* Messages */}
+      {(sessionNotice || !staffRequestsAvailable) && (
+        <div className="border-b border-border/40 px-4 py-2">
+          <div
+            data-testid="session-notice"
+            role={sessionStatus === "unavailable" ? "alert" : "status"}
+            className="mx-auto max-w-lg text-xs leading-relaxed text-muted-foreground"
+          >
+            {sessionNotice ?? copy.demoNotice}
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto px-4 py-4">
-        <div className="max-w-lg mx-auto space-y-4">
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} msg={msg} onCartAdd={() => setCartCount((c) => c + 1)} />
+        <div
+          className="mx-auto max-w-lg space-y-4"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
+          {messages.map((message) => (
+            <div key={message.id}>
+              <MessageBubble
+                message={message}
+                language={language}
+                disabled={busy}
+                onAsk={askAbout}
+                onAdd={addReference}
+              />
+              {retryMessageId === message.id && (
+                <button
+                  type="button"
+                  data-testid="retry-turn"
+                  onClick={retryLastTurn}
+                  disabled={busy}
+                  aria-label={`${copy.retry}: ${message.content}`}
+                  className="ml-11 mt-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40"
+                >
+                  {copy.retry}
+                </button>
+              )}
+            </div>
           ))}
-          {typing && <TypingDots />}
+          {typing && <TypingDots label={copy.preparing} />}
+          {sessionStatus === "initializing" && (
+            <p
+              data-testid="session-loading"
+              role="status"
+              className="text-center text-xs text-muted-foreground"
+            >
+              {copy.initializing}
+            </p>
+          )}
+          {sessionStatus === "unavailable" && (
+            <div
+              data-testid="foundation-unavailable"
+              role="alert"
+              className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm"
+            >
+              <p>{sessionNotice ?? copy.unavailable}</p>
+              <button
+                type="button"
+                onClick={() => void initializeSession(true)}
+                className="mt-3 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              >
+                {copy.retry}
+              </button>
+            </div>
+          )}
           <div ref={bottomRef} />
         </div>
       </div>
 
-      {/* Suggestion chips */}
       {showSuggestions && (
         <div className="px-4 pb-2">
-          <div className="max-w-lg mx-auto flex gap-2 overflow-x-auto no-scrollbar">
-            {suggestions.map((s) => (
+          <div className="no-scrollbar mx-auto flex max-w-lg gap-2 overflow-x-auto">
+            {suggestions.map((suggestion) => (
               <button
-                key={s}
-                onClick={() => sendMessage(s)}
-                disabled={typing}
-                className="px-3 py-2 bg-secondary rounded-full text-xs font-medium whitespace-nowrap border border-border/50 active:bg-primary/10 active:border-primary/30 transition-colors shrink-0 disabled:opacity-40"
+                key={suggestion}
+                type="button"
+                onClick={() => sendMessage(suggestion)}
+                disabled={busy}
+                className="shrink-0 whitespace-nowrap rounded-full border border-border/50 bg-secondary px-3 py-2 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary active:border-primary/30 active:bg-primary/10 disabled:opacity-40"
               >
-                {s}
+                {suggestion}
               </button>
             ))}
           </div>
         </div>
       )}
 
-      {/* Input */}
-      <div className="px-4 pb-6 pt-2 border-t border-border/30">
-        <div className="max-w-lg mx-auto flex gap-2 items-center">
-          <div className="flex-1 bg-secondary rounded-2xl px-4 py-3 flex items-center gap-2 min-h-12">
+      <div className="border-t border-border/30 px-4 pb-6 pt-2">
+        <div className="mx-auto flex max-w-lg items-center gap-2">
+          <div className="flex min-h-12 flex-1 items-center gap-2 rounded-2xl bg-secondary px-4 py-3">
             <input
               ref={inputRef}
+              data-testid="waiter-input"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
                   sendMessage(input);
                 }
               }}
-              placeholder={tr.ai_placeholder}
-              className="bg-transparent text-sm flex-1 outline-none placeholder:text-muted-foreground"
-              disabled={typing}
+              placeholder={copy.placeholder}
+              aria-label={copy.placeholder}
+              className="flex-1 bg-transparent text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary placeholder:text-muted-foreground"
+              disabled={busy}
             />
           </div>
           <button
+            type="button"
+            data-testid="send-turn"
             onClick={() => sendMessage(input)}
-            disabled={!input.trim() || typing}
-            className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-md active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+            disabled={!input.trim() || busy}
+            aria-label={copy.send}
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Send size={17} strokeWidth={2.5} />
           </button>
@@ -444,4 +1209,8 @@ export default function AIPage() {
       </div>
     </div>
   );
+}
+
+export default function AIPage() {
+  return <AIPageClient />;
 }

@@ -3,8 +3,11 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { DiningSessionId, ToolName } from "../schemas.ts";
 
-function safeSessionIdentifier(sessionId: DiningSessionId): string {
-  return createHash("sha256").update(sessionId).digest("hex").slice(0, 12);
+export function safeCapabilityIdentifier(value: string): string {
+  return `sha256:${createHash("sha256")
+    .update(value)
+    .digest("hex")
+    .slice(0, 12)}`;
 }
 
 export interface SafeTurnLog {
@@ -25,8 +28,8 @@ export function logSafeTurnEvent(log: SafeTurnLog): void {
   if (process.env.NODE_ENV === "test") return;
   const entry = {
     event: "waiter_turn_completed",
-    turnId: log.turnId,
-    session: safeSessionIdentifier(log.sessionId),
+    turnId: log.turnId ? safeCapabilityIdentifier(log.turnId) : null,
+    session: safeCapabilityIdentifier(log.sessionId),
     provider: log.provider,
     fallbackUsed: log.fallbackUsed,
     toolNames: log.toolNames,
@@ -72,7 +75,9 @@ export function logSafeToolEvent(log: SafeToolLog): void {
   const entry = {
     event: log.event,
     toolName: log.toolName,
-    session: log.sessionId ? safeSessionIdentifier(log.sessionId) : undefined,
+    session: log.sessionId
+      ? safeCapabilityIdentifier(log.sessionId)
+      : undefined,
     category: log.category,
     status: log.status,
     durationMs: log.durationMs,

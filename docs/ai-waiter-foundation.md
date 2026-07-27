@@ -268,7 +268,7 @@ JSON handling:
 - rejects empty/malformed JSON;
 - returns `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
 
-Limits remain 2 KiB for session creation and 16 KiB for tool execution.
+Limits remain 2 KiB for session operations and 16 KiB for tool execution.
 
 Create a signed-table session:
 
@@ -276,7 +276,23 @@ Create a signed-table session:
 POST /api/ai/session
 Content-Type: application/json
 
-{"language":"lt","tableToken":"<server-generated-signed-token>"}
+{
+  "action": "create_table_session",
+  "language": "lt",
+  "tableToken": "<server-generated-signed-token>"
+}
+```
+
+Restore a session without putting its ownership capability in the URL:
+
+```http
+POST /api/ai/session
+Content-Type: application/json
+
+{
+  "action": "restore_session",
+  "sessionId": "ds_<32 lowercase hexadecimal characters>"
+}
 ```
 
 Execute a tool:

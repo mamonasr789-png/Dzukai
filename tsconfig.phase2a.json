@@ -6,6 +6,8 @@
   "include": [
     "next-env.d.ts",
     "src/lib/ai-waiter/**/*.ts",
+    "src/app/ai/page.tsx",
+    "src/lib/ai-waiter/tests/**/*.tsx",
     "src/app/api/ai/session/route.ts",
     "src/app/api/ai/tools/route.ts",
     "src/app/api/ai/turn/route.ts",

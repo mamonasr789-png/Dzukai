@@ -1,6 +1,8 @@
 import {
   CreateDiningSessionRequestSchema,
-  CreateDiningSessionResponseSchema,
+  DiningSessionSnapshotResponseSchema,
+  type ConversationState,
+  type DiningSessionRequest,
 } from "../../../../lib/ai-waiter/schemas.ts";
 import {
   methodNotAllowedResponse,
@@ -10,6 +12,7 @@ import {
 } from "../../../../lib/ai-waiter/server/http.ts";
 import { requestFingerprint } from "../../../../lib/ai-waiter/server/rateLimitPort.ts";
 import {
+  cartPort,
   conversationStateStore,
   getAiWaiterRuntimeAvailability,
   rateLimitPort,
@@ -24,6 +27,119 @@ const ALLOWED_METHODS = ["OPTIONS", "POST"];
 
 export const runtime = "nodejs";
 
+async function sessionSnapshot(
+  state: ConversationState,
+  status = 200
+): Promise<Response> {
+  const cart = await cartPort.getCart(state.sessionId);
+  if (!cart.ok) {
+    return safeJsonResponse(
+      {
+        ok: false,
+        error: {
+          code:
+            cart.error.code === "session_not_found"
+              ? "session_not_found"
+              : "internal_error",
+          message: "The dining-session cart could not be restored safely.",
+        },
+      },
+      { status: cart.error.code === "session_not_found" ? 404 : 500 }
+    );
+  }
+  const staffRequestsAvailable = Boolean(
+    state.restaurantId && state.tableNumber && state.tableTokenId
+  );
+  return safeJsonResponse(
+    DiningSessionSnapshotResponseSchema.parse({
+      ok: true,
+      state,
+      cart: cart.data.cart,
+      capabilities: {
+        mode: staffRequestsAvailable ? "table" : "demo",
+        staffRequestsAvailable,
+      },
+    }),
+    { status }
+  );
+}
+
+async function createSession(
+  request: Extract<
+    DiningSessionRequest,
+    { action: "create_demo_session" | "create_table_session" }
+  >
+): Promise<Response> {
+  let tableContext = null;
+  if (request.action === "create_table_session") {
+    const secret = getTableTokenSecret();
+    if (!secret) {
+      return safeJsonResponse(
+        {
+          ok: false,
+          error: {
+            code: "storage_not_configured",
+            message: "Table-token verification is not configured.",
+          },
+        },
+        { status: 503 }
+      );
+    }
+    const verified = verifyTableToken(request.tableToken, secret);
+    if (!verified.ok) {
+      return safeJsonResponse(
+        {
+          ok: false,
+          error: {
+            code: verified.code,
+            message: verified.message,
+          },
+        },
+        { status: 401 }
+      );
+    }
+    tableContext = {
+      restaurantId: verified.payload.restaurantId,
+      tableNumber: verified.payload.tableNumber,
+      tableTokenId: verified.payload.tokenId,
+    };
+  }
+
+  const created = await conversationStateStore.createSession({
+    language: request.language,
+    tableContext,
+  });
+  if (!created.ok) {
+    return safeJsonResponse(
+      { ok: false, error: created.error },
+      {
+        status:
+          created.error.code === "storage_capacity_exceeded" ? 503 : 400,
+      }
+    );
+  }
+  return sessionSnapshot(created.data, 201);
+}
+
+async function restoreSession(
+  request: Extract<DiningSessionRequest, { action: "restore_session" }>
+): Promise<Response> {
+  const state = await conversationStateStore.getSession(request.sessionId);
+  if (!state) {
+    return safeJsonResponse(
+      {
+        ok: false,
+        error: {
+          code: "session_not_found",
+          message: "Dining session was not found or expired.",
+        },
+      },
+      { status: 404 }
+    );
+  }
+  return sessionSnapshot(state);
+}
+
 export async function POST(request: Request): Promise<Response> {
   try {
     const availability = getAiWaiterRuntimeAvailability();
@@ -37,32 +153,6 @@ export async function POST(request: Request): Promise<Response> {
           },
         },
         { status: 503 }
-      );
-    }
-
-    const fingerprint = requestFingerprint(request);
-    const rateDecision = await rateLimitPort.consume({
-      key: `session-create:${fingerprint}`,
-      limit: 20,
-      windowMs: 60_000,
-    });
-    if (!rateDecision.allowed) {
-      return safeJsonResponse(
-        {
-          ok: false,
-          error: {
-            code: "rate_limited",
-            message: "Dining-session creation rate limit exceeded. Retry later.",
-          },
-        },
-        {
-          status: 429,
-          headers: {
-            "Retry-After": String(
-              Math.max(1, Math.ceil(rateDecision.retryAfterMs / 1_000))
-            ),
-          },
-        }
       );
     }
 
@@ -86,69 +176,42 @@ export async function POST(request: Request): Promise<Response> {
         { status: 400 }
       );
     }
-
-    let tableContext = null;
-    if (parsed.data.tableToken) {
-      const secret = getTableTokenSecret();
-      if (!secret) {
-        return safeJsonResponse(
-          {
-            ok: false,
-            error: {
-              code: "storage_not_configured",
-              message: "Table-token verification is not configured.",
-            },
-          },
-          { status: 503 }
-        );
-      }
-      const verified = verifyTableToken(parsed.data.tableToken, secret);
-      if (!verified.ok) {
-        return safeJsonResponse(
-          {
-            ok: false,
-            error: {
-              code: verified.code,
-              message: verified.message,
-            },
-          },
-          { status: 401 }
-        );
-      }
-      tableContext = {
-        restaurantId: verified.payload.restaurantId,
-        tableNumber: verified.payload.tableNumber,
-        tableTokenId: verified.payload.tokenId,
-      };
-    }
-
-    const created = await conversationStateStore.createSession({
-      language: parsed.data.language,
-      tableContext,
+    const fingerprint = requestFingerprint(request);
+    const rateDecision = await rateLimitPort.consume({
+      key: `session-${parsed.data.action}:${fingerprint}`,
+      limit: parsed.data.action === "restore_session" ? 120 : 20,
+      windowMs: 60_000,
     });
-    if (!created.ok) {
+    if (!rateDecision.allowed) {
       return safeJsonResponse(
-        { ok: false, error: created.error },
         {
-          status:
-            created.error.code === "storage_capacity_exceeded" ? 503 : 400,
+          ok: false,
+          error: {
+            code: "rate_limited",
+            message: "Dining-session request rate limit exceeded. Retry later.",
+          },
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(
+              Math.max(1, Math.ceil(rateDecision.retryAfterMs / 1_000))
+            ),
+          },
         }
       );
     }
-    return safeJsonResponse(
-      CreateDiningSessionResponseSchema.parse({
-        ok: true,
-        state: created.data,
-      }),
-      { status: 201 }
-    );
+
+    return parsed.data.action === "restore_session"
+      ? restoreSession(parsed.data)
+      : createSession(parsed.data);
   } catch {
     return safeJsonResponse(
       {
         ok: false,
         error: {
           code: "internal_error",
-          message: "Dining session could not be created safely.",
+          message: "Dining session request could not be completed safely.",
         },
       },
       { status: 500 }
