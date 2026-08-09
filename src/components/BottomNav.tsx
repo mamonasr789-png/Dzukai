@@ -6,6 +6,7 @@ import { Home, UtensilsCrossed, ShoppingCart, Bot } from "lucide-react";
 import { useCartStore } from "@/lib/store";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { AI_WAITER_OPEN_CART_EVENT } from "@/lib/ai-waiter/client/liveWaiterUi";
 
 export default function BottomNav() {
   const pathname = usePathname();
@@ -31,15 +32,9 @@ export default function BottomNav() {
       <div className="max-w-lg mx-auto flex items-center justify-around px-2 pt-2 pb-2">
         {navItems.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== "/" && pathname.startsWith(href));
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all duration-200 relative",
-                active ? "text-primary" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
+          const opensAiServerCart = href === "/cart" && pathname.startsWith("/ai");
+          const content = (
+            <>
               {active && <span className="absolute inset-0 bg-primary/10 rounded-2xl" />}
               <span className="relative">
                 <Icon
@@ -48,7 +43,7 @@ export default function BottomNav() {
                   className="transition-transform duration-200"
                   style={{ transform: active ? "scale(1.1)" : "scale(1)" }}
                 />
-                {href === "/cart" && totalItems > 0 && (
+                {href === "/cart" && !opensAiServerCart && totalItems > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 bg-primary text-primary-foreground text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
                     {totalItems > 9 ? "9+" : totalItems}
                   </span>
@@ -57,6 +52,37 @@ export default function BottomNav() {
               <span className={cn("text-[10px] font-medium tracking-wide transition-all", active ? "opacity-100" : "opacity-60")}>
                 {label}
               </span>
+            </>
+          );
+          const className = cn(
+            "flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all duration-200 relative",
+            active ? "text-primary" : "text-muted-foreground hover:text-foreground"
+          );
+          if (opensAiServerCart) {
+            return (
+              <button
+                key={href}
+                type="button"
+                data-testid="ai-bottom-cart"
+                aria-label={label}
+                className={className}
+                onClick={() =>
+                  window.dispatchEvent(
+                    new CustomEvent(AI_WAITER_OPEN_CART_EVENT)
+                  )
+                }
+              >
+                {content}
+              </button>
+            );
+          }
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={className}
+            >
+              {content}
             </Link>
           );
         })}

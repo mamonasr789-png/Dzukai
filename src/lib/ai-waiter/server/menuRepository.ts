@@ -1,6 +1,7 @@
 import "server-only";
 
 import { products, type Product } from "../../data.ts";
+import { tProduct } from "../../product-translations.ts";
 import {
   ProductDetailsSchema,
   type ConversationState,
@@ -195,14 +196,22 @@ export function productRequiresVariantSelection(product: Product): boolean {
   return typeof product.priceNote === "string" && product.priceNote.trim().length > 0;
 }
 
-function toDetails(product: Product): ProductDetails {
+function toDetails(
+  product: Product,
+  language: SupportedLanguage = "lt"
+): ProductDetails {
   return ProductDetailsSchema.parse({
     productId: product.id,
-    name: product.name,
+    name: tProduct(product.id, language, "name", product.name),
     category: product.category,
     officialUnitPrice: product.price,
     currency: "EUR",
-    description: product.description,
+    description: tProduct(
+      product.id,
+      language,
+      "description",
+      product.description
+    ),
     ingredients: [...product.ingredients],
     priceNote: product.priceNote ?? null,
     allergenStatus:
@@ -237,12 +246,11 @@ export class StaticMenuRepository implements MenuRepository {
     options: ProductSearchOptions,
     language?: SupportedLanguage
   ): Promise<ProductDetails[]> {
-    void language;
     return products
       .filter((product) => !options.category || product.category === options.category)
       .filter((product) => containsEverySearchTerm(product, query))
       .slice(0, options.limit)
-      .map(toDetails);
+      .map((product) => toDetails(product, language));
   }
 
   async getProductById(productId: string): Promise<Product | null> {
@@ -258,9 +266,8 @@ export class StaticMenuRepository implements MenuRepository {
     productId: string,
     language?: SupportedLanguage
   ): Promise<ProductDetails | null> {
-    void language;
     const product = await this.getProductById(productId);
-    return product ? toDetails(product) : null;
+    return product ? toDetails(product, language) : null;
   }
 
   async getOfficialPrice(productId: string): Promise<number | null> {
@@ -283,7 +290,6 @@ export class StaticMenuRepository implements MenuRepository {
     options: RecommendationCandidateOptions,
     language?: SupportedLanguage
   ): Promise<ProductDetails[]> {
-    void language;
     if (
       options.dietaryRequirements.includes("halal") ||
       options.dietaryRequirements.includes("kosher")
@@ -319,6 +325,6 @@ export class StaticMenuRepository implements MenuRepository {
         );
       })
       .slice(0, options.limit)
-      .map(toDetails);
+      .map((product) => toDetails(product, language));
   }
 }

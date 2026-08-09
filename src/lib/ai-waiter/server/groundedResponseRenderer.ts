@@ -5,6 +5,7 @@ import type {
   ConversationState,
   SupportedLanguage,
 } from "../schemas.ts";
+import { tProduct } from "../../product-translations.ts";
 import type { StoredActionLedgerEntry } from "./actionLedger.ts";
 import type { ValidatedClaim } from "./claimValidation.ts";
 
@@ -110,9 +111,13 @@ export class GroundedResponseRenderer {
     const previousLine = beforeCart.lines.find(
       (line) => line.lineId === ledger.entry.intent.targetIds[0]
     );
+    const productId = currentLine?.productId ?? previousLine?.productId;
+    const originalName =
+      currentLine?.product.name ?? previousLine?.product.name;
     const name =
-      currentLine?.product.name ??
-      previousLine?.product.name ??
+      (productId && originalName
+        ? tProduct(productId, language, "name", originalName)
+        : null) ??
       (language === "lt"
         ? "pasirinktą prekę"
         : language === "en"

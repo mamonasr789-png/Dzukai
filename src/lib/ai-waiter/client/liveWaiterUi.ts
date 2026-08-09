@@ -50,7 +50,6 @@ const COPY = {
     total: "Iš viso",
     note: "Pastaba",
     staffConfirmation: "Reikia darbuotojo patvirtinimo",
-    ask: "Paklausti",
     add: "Pridėti",
     retry: "Bandyti dar kartą",
     fallback: "Atsakymą saugiai parengė atsarginis režimas.",
@@ -135,7 +134,6 @@ const COPY = {
     total: "Total",
     note: "Note",
     staffConfirmation: "Requires staff confirmation",
-    ask: "Ask",
     add: "Add",
     retry: "Try again",
     fallback: "A safe fallback prepared this response.",
@@ -221,7 +219,6 @@ const COPY = {
     total: "Итого",
     note: "Примечание",
     staffConfirmation: "Требуется подтверждение сотрудника",
-    ask: "Спросить",
     add: "Добавить",
     retry: "Повторить",
     fallback: "Ответ подготовлен безопасным резервным режимом.",
@@ -280,16 +277,28 @@ export interface TurnPresentation {
   preservesSuccessfulAction: boolean;
 }
 
+export const AI_WAITER_OPEN_CART_EVENT = "vaise:ai-waiter-open-cart";
+
+export interface TurnPresentationOptions {
+  showFallbackNotice?: boolean;
+}
+
 export function turnPresentation(
   data: WaiterTurnData,
-  language: SupportedLanguage
+  language: SupportedLanguage,
+  options: TurnPresentationOptions = {}
 ): TurnPresentation {
   const copy = liveWaiterCopy(language);
   const replaySuffix = data.replayed ? ` ${copy.replayed}` : "";
+  const showFallbackNotice = options.showFallbackNotice ?? true;
   switch (data.status) {
     case "success_with_response_fallback":
       return {
-        notice: `${copy.fallback}${replaySuffix}`,
+        notice: showFallbackNotice
+          ? `${copy.fallback}${replaySuffix}`
+          : data.replayed
+            ? copy.replayed
+            : null,
         tone: "success",
         retryable: false,
         preservesSuccessfulAction: true,
@@ -339,7 +348,7 @@ export function turnPresentation(
       return {
         notice: data.replayed
           ? copy.replayed
-          : data.fallbackUsed
+          : data.fallbackUsed && showFallbackNotice
             ? copy.fallback
             : null,
         tone: data.fallbackUsed ? "info" : "success",

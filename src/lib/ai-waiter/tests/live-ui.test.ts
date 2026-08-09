@@ -509,6 +509,18 @@ test("turn presentation preserves partial success, fallback, replay, and no-side
   );
   assert.equal(fallback.preservesSuccessfulAction, true);
   assert.match(fallback.notice ?? "", /safe fallback/iu);
+  assert.equal(
+    turnPresentation(
+      {
+        ...baseline.data,
+        status: "success_with_response_fallback",
+        fallbackUsed: true,
+      },
+      "en",
+      { showFallbackNotice: false }
+    ).notice,
+    null
+  );
 
   const failed = {
     ...baseline.data,
@@ -1313,6 +1325,7 @@ test("live /ai source has no old brain, ADD tag, tool endpoint, or browser cart 
   assert.doesNotMatch(source, /generateReply|updateContext|emptyContext/u);
   assert.doesNotMatch(source, /\[ADD:|extractAddIds|stripAddTags/u);
   assert.doesNotMatch(source, /\/api\/ai\/tools/u);
+  assert.doesNotMatch(source, /\baskAbout\b|copy\.ask/u);
   assert.doesNotMatch(
     source,
     /useCartStore\([^)]*\b(addItem|removeItem|updateQuantity|clearCart)\b/u

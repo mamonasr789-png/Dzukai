@@ -44,6 +44,7 @@ import {
   type StoredDisplayMessage,
 } from "@/lib/ai-waiter/client/liveWaiterStorage";
 import {
+  AI_WAITER_OPEN_CART_EVENT,
   friendlyClientError,
   liveWaiterCopy,
   turnPresentation,
@@ -58,6 +59,7 @@ import type {
 } from "@/lib/ai-waiter/schemas";
 import { useCartStore } from "@/lib/store";
 import { useT } from "@/lib/i18n";
+import { tProduct } from "@/lib/product-translations";
 
 type Message = StoredDisplayMessage;
 
@@ -182,16 +184,20 @@ function ProductReferenceRow({
   reference,
   language,
   disabled,
-  onAsk,
   onAdd,
 }: {
   reference: WaiterReference;
   language: SupportedLanguage;
   disabled: boolean;
-  onAsk: (reference: WaiterReference) => void;
   onAdd: (reference: WaiterReference) => void;
 }) {
   const copy = liveWaiterCopy(language);
+  const displayName = tProduct(
+    reference.productId,
+    language,
+    "name",
+    reference.name
+  );
   return (
     <div
       data-testid={`product-reference-${reference.productId}`}
@@ -202,21 +208,12 @@ function ProductReferenceRow({
           href={`/product/${encodeURIComponent(reference.productId)}`}
           className="min-w-0 flex-1"
         >
-          <p className="text-sm font-semibold leading-snug">{reference.name}</p>
+          <p className="text-sm font-semibold leading-snug">{displayName}</p>
           <p className="mt-1 text-xs font-bold text-primary">
             {formatPrice(reference.officialUnitPrice, language)}
           </p>
         </Link>
-        <div className="flex shrink-0 gap-1.5">
-          <button
-            type="button"
-            onClick={() => onAsk(reference)}
-            disabled={disabled}
-            aria-label={`${copy.ask}: ${reference.name}`}
-            className="rounded-full bg-secondary px-2.5 py-1.5 text-[11px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40"
-          >
-            {copy.ask}
-          </button>
+        <div className="flex shrink-0">
           <button
             type="button"
             onClick={() => onAdd(reference)}
@@ -225,7 +222,7 @@ function ProductReferenceRow({
               reference.referenceSetId === undefined ||
               reference.ordinal === undefined
             }
-            aria-label={`${copy.add}: ${reference.name}`}
+            aria-label={`${copy.add}: ${displayName}`}
             className="rounded-full bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40"
           >
             {copy.add}
@@ -240,13 +237,11 @@ function MessageBubble({
   message,
   language,
   disabled,
-  onAsk,
   onAdd,
 }: {
   message: Message;
   language: SupportedLanguage;
   disabled: boolean;
-  onAsk: (reference: WaiterReference) => void;
   onAdd: (reference: WaiterReference) => void;
 }) {
   const isUser = message.role === "user";
@@ -298,7 +293,6 @@ function MessageBubble({
                 reference={reference}
                 language={language}
                 disabled={disabled}
-                onAsk={onAsk}
                 onAdd={onAdd}
               />
             ))}
@@ -376,7 +370,14 @@ function CartPanel({
               >
                 <div className="flex justify-between gap-3 text-sm">
                   <div>
-                    <p className="font-semibold">{line.product.name}</p>
+                    <p className="font-semibold">
+                      {tProduct(
+                        line.productId,
+                        language,
+                        "name",
+                        line.product.name
+                      )}
+                    </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {line.quantity} ×{" "}
                       {formatPrice(
@@ -762,6 +763,13 @@ export function AIPageClient({
   }, [applySnapshot]);
 
   useEffect(() => {
+    const openServerCart = () => setCartOpen(true);
+    window.addEventListener(AI_WAITER_OPEN_CART_EVENT, openServerCart);
+    return () =>
+      window.removeEventListener(AI_WAITER_OPEN_CART_EVENT, openServerCart);
+  }, []);
+
+  useEffect(() => {
     if (!activeSessionId) return;
     const factory =
       createBroadcastChannel ??
@@ -930,7 +938,8 @@ export function AIPageClient({
         clearPendingTurn(storageRef.current, session.state.sessionId);
         const presentation = turnPresentation(
           result.data,
-          result.data.language
+          result.data.language,
+          { showFallbackNotice: developmentProviderControls }
         );
         const retryModeForSuccess = retryModeForTurnResult(result);
         gateRef.current.complete(attempt, false);
@@ -1077,20 +1086,6 @@ export function AIPageClient({
     freshRetryAttemptRef.current = null;
     void executeAttempt(attempt, false);
   }, [executeAttempt, sessionStatus, updateRetryMode]);
-
-  const askAbout = useCallback(
-    (reference: WaiterReference) => {
-      const prompt =
-        language === "lt"
-          ? `Papasakokite apie „${reference.name}“.`
-          : language === "ru"
-            ? `Расскажите о «${reference.name}».`
-            : `Tell me about “${reference.name}”.`;
-      setInput(prompt);
-      setTimeout(() => inputRef.current?.focus(), 0);
-    },
-    [language]
-  );
 
   const addReference = useCallback(
     (reference: WaiterReference) => {
@@ -1313,7 +1308,6 @@ export function AIPageClient({
                 message={message}
                 language={language}
                 disabled={busy || newTurnBlocked}
-                onAsk={askAbout}
                 onAdd={addReference}
               />
               {retryMessageId === message.id && (

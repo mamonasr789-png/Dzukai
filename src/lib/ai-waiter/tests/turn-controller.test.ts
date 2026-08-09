@@ -167,6 +167,36 @@ test("grounded Lithuanian recommendation uses real products, official prices, an
   assert.doesNotMatch(result.data.message, /populiariaus|most popular/iu);
 });
 
+test("menu localization preserves authoritative identity, price, and missing-translation fallback", async () => {
+  const repository = new StaticMenuRepository();
+  const lithuanian = await repository.getProductDetails("gg2", "lt");
+  const english = await repository.getProductDetails("gg2", "en");
+  const russian = await repository.getProductDetails("gg2", "ru");
+  assert.ok(lithuanian && english && russian);
+  assert.equal(lithuanian.name, "Gazuotas vanduo (0,5l)");
+  assert.equal(english.name, "Sparkling water (0.5L)");
+  assert.equal(russian.name, "Газированная вода (0,5Л)");
+  assert.deepEqual(
+    [lithuanian.productId, english.productId, russian.productId],
+    ["gg2", "gg2", "gg2"]
+  );
+  assert.deepEqual(
+    [
+      lithuanian.officialUnitPrice,
+      english.officialUnitPrice,
+      russian.officialUnitPrice,
+    ],
+    [2, 2, 2]
+  );
+
+  const untranslatedProduct = await repository.getProductById("ko2");
+  const missingEnglish = await repository.getProductDetails("ko2", "en");
+  assert.ok(untranslatedProduct && missingEnglish);
+  assert.equal(missingEnglish.name, untranslatedProduct.name);
+  assert.equal(missingEnglish.productId, untranslatedProduct.id);
+  assert.equal(missingEnglish.officialUnitPrice, untranslatedProduct.price);
+});
+
 test("multi-turn beef preference is persisted and grounds later recommendations", async () => {
   const harness = createHarness();
   const session = await createSession(harness);
@@ -255,6 +285,13 @@ test("English drink category, ordinal add, and another stay on the safe server f
   }
 
   const first = drinks.data.references[0];
+  const localizedFirst = await harness.menuRepository.getProductDetails(
+    first.productId,
+    "en"
+  );
+  assert.ok(localizedFirst);
+  assert.equal(first.name, localizedFirst.name);
+  assert.ok(drinks.data.message.includes(localizedFirst.name));
   assert.ok(first.referenceSetId);
   assert.equal(first.ordinal, 0);
   if (!first.referenceSetId || first.ordinal === undefined) return;
@@ -279,6 +316,7 @@ test("English drink category, ordinal add, and another stay on the safe server f
     added.data.cart.lines[0]?.product.officialUnitPrice,
     first.officialUnitPrice
   );
+  assert.ok(added.data.message.includes(localizedFirst.name));
 
   const another = await harness.controller.handleWaiterTurn(
     request(session.sessionId, "another", "turn_drink_en_another")
@@ -343,6 +381,13 @@ test("Lithuanian drink category, safe ordinal add, and Dar rotate recommendation
   if (!drinks.ok) return;
   assert.ok(drinks.data.references.length > 0);
   const first = drinks.data.references[0];
+  const localizedFirst = await harness.menuRepository.getProductDetails(
+    first.productId,
+    "lt"
+  );
+  assert.ok(localizedFirst);
+  assert.equal(first.name, localizedFirst.name);
+  assert.ok(drinks.data.message.includes(localizedFirst.name));
   assert.ok(first.referenceSetId);
   assert.equal(first.ordinal, 0);
   if (!first.referenceSetId || first.ordinal === undefined) return;
@@ -393,6 +438,13 @@ test("Russian drink category, safe ordinal add, and follow-up retain context", a
   if (!drinks.ok) return;
   assert.ok(drinks.data.references.length > 0);
   const first = drinks.data.references[0];
+  const localizedFirst = await harness.menuRepository.getProductDetails(
+    first.productId,
+    "ru"
+  );
+  assert.ok(localizedFirst);
+  assert.equal(first.name, localizedFirst.name);
+  assert.ok(drinks.data.message.includes(localizedFirst.name));
   assert.ok(first.referenceSetId);
   assert.equal(first.ordinal, 0);
   if (!first.referenceSetId || first.ordinal === undefined) return;
@@ -410,6 +462,7 @@ test("Russian drink category, safe ordinal add, and follow-up retain context", a
   if (!added.ok) return;
   assert.equal(added.data.cart.revision, 1);
   assert.equal(added.data.cart.lines[0]?.productId, first.productId);
+  assert.ok(added.data.message.includes(localizedFirst.name));
 
   const another = await harness.controller.handleWaiterTurn(
     request(session.sessionId, "Другой", "turn_drink_ru_another")

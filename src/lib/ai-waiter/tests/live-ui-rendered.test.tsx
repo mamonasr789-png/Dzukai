@@ -61,6 +61,10 @@ const {
   within,
 } = await import("@testing-library/react");
 const { AIPageClient } = await import("../../../app/ai/page.tsx");
+const { default: BottomNav } = await import("../../../components/BottomNav.tsx");
+const { PathnameContext } = await import(
+  "next/dist/shared/lib/hooks-client-context.shared-runtime.js"
+);
 const { useCartStore } = await import("../../store.ts");
 const { products } = await import("../../data.ts");
 
@@ -283,17 +287,25 @@ function renderPage(
       close(): void;
       onmessage: ((event: MessageEvent<unknown>) => void) | null;
     } | null;
+    bottomNav?: boolean;
   } = {}
 ) {
-  const content: ReactNode = (
-    <AIPageClient
-      client={client}
-      storage={storage}
-      createBroadcastChannel={extra.createBroadcastChannel}
-    />
+  const page: ReactNode = (
+    <>
+      <AIPageClient
+        client={client}
+        storage={storage}
+        createBroadcastChannel={extra.createBroadcastChannel}
+      />
+      {extra.bottomNav && (
+        <PathnameContext.Provider value="/ai">
+          <BottomNav />
+        </PathnameContext.Provider>
+      )}
+    </>
   );
   return render(
-    extra.strict ? <React.StrictMode>{content}</React.StrictMode> : content
+    extra.strict ? <React.StrictMode>{page}</React.StrictMode> : page
   );
 }
 
@@ -793,17 +805,14 @@ test("refresh recovery keeps a pending turn, does not auto-send, and retries the
     name: "What do you recommend?",
   }) as HTMLButtonElement;
   const card = screen.getByTestId("product-reference-u2");
-  const ask = within(card).getByRole("button", {
-    name: "Ask: Shared official dish deluxe",
-  }) as HTMLButtonElement;
   const add = within(card).getByRole("button", {
-    name: "Add: Shared official dish deluxe",
+    name: "Add: Herring with roasted vegetables",
   }) as HTMLButtonElement;
   const retry = screen.getByTestId("retry-turn") as HTMLButtonElement;
   assert.equal(input.disabled, true);
   assert.equal(send.disabled, true);
   assert.equal(suggestion.disabled, true);
-  assert.equal(ask.disabled, true);
+  assert.equal(within(card).queryByRole("button", { name: /^Ask:/u }), null);
   assert.equal(add.disabled, true);
   assert.equal(retry.disabled, false);
   assert.match(retry.getAttribute("aria-label") ?? "", /Try again/iu);
@@ -927,7 +936,7 @@ test("route-backed lost add response recreates the page and replays to exactly o
     const firstCard = await screen.findByTestId("product-reference-u1");
     fireEvent.click(
       within(firstCard).getByRole("button", {
-        name: "Add: Silkė su marinuotais svogūnais ir karštomis bulvėmis",
+        name: "Add: Herring with marinated onions and hot potatoes",
       })
     );
     await screen.findByTestId("pending-turn-recovery");
@@ -951,7 +960,7 @@ test("route-backed lost add response recreates the page and replays to exactly o
     assert.equal(addRequests, 1);
     fireEvent.click(screen.getByTestId("retry-turn"));
     await screen.findByText(
-      /added.*Silkė su marinuotais svogūnais ir karštomis bulvėmis.*cart/iu
+      /added.*Herring with marinated onions and hot potatoes.*cart/iu
     );
 
     fireEvent.click(screen.getByLabelText("Cart"));
@@ -959,7 +968,7 @@ test("route-backed lost add response recreates the page and replays to exactly o
     assert.equal(cartLines.length, 1);
     assert.match(
       cartLines[0].textContent ?? "",
-      /Silkė su marinuotais svogūnais ir karštomis bulvėmis/iu
+      /Herring with marinated onions and hot potatoes/iu
     );
     assert.match(cartLines[0].textContent ?? "", /1 ×/u);
     assert.equal(
@@ -1014,7 +1023,7 @@ test("confirmed no-side-effect retry uses a new turn ID without duplicating the 
   assert.equal(screen.getAllByText("Recommend dinner").length, 1);
 });
 
-test("rendered product-card Add sends and applies the exact clicked server reference", async () => {
+test("both /ai cart entries use the restored server cart while cards stay localized and Add-only", async () => {
   setLanguage("en");
   const storage = new MemorySessionStorage();
   const turnBodies: Array<Record<string, unknown>> = [];
@@ -1047,16 +1056,20 @@ test("rendered product-card Add sends and applies the exact clicked server refer
       ordinal: 1,
     },
   ];
+  let currentCart = emptyCart();
   const client = new LiveWaiterClient({
     fetchImplementation: (async (input, init) => {
-      if (String(input).endsWith("/session")) return jsonSnapshot(snapshot(), 201);
+      if (String(input).endsWith("/session")) {
+        return jsonSnapshot(snapshot({ cart: currentCart }), 201);
+      }
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       turnBodies.push(body);
       const isAdd = turnBodies.length === 2;
+      if (isAdd) currentCart = cartWithLine();
       return Response.json({
         ok: true,
         data: turnData(
-          isAdd ? cartWithLine() : emptyCart(),
+          currentCart,
           isAdd
             ? {
                 message: "Exact second card added.",
@@ -1078,8 +1091,9 @@ test("rendered product-card Add sends and applies the exact clicked server refer
     }) as typeof fetch,
   });
 
-  renderPage(client, storage, {
+  const firstPage = renderPage(client, storage, {
     createBroadcastChannel: () => channel,
+    bottomNav: true,
   });
   const readyInput = await screen.findByTestId("waiter-input");
   await waitFor(() =>
@@ -1088,9 +1102,11 @@ test("rendered product-card Add sends and applies the exact clicked server refer
   fireEvent.click(screen.getByText("What do you recommend?"));
   await screen.findByText("Two grounded choices.");
   const secondCard = screen.getByTestId("product-reference-u2");
+  assert.match(secondCard.textContent ?? "", /Herring with roasted vegetables/u);
+  assert.equal(within(secondCard).queryByRole("button", { name: /^Ask:/u }), null);
   fireEvent.click(
     within(secondCard).getByRole("button", {
-      name: "Add: Shared official dish deluxe",
+      name: "Add: Herring with roasted vegetables",
     })
   );
   await screen.findByText("Exact second card added.");
@@ -1101,8 +1117,18 @@ test("rendered product-card Add sends and applies the exact clicked server refer
     ordinal: 1,
   });
   assert.match(String(turnBodies[1].message), /recommendation 2/iu);
-  fireEvent.click(screen.getByLabelText("Cart"));
-  assert.ok(screen.getByText("Second official dish"));
+  const cartButtons = screen.getAllByLabelText("Cart");
+  assert.equal(cartButtons.length, 2);
+  assert.match(cartButtons[0].textContent ?? "", /1/u);
+  fireEvent.click(cartButtons[0]);
+  let cartPanel = screen.getByTestId("server-cart");
+  assert.match(cartPanel.textContent ?? "", /Herring with roasted vegetables/u);
+  assert.match(cartPanel.textContent ?? "", /€10\.00/u);
+  fireEvent.click(within(cartPanel).getByLabelText("Close cart"));
+  fireEvent.click(screen.getByTestId("ai-bottom-cart"));
+  cartPanel = screen.getByTestId("server-cart");
+  assert.match(cartPanel.textContent ?? "", /Herring with roasted vegetables/u);
+  assert.equal(screen.getAllByTestId(/^cart-line-/u).length, 1);
   assert.deepEqual(broadcastMessages, [
     {
       type: "cart-invalidated",
@@ -1117,6 +1143,19 @@ test("rendered product-card Add sends and applies the exact clicked server refer
     ),
     false
   );
+  assert.equal(useCartStore.getState().items[0]?.quantity, 7);
+
+  firstPage.unmount();
+  renderPage(client, storage);
+  const restoredCartButton = await screen.findByLabelText("Cart");
+  await waitFor(() =>
+    assert.match(restoredCartButton.textContent ?? "", /1/u)
+  );
+  fireEvent.click(restoredCartButton);
+  const restoredLine = screen.getByTestId(
+    "cart-line-line_00000000000000000000000000000001"
+  );
+  assert.match(restoredLine.textContent ?? "", /Herring with roasted vegetables/u);
   assert.equal(useCartStore.getState().items[0]?.quantity, 7);
 });
 
@@ -1281,7 +1320,43 @@ test("a malformed duplicate-line cart preserves the last good cart and the same-
     capturedTurnId
   );
   fireEvent.click(screen.getByLabelText("Cart"));
-  assert.equal(screen.getAllByText("Second official dish").length, 1);
+  assert.equal(screen.getAllByText("Herring with roasted vegetables").length, 1);
+});
+
+test("normal non-development UI hides fallback diagnostics but keeps partial warnings", async () => {
+  setNodeEnvironment("production");
+  const storage = new MemorySessionStorage();
+  let turn = 0;
+  const client = new LiveWaiterClient({
+    fetchImplementation: (async (input) => {
+      if (String(input).endsWith("/session")) {
+        return jsonSnapshot(snapshot({ language: "en" }), 201);
+      }
+      turn += 1;
+      return Response.json({
+        ok: true,
+        data: turnData(emptyCart(), {
+          message: turn === 1 ? "Fallback answer." : "Partial answer.",
+          status:
+            turn === 1
+              ? "success_with_response_fallback"
+              : "partial_success_state_update_failed",
+        }),
+      });
+    }) as typeof fetch,
+  });
+
+  renderPage(client, storage);
+  const input = await screen.findByTestId("waiter-input");
+  fireEvent.change(input, { target: { value: "First" } });
+  fireEvent.click(screen.getByTestId("send-turn"));
+  await screen.findByText("Fallback answer.");
+  assert.equal(screen.queryByText(/safe fallback prepared/iu), null);
+
+  fireEvent.change(input, { target: { value: "Second" } });
+  fireEvent.click(screen.getByTestId("send-turn"));
+  await screen.findByText("Partial answer.");
+  assert.ok(screen.getByText(/conversation state was not fully updated/iu));
 });
 
 test("rendered timeout settles typing and preserves manual same-ID retry state", async () => {
