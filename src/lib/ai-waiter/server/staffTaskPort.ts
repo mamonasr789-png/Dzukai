@@ -153,7 +153,14 @@ export class InMemoryStaffTaskAdapter implements StaffTaskPort {
         "Dining session was not found or expired."
       );
     }
-    if (!state.restaurantId || !state.tableNumber || !state.tableTokenId) {
+    // Either a fully verified table, or a fully anonymous demo session that
+    // dispatches to no real table. A partial table context is never trusted.
+    const verifiedTable = Boolean(
+      state.restaurantId && state.tableNumber && state.tableTokenId
+    );
+    const anonymousDemo =
+      !state.restaurantId && !state.tableNumber && !state.tableTokenId;
+    if (!verifiedTable && !anonymousDemo) {
       return operationError(
         "table_context_required",
         "A verified table session is required for this request."
@@ -221,8 +228,8 @@ export class InMemoryStaffTaskAdapter implements StaffTaskPort {
     const request: StoredStaffRequest = {
       requestId: this.createRequestId(),
       type,
-      restaurantId: state.restaurantId,
-      tableNumber: state.tableNumber,
+      restaurantId: state.restaurantId ?? "demo",
+      tableNumber: state.tableNumber ?? "demo",
       status: "waiting",
       sessionId,
       note: command.note,

@@ -353,7 +353,7 @@ test("explicit add and explicit waiter request execute exactly one bound action"
   assert.equal(added.data.actions.length, 1);
   assert.equal(added.data.actions[0].toolName, "add_to_cart");
   assert.equal(added.data.actionLedger[0].status, "succeeded");
-  assert.match(added.data.message, /Pridėjau/iu);
+  assert.match(added.data.message, /(įdėjau|pridėta|krepšely)/iu);
 
   const waiterTarget = harness({
     provider: new ScriptedTestAIProvider([
@@ -377,7 +377,7 @@ test("explicit add and explicit waiter request execute exactly one bound action"
   assert.equal(requested.data.actions.length, 1);
   assert.equal(requested.data.actions[0].toolName, "request_waiter");
   assert.equal(requested.data.actionLedger.length, 1);
-  assert.match(requested.data.message, /užklausa išsiųsta/iu);
+  assert.match(requested.data.message, /(kviečiu|padavėj|kolega)/iu);
 });
 
 test("provider cannot broaden an authorized quantity and generated schemas retain modifier structure", async () => {
@@ -479,7 +479,7 @@ test("successful mutation cannot be hidden by a later invalid factual claim", as
   if (!result.ok) return;
   assert.equal(result.data.cart.lines.length, 1);
   assert.equal(result.data.status, "success_with_response_fallback");
-  assert.match(result.data.message, /Pridėjau/iu);
+  assert.match(result.data.message, /(įdėjau|pridėta|krepšely)/iu);
   assert.doesNotMatch(result.data.message, /vieną eurą|visiškai saug/iu);
 });
 
@@ -502,7 +502,7 @@ test("state-write failure after a mutation returns explicit partial success", as
   assert.equal(result.data.status, "partial_success_state_update_failed");
   assert.equal(result.data.cart.lines.length, 1);
   assert.equal(result.data.actionLedger[0].status, "succeeded");
-  assert.match(result.data.message, /Pridėjau/iu);
+  assert.match(result.data.message, /(įdėjau|pridėta|krepšely)/iu);
 });
 
 test("exception after a successful action is recovered with the stable action key", async () => {
@@ -674,7 +674,7 @@ test("stored allergies and indirect unsafe claims always produce conservative ou
   );
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.match(result.data.message, /patvirtinti negaliu/iu);
+  assert.match(result.data.message, /(negaliu|pasitikslinti)/iu);
   assert.doesNotMatch(result.data.message, /visiškai saug|completely safe/iu);
 });
 
@@ -735,7 +735,7 @@ test("staff escalation without a tool is rendered only as an offer", async () =>
   assert.equal(result.data.actions.length, 1);
   assert.equal(result.data.actions[0].type, "clarification_required");
   assert.doesNotMatch(result.data.message, /jau eina/iu);
-  assert.match(result.data.message, /Galiu pakviesti/iu);
+  assert.match(result.data.message, /pakvies/iu);
 });
 
 test("state extraction handles negation, third-party scope, temporary preference, correction, and group budget", async () => {

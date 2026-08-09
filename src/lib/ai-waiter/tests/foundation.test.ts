@@ -1019,14 +1019,28 @@ test("staff requests require verified context, replay safely, and avoid duplicat
   );
 
   const noTable = await createHarness({ tableContext: false });
-  assertError(
-    await noTable.registry.execute({
-      sessionId: noTable.state.sessionId,
-      toolName: "request_bill",
-      input: { idempotencyKey: "bill_request_001" },
+  const anonymousDemo = await noTable.registry.execute({
+    sessionId: noTable.state.sessionId,
+    toolName: "request_bill",
+    input: { idempotencyKey: "bill_request_001" },
+  });
+  assert.equal(anonymousDemo.ok, true);
+
+  const partialContextStore = {
+    getSession: async () => ({
+      ...noTable.state,
+      restaurantId: "dzuku_ainiai",
+      tableNumber: null,
+      tableTokenId: null,
     }),
-    "table_context_required"
-  );
+  } as unknown as InMemoryConversationStateStore;
+  const partial = await new InMemoryStaffTaskAdapter(
+    partialContextStore
+  ).requestWaiter(noTable.state.sessionId, {
+    idempotencyKey: "partial_context_001",
+  });
+  assert.equal(partial.ok, false);
+  if (!partial.ok) assert.equal(partial.error.code, "table_context_required");
 });
 
 test("staff idempotency conflicts and staff action rate limits are enforced", async () => {
@@ -1546,7 +1560,7 @@ test("exact production demo override allows only non-persistent demo sessions", 
     };
     assert.deepEqual(demoBody.capabilities, {
       mode: "demo",
-      staffRequestsAvailable: false,
+      staffRequestsAvailable: true,
       persistent: false,
     });
 
@@ -1564,14 +1578,16 @@ test("exact production demo override allows only non-persistent demo sessions", 
         jsonRequest("http://test/api/ai/tools", {
           sessionId: demoBody.state.sessionId,
           toolName,
-          input: { idempotencyKey: `demo_${toolName}_blocked` },
+          input: { idempotencyKey: `demo_${toolName}_allowed` },
         })
       );
-      assert.equal(staffAction.status, 400);
+      assert.equal(staffAction.status, 200);
       const staffBody = (await staffAction.json()) as {
-        error: { code: string };
+        ok: boolean;
+        data: { tableNumber: string };
       };
-      assert.equal(staffBody.error.code, "table_context_required");
+      assert.equal(staffBody.ok, true);
+      assert.equal(staffBody.data.tableNumber, "demo");
     }
 
     const tableTool = await toolsPost(

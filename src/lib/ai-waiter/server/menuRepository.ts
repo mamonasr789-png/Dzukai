@@ -21,6 +21,12 @@ export interface RecommendationCandidateOptions {
   dietaryRequirements: ConversationState["dietaryRequirements"];
   allergies: ConversationState["allergies"];
   preferredProteins?: string[];
+  dislikedIngredients?: string[];
+  /**
+   * Opt-in for conversational recommendations only. Grounding relies on menu
+   * order to keep an explicitly named dish inside the allowed set.
+   */
+  spreadAcrossCategories?: boolean;
   limit: number;
 }
 
@@ -132,11 +138,49 @@ const PROTEIN_TERMS: Record<string, string[]> = {
   fish: ["zuv", "tunas", "lasis", "silk"],
 };
 
+const DISLIKE_TERMS: Record<string, string[]> = {
+  ...PROTEIN_TERMS,
+  herring: ["silk"],
+  onions: ["svogun"],
+  garlic: ["cesnak"],
+  mushrooms: ["gryb", "baravyk", "pievagryb"],
+};
+
 function normalize(value: string): string {
   return value
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+}
+
+/**
+ * Interleaves one product per category, chef's picks first. Menu order alone
+ * made every open recommendation return the same first three dishes.
+ */
+function spreadAcrossCategories(candidates: Product[]): Product[] {
+  const groups = new Map<string, Product[]>();
+  for (const product of candidates) {
+    const group = groups.get(product.category);
+    if (group) group.push(product);
+    else groups.set(product.category, [product]);
+  }
+  for (const group of groups.values()) {
+    group.sort(
+      (left, right) => Number(right.featured ?? false) - Number(left.featured ?? false)
+    );
+  }
+  const spread: Product[] = [];
+  for (let round = 0; spread.length < candidates.length; round += 1) {
+    let added = false;
+    for (const group of groups.values()) {
+      const product = group[round];
+      if (!product) continue;
+      spread.push(product);
+      added = true;
+    }
+    if (!added) break;
+  }
+  return spread;
 }
 
 function productText(product: Product): string {
@@ -299,7 +343,7 @@ export class StaticMenuRepository implements MenuRepository {
     }
 
     const excluded = new Set(options.excludeProductIds);
-    return products
+    const candidates = products
       .filter((product) => !options.category || product.category === options.category)
       .filter((product) => !excluded.has(product.id))
       .filter(
@@ -316,6 +360,15 @@ export class StaticMenuRepository implements MenuRepository {
       )
       .filter((product) => !hasExplicitAllergenConflict(product, options.allergies))
       .filter((product) => {
+        if (!options.dislikedIngredients?.length) return true;
+        const searchable = productText(product);
+        return !options.dislikedIngredients.some((disliked) =>
+          (DISLIKE_TERMS[disliked] ?? [normalize(disliked)]).some((term) =>
+            searchable.includes(term)
+          )
+        );
+      })
+      .filter((product) => {
         if (!options.preferredProteins?.length) return true;
         const searchable = productText(product);
         return options.preferredProteins.some((protein) =>
@@ -324,6 +377,12 @@ export class StaticMenuRepository implements MenuRepository {
           )
         );
       })
+      .slice(0, options.limit * 4);
+    const ordered =
+      options.spreadAcrossCategories && !options.category
+        ? spreadAcrossCategories(candidates)
+        : candidates;
+    return ordered
       .slice(0, options.limit)
       .map((product) => toDetails(product, language));
   }

@@ -13,6 +13,7 @@ import type {
 import type { CartPort } from "./cartPort.ts";
 import type { ConversationStateStore } from "./conversationStateStore.ts";
 import type { GroundedResponseRenderer } from "./groundedResponseRenderer.ts";
+import { buildVoiceContext, turnSeed } from "./waiterVoice.ts";
 import type {
   SafeToolRegistry,
   ToolExecutionResponse,
@@ -117,7 +118,12 @@ export class ActionOutcomeService {
       state: command.state,
       cart: command.currentCart,
       message: this.responseRenderer.actionSuccess({
-        language: command.state.language,
+        voice: buildVoiceContext({
+          language: command.state.language,
+          sessionId: command.state.sessionId,
+          turn: turnSeed(command.request.message, command.state.updatedAt),
+          message: command.request.message,
+        }),
         ledger: command.ledger,
         beforeCart: command.beforeCart,
         currentCart: command.currentCart,

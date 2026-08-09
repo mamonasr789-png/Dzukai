@@ -18,37 +18,34 @@ export const READ_ONLY_TOOLS = new Set<ToolName>([
 
 export const TURN_COPY = {
   lt: {
-    failure:
-      "Šiuo metu negaliu saugiai užbaigti atsakymo. Pabandykite dar kartą.",
+    failure: "Atsiprašau, kažkas užstrigo. Pakartokite, prašau?",
     toolFailure:
-      "Veiksmo atlikti nepavyko. Patikrinkite pasirinkimą ir bandykite dar kartą.",
+      "Nepavyko to padaryti. Gal pasitikslinkime — ką tiksliai keičiam?",
     staffUnavailable:
-      "Šiame demonstraciniame režime padavėjo ir sąskaitos užklausos nepasiekiamos.",
-    limit: "Kad išvengčiau klaidos, patikslinkite vieną konkretų pasirinkimą.",
+      "Kolegos dabar nepasiekiu. Pabandykite dar kartą po akimirkos.",
+    limit: "Kad nesuklysčiau — pasakykite vieną konkretų pasirinkimą.",
     uncertainAllergy:
-      "Ar alergija taikoma jums? Patvirtinkite alergeną, kad galėčiau tai saugiai pasižymėti.",
+      "Alergija jums pačiam? Pasakykite, kuriam produktui — pasižymėsiu.",
   },
   en: {
-    failure:
-      "I cannot safely complete the response right now. Please try again.",
+    failure: "Sorry, something got stuck there. Could you say that again?",
     toolFailure:
-      "The action could not be completed. Check the selection and try again.",
+      "That didn't go through. Let's double-check — what exactly are we changing?",
     staffUnavailable:
-      "Waiter and bill requests are unavailable in this demo session.",
-    limit: "To avoid a mistake, please clarify one specific selection.",
+      "I can't reach a colleague right now. Try again in a moment.",
+    limit: "So I don't get it wrong — tell me one specific choice.",
     uncertainAllergy:
-      "Does the allergy apply to you? Please confirm the allergen so I can record it safely.",
+      "Is the allergy yours? Tell me which ingredient and I'll note it.",
   },
   ru: {
-    failure:
-      "Сейчас я не могу безопасно завершить ответ. Попробуйте ещё раз.",
+    failure: "Извините, что-то заело. Повторите, пожалуйста?",
     toolFailure:
-      "Не удалось выполнить действие. Проверьте выбор и попробуйте ещё раз.",
+      "Не получилось. Давайте уточним — что именно меняем?",
     staffUnavailable:
-      "В демонстрационном режиме вызов официанта и запрос счёта недоступны.",
-    limit: "Чтобы избежать ошибки, уточните один конкретный вариант.",
+      "Сейчас не могу связаться с коллегой. Попробуйте через минутку.",
+    limit: "Чтобы не ошибиться — назовите один конкретный вариант.",
     uncertainAllergy:
-      "Аллергия относится к вам? Подтвердите аллерген, чтобы я мог безопасно это записать.",
+      "Аллергия у вас? Скажите, на какой продукт — отмечу.",
   },
 } as const;
 

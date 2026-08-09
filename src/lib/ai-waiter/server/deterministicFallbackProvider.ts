@@ -6,11 +6,32 @@ import type {
   ProviderToolResult,
 } from "./aiProvider.ts";
 import type { ProviderStep } from "./providerTooling.ts";
-import { safeLegacyGreeting } from "./legacyDeterministicBoundary.ts";
+import { tProduct } from "../../product-translations.ts";
 import {
   menuCategoryForMessage,
   messageRequestsAnotherRecommendation,
 } from "./stateExtraction.ts";
+import {
+  allergyCaution,
+  billRequested,
+  buildVoiceContext,
+  cartAddedGeneric,
+  cartEmpty,
+  cartShown,
+  detectSmallTalk,
+  greeting,
+  modifierUnsure,
+  noMatch,
+  recommendIntro,
+  rotationOffset,
+  smallTalk,
+  turnSeed,
+  unknownRedirect,
+  waiterCalled,
+  whichItem,
+  whichVariant,
+  type VoiceContext,
+} from "./waiterVoice.ts";
 
 function normalize(value: string): string {
   return value
@@ -73,56 +94,36 @@ function recommendationCategory(request: AIProviderStepRequest): {
   };
 }
 
-const text = {
-  lt: {
-    clarifyReference: "Kurį konkretų patiekalą turite omenyje?",
-    clarifyVariant: "Kurį dydį ar variantą norėtumėte pasirinkti?",
-    clarifyModifier:
-      "Šio pakeitimo meniu duomenys nepatvirtina. Ar pakviesti darbuotoją patikslinti?",
-    allergy:
-      "Alergiją pasižymėjau, tačiau saugumo ir kryžminės taršos patvirtinti negaliu. Ar pakviesti darbuotoją?",
-    noResults:
-      "Pagal šiuos kriterijus patikimo pasiūlymo neradau. Kurį kriterijų galime pakeisti?",
-    added: "Pasirinkimas saugiai pridėtas į krepšelį.",
-    staff: "Prašymas perduotas darbuotojams.",
-    viewedCart: "Parodžiau dabartinį krepšelį.",
-    staffUnavailable:
-      "Šiame demonstraciniame režime padavėjo ir sąskaitos užklausos nepasiekiamos.",
-    generic: "Kuo galėčiau padėti išsirinkti: maistu, gėrimu ar užsakymu?",
-  },
-  en: {
-    clarifyReference: "Which specific item do you mean?",
-    clarifyVariant: "Which size or variant would you like?",
-    clarifyModifier:
-      "The menu data does not confirm that modification. Shall I ask a staff member to check?",
-    allergy:
-      "I’ve recorded the allergy, but I cannot confirm safety or cross-contamination. Shall I ask a staff member?",
-    noResults:
-      "I couldn’t find a reliable match for those criteria. Which criterion can we adjust?",
-    added: "The selection was safely added to your cart.",
-    staff: "The request has been sent to staff.",
-    viewedCart: "I’ve shown the current cart.",
-    staffUnavailable:
-      "Waiter and bill requests are unavailable in this demo session.",
-    generic: "How can I help: choosing food, a drink, or managing the order?",
-  },
-  ru: {
-    clarifyReference: "Какое именно блюдо вы имеете в виду?",
-    clarifyVariant: "Какой размер или вариант вы хотите выбрать?",
-    clarifyModifier:
-      "Данные меню не подтверждают такую модификацию. Позвать сотрудника для уточнения?",
-    allergy:
-      "Я отметил аллергию, но не могу подтвердить безопасность или отсутствие перекрёстного загрязнения. Позвать сотрудника?",
-    noResults:
-      "Не удалось найти надёжный вариант по этим критериям. Какой критерий можно изменить?",
-    added: "Выбранная позиция безопасно добавлена в корзину.",
-    staff: "Запрос передан сотрудникам.",
-    viewedCart: "Я показал текущую корзину.",
-    staffUnavailable:
-      "В демонстрационном режиме вызов официанта и запрос счёта недоступны.",
-    generic: "С чем помочь: выбрать еду, напиток или изменить заказ?",
-  },
-} as const;
+function voiceFor(request: AIProviderStepRequest): VoiceContext {
+  const { context } = request;
+  const seedSource = context.clientTurnId ?? context.customerMessage;
+  return buildVoiceContext({
+    language: context.language,
+    sessionId: seedSource,
+    turn: turnSeed(context.customerMessage, context.clientTurnId),
+    message: context.customerMessage,
+  });
+}
+
+function copyFor(voice: VoiceContext) {
+  return {
+    clarifyReference: whichItem(voice),
+    clarifyVariant: whichVariant(voice),
+    clarifyModifier: modifierUnsure(voice),
+    allergy: allergyCaution(voice),
+    noResults: noMatch(voice),
+    added: cartAddedGeneric(voice),
+    viewedCart: cartShown(voice),
+    generic: unknownRedirect(voice),
+  };
+}
+
+/** Candidate pool size; the provider tool contract caps this at 5. */
+const RECOMMENDATION_POOL = 5;
+
+function desiredRecommendationCount(message: string): number {
+  return /\b(du|dvi|two)\b|\bдва\b|\bдве\b/u.test(normalize(message)) ? 2 : 3;
+}
 
 function successfulProducts(results: ProviderToolResult[]) {
   for (const item of results) {
@@ -141,26 +142,26 @@ function resultStep(
   request: AIProviderStepRequest,
   results: ProviderToolResult[]
 ): ProviderStep {
-  const language = request.context.language;
-  const copy = text[language];
+  const voice = voiceFor(request);
+  const copy = copyFor(voice);
   const products = successfulProducts(results);
   if (products.length > 0) {
-    const summary = products
-      .slice(0, 3)
-      .map((product) => product.name)
-      .join(", ");
+    // The tool returns a candidate pool in menu order. Always taking its head
+    // made every guest hear the same three dishes, so rotate a window instead.
+    const wanted = Math.min(
+      desiredRecommendationCount(request.context.customerMessage),
+      products.length
+    );
+    const offset =
+      products.length > wanted
+        ? rotationOffset(voice, products.length - wanted + 1)
+        : 0;
+    const shown = products.slice(offset, offset + wanted);
     return {
       kind: "final",
-      message:
-        language === "en"
-          ? `These official options fit best: ${summary}.`
-          : language === "ru"
-            ? `Лучше всего подходят эти позиции: ${summary}.`
-            : `Geriausiai tinka šie oficialūs variantai: ${summary}.`,
-      referencedProductIds: products
-        .slice(0, 3)
-        .map((product) => product.productId),
-      claims: products.slice(0, 3).map((product) => ({
+      message: recommendIntro(voice),
+      referencedProductIds: shown.map((product) => product.productId),
+      claims: shown.map((product) => ({
         claimType: "product_price" as const,
         productId: product.productId,
         proposedValue: Math.round(product.officialUnitPrice * 100),
@@ -195,7 +196,10 @@ function resultStep(
   if (staffResult) {
     return {
       kind: "final",
-      message: copy.staff,
+      message:
+        staffResult.toolName === "request_bill"
+          ? billRequested(voice)
+          : waiterCalled(voice),
       referencedProductIds: [],
       stateUpdate: { stage: "service_request" },
     };
@@ -203,28 +207,39 @@ function resultStep(
   const viewCartResult = results.find(
     (item) => item.result.ok && item.toolName === "view_cart"
   );
-  if (viewCartResult) {
+  if (viewCartResult?.result.ok) {
+    const lines =
+      viewCartResult.result.toolName === "view_cart"
+        ? viewCartResult.result.data.cart.lines
+        : [];
     return {
       kind: "final",
-      message: copy.viewedCart,
+      message: lines.length
+        ? `${copy.viewedCart} ${lines
+            .map(
+              (line) =>
+                `${tProduct(
+                  line.productId,
+                  voice.language,
+                  "name",
+                  line.product.name
+                )} × ${line.quantity}`
+            )
+            .join(", ")}`
+        : cartEmpty(voice),
       referencedProductIds: [],
       stateUpdate: { stage: "cart_review" },
     };
   }
   const error = results.find((item) => !item.result.ok);
   if (error && !error.result.ok) {
-    const staffUnavailable =
-      error.result.error.code === "table_context_required" &&
-      ["request_waiter", "request_bill"].includes(error.toolName);
     const requiredVariant = error.result.error.code === "required_variant_missing";
     const modifier =
       error.result.error.code === "unsupported_modifier" ||
       error.result.error.code === "requires_staff_confirmation";
     return {
       kind: "clarification",
-      message: staffUnavailable
-        ? copy.staffUnavailable
-        : requiredVariant
+      message: requiredVariant
         ? copy.clarifyVariant
         : modifier
           ? copy.clarifyModifier
@@ -232,15 +247,11 @@ function resultStep(
       unresolvedQuestion: {
         kind: requiredVariant
           ? "product_reference"
-          : staffUnavailable
-            ? "other"
           : modifier
             ? "modifier_confirmation"
             : "other",
         promptKey: requiredVariant
           ? "required_variant"
-          : staffUnavailable
-            ? "demo_staff_unavailable"
           : modifier
             ? "unsupported_modifier"
             : "tool_error",
@@ -277,7 +288,8 @@ export class DeterministicFallbackProvider implements AIProvider {
     }
 
     const { context } = request;
-    const copy = text[context.language];
+    const voice = voiceFor(request);
+    const copy = copyFor(voice);
     const message = normalize(context.customerMessage);
     const categoryRequest = recommendationCategory(request);
     if (/\b(saskait\w*|bill)\b|сч[её]т/u.test(message)) {
@@ -481,11 +493,7 @@ export class DeterministicFallbackProvider implements AIProvider {
     ) {
       return Promise.resolve({
         kind: "final",
-        message:
-          safeLegacyGreeting(
-            context.customerMessage,
-            context.language
-          ) ?? copy.generic,
+        message: greeting(voice),
         referencedProductIds: [],
         stateUpdate: { stage: "discovering_preferences" },
       } satisfies ProviderStep);
@@ -496,7 +504,7 @@ export class DeterministicFallbackProvider implements AIProvider {
       (categoryRequest.contextualFollowUp &&
         (Boolean(categoryRequest.category) ||
           context.state.latestReferencedProductIds.length > 0)) ||
-      /\b(noriu|want|recommend|rekomend\w*|pasiulyk|parodyk|something|kazko|vegetar\w*|beef|jautien\w*)\b|хочу|рекоменд|посовет|покаж|вегетари|говядин/u.test(
+      /\b(noriu|want|recommend|rekomend\w*|pasiulyk|parodyk|something|kazko|vegetar\w*|beef|jautien\w*|nenoriu|nemegstu|nepatinka|dont like|do not like)\b|хочу|рекоменд|посовет|покаж|вегетари|говядин|не\s+люблю|не\s+хочу/u.test(
         message
       );
 
@@ -518,10 +526,20 @@ export class DeterministicFallbackProvider implements AIProvider {
                 context.state.latestReferencedProductIds,
               dietaryRequirements: context.state.dietaryRequirements,
               allergies: context.state.allergies,
-              limit: /\b(du|dvi|two)\b/u.test(message) ? 2 : 3,
+              limit: RECOMMENDATION_POOL,
             },
           },
         ],
+      } satisfies ProviderStep);
+    }
+
+    const chat = detectSmallTalk(context.customerMessage);
+    if (chat) {
+      return Promise.resolve({
+        kind: "final",
+        message: smallTalk(chat, voice),
+        referencedProductIds: [],
+        stateUpdate: { stage: "discovering_preferences" },
       } satisfies ProviderStep);
     }
 
@@ -530,10 +548,10 @@ export class DeterministicFallbackProvider implements AIProvider {
         kind: "final",
         message:
           context.language === "lt"
-            ? "Štai patvirtinta restorano informacija."
+            ? "Štai ką galiu pasakyti:"
             : context.language === "en"
-              ? "Here is the verified restaurant information."
-              : "Вот подтверждённая информация о ресторане.",
+              ? "Here's what I can tell you:"
+              : "Вот что могу сказать:",
         referencedProductIds: [],
         claims: context.restaurantKnowledge.map((record) => ({
           claimType: "restaurant_fact" as const,

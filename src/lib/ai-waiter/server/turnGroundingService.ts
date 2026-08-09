@@ -4,6 +4,7 @@ import type {
   Cart,
   ConversationState,
   ConversationTurnRequest,
+  ProductDetails,
   WaiterReference,
 } from "../schemas.ts";
 import type { ActionIntentContext } from "./actionAuthorizationPolicy.ts";
@@ -69,14 +70,17 @@ export class TurnGroundingService {
         this.menuRepository.getProductDetails(productId, state.language)
       )
     );
-    const products = new Map(
-      context.relevantProducts.map((product) => [
-        product.productId,
-        product,
-      ])
-    );
+    // Tool results are this turn's authority, so they claim slots first. When
+    // message-derived grounding filled the cap, appending them last silently
+    // dropped them and every claim about them was then rejected.
+    const products = new Map<string, ProductDetails>();
     for (const product of details) {
       if (product) products.set(product.productId, product);
+    }
+    for (const product of context.relevantProducts) {
+      if (!products.has(product.productId)) {
+        products.set(product.productId, product);
+      }
     }
     const provenance = new Map(
       context.productProvenance.map((item) => [

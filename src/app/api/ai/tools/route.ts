@@ -117,22 +117,6 @@ export async function POST(request: Request): Promise<Response> {
             { status: 404 }
           );
         }
-        if (
-          parsed.data.toolName === "request_waiter" ||
-          parsed.data.toolName === "request_bill"
-        ) {
-          return safeJsonResponse(
-            {
-              ok: false,
-              toolName: parsed.data.toolName,
-              error: {
-                code: "table_context_required",
-                message: "Staff requests are unavailable in demo mode.",
-              },
-            },
-            { status: 400 }
-          );
-        }
       }
     }
     const result = await safeToolRegistry.execute(json.value, {

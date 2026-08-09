@@ -21,6 +21,27 @@ const menuCategoryPatterns: ReadonlyArray<{
   category: string;
   pattern: RegExp;
 }> = [
+  // Must precede "alus": "prie alaus" asks for beer snacks, not for a beer.
+  // Cyrillic alternatives carry no \b — JS \w is ASCII-only.
+  { category: "uzkandziai", pattern: /\b(uzkand\w*|appetiz\w*|starters?)\b|закуск/u },
+  { category: "koldumai", pattern: /\b(koldun\w*|dumplings?)\b|пельмен|вареник/u },
+  {
+    category: "lietiniai",
+    pattern: /\b(lietin\w*|blyn\w*|pancakes?|crepes?)\b|блин/u,
+  },
+  { category: "vistiena", pattern: /\b(vistien\w*|chicken)\b|курин|куриц/u },
+  { category: "kiauliena", pattern: /\b(kiaulien\w*|pork)\b|свинин/u },
+  { category: "jautiena", pattern: /\b(jautien\w*|beef)\b|говядин/u },
+  { category: "zuvis", pattern: /\b(zuv\w*|fish|lasis\w*|salmon)\b|рыб/u },
+  {
+    category: "grilinis",
+    pattern: /\b(kepsn\w*|steaks?|grill\w*|gril\w*)\b|стейк|гриль/u,
+  },
+  {
+    category: "prie-alaus",
+    pattern:
+      /\bprie\s+alaus\b|\b(?:beer|pub)\s+snacks?\b|\bwith\s+(?:a\s+|the\s+)?beer\b|к\s+пиву|под\s+пиво/u,
+  },
   { category: "alus", pattern: /\b(alus|alaus|alu|beers?)\b|пив/u },
   { category: "vynas", pattern: /\b(vyn\w*|wines?)\b|вин(?:о|а|у|ом)?/u },
   {
@@ -43,10 +64,6 @@ const menuCategoryPatterns: ReadonlyArray<{
     pattern: /\b(bulvin\w*|potato(?: dishes?)?)\b|картоф/u,
   },
   {
-    category: "grilinis",
-    pattern: /\b(gril\w*|grill(?:ed)?)\b|грил/u,
-  },
-  {
     category: "vaikiskas",
     pattern: /\b(vaik\w*|kids?(?: menu)?|children(?:s menu)?)\b|детск/u,
   },
@@ -57,9 +74,15 @@ const menuCategoryPatterns: ReadonlyArray<{
   },
 ];
 
+const CATEGORY_REFUSAL =
+  /\b(nenoriu|nemegstu|nepatinka|jokio|jokios|dont want|do not want|dont like|do not like|no more|without)\b|не\s+хочу|не\s+люблю|никакой/u;
+
 /** Maps explicit customer category wording to an official menu category. */
 export function menuCategoryForMessage(message: string): string | null {
   const normalized = normalize(message);
+  // "I don't want fish" names a category it is refusing; picking it would
+  // recommend the exact thing the guest just turned down.
+  if (CATEGORY_REFUSAL.test(normalized)) return null;
   return (
     menuCategoryPatterns.find(({ pattern }) => pattern.test(normalized))
       ?.category ?? null
@@ -69,7 +92,7 @@ export function menuCategoryForMessage(message: string): string | null {
 /** True only for wording that asks to continue the current recommendation set. */
 export function messageRequestsAnotherRecommendation(message: string): boolean {
   const normalized = normalize(message);
-  return /\b(another(?: one)?|something else|different one|more options?)\b|\b(dar(?: viena)?|kit(?:a|ka|as|ok\w*))\b|друг(?:ои|ую|ое|ие)|ещ[её]/u.test(
+  return /\b(another(?: one)?|something else|different one|more options?|anything else|what else|more)\b|\b(dar(?: viena)?|daugiau|kit(?:a|ka|as|ok\w*))\b|друг(?:ои|ую|ое|ие)|ещ[её]|что\s+ещ/u.test(
     normalized
   );
 }
@@ -141,7 +164,7 @@ const proteins = [
   { value: "beef", pattern: /\b(jautien\w*|beef)\b/u },
   { value: "chicken", pattern: /\b(vistien\w*|chicken)\b/u },
   { value: "pork", pattern: /\b(kiaulien\w*|pork)\b/u },
-  { value: "fish", pattern: /\b(zuv\w*|fish|lasis\w*|salmon)\b/u },
+  { value: "fish", pattern: /\b(zuv\w*|fish|lasis\w*|salmon|silk\w*|herring)\b|сельд|селедк/u },
 ];
 
 const ingredientTerms = [
@@ -156,7 +179,7 @@ export function messageUsesPriorReference(message: string): boolean {
     /\b(sita|sitas|this one|that one|antr\w*|second|pirm\w*|first|toki pat|same)\b|эт[оа]|перв|втор|трет|тако[йе]\s+же|предлож/u.test(
       normalized
     ) ||
-    /recommendation[^\d]{0,12}[1-9]|[1-9][^\d]{0,12}recommendation/u.test(
+    /(?:recommendation|pasiul\w*|предлож)[^\d]{0,12}[1-9]|[1-9][^\d]{0,12}(?:recommendation|pasiul\w*|предлож)/u.test(
       normalized
     )
   );
@@ -188,6 +211,14 @@ export function extractTurnState(
       kind: "clear_temporary_preference",
       field: "preferredCategories",
     });
+    // A category with no protein of its own ("kepsnio", "deserto") would
+    // otherwise stay filtered by a protein carried over from an earlier turn.
+    if (!proteins.some((protein) => protein.pattern.test(normalized))) {
+      operations.push({
+        kind: "clear_temporary_preference",
+        field: "preferredProteins",
+      });
+    }
     operations.push({
       kind: "set_temporary_preference",
       field: "preferredCategories",
@@ -214,7 +245,9 @@ export function extractTurnState(
   const persistentPreference =
     /\b(geriau|megstu|mėgstu|prefer|favorite|favourite)\b/u.test(normalized);
   const dislike =
-    /\b(nemegstu|nepatinka|dislike|dont like|do not like)\b/u.test(normalized);
+    /\b(nemegstu|nepatinka|nenoriu|dislike|dont like|do not like|no more)\b|не\s+люблю|не\s+хочу|надоел/u.test(
+      normalized
+    );
   const temporaryAcceptance =
     /\b(bet siandien galiu|but today i can|this time is fine)\b/u.test(
       normalized
@@ -234,6 +267,21 @@ export function extractTurnState(
         kind: "add_preference",
         field: "preferredProteins",
         value: protein.value,
+      });
+    }
+  }
+
+  // "Something meaty" spans several categories, so it becomes a protein
+  // preference rather than a category pick.
+  if (
+    /\b(mes\w*|meat|meaty)\b|мясн|мяса|мясо/u.test(normalized) &&
+    !dislike
+  ) {
+    for (const protein of ["beef", "pork", "chicken"]) {
+      operations.push({
+        kind: "set_temporary_preference",
+        field: "preferredProteins",
+        value: protein,
       });
     }
   }

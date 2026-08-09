@@ -35,6 +35,11 @@ import {
 } from "./conversationStateReducer.ts";
 import type { ConversationStateStore } from "./conversationStateStore.ts";
 import { GroundedResponseRenderer } from "./groundedResponseRenderer.ts";
+import {
+  buildVoiceContext,
+  turnSeed,
+  type VoiceContext,
+} from "./waiterVoice.ts";
 import { buildGroundedWaiterContext } from "./grounding.ts";
 import type { MenuRepository } from "./menuRepository.ts";
 import { ProviderLoopRunner } from "./providerLoopRunner.ts";
@@ -165,6 +170,16 @@ export class WaiterTurnController {
       this.responseRenderer,
       this.resultFactory
     );
+  }
+
+  private voiceFor(state: ConversationState, message: string): VoiceContext {
+    return buildVoiceContext({
+      language: state.language,
+      sessionId: state.sessionId,
+      turn: turnSeed(message, state.updatedAt),
+      message,
+      now: new Date(this.now()),
+    });
   }
 
   async handleWaiterTurn(
@@ -315,7 +330,7 @@ export class WaiterTurnController {
         command,
         state,
         cart: currentCart,
-        message: this.responseRenderer.allergySafety(state.language),
+        message: this.responseRenderer.allergySafety(this.voiceFor(state, command.message)),
         status: "clarification_required",
         fallbackUsed: false,
         actionLedger: [],
@@ -330,7 +345,7 @@ export class WaiterTurnController {
         command,
         state,
         cart: currentCart,
-        message: this.responseRenderer.certificationSafety(state.language),
+        message: this.responseRenderer.certificationSafety(this.voiceFor(state, command.message)),
         status: "clarification_required",
         fallbackUsed: false,
         actionLedger: [],
@@ -369,7 +384,7 @@ export class WaiterTurnController {
         state,
         cart: currentCart,
         message: this.responseRenderer.clarification(
-          state.language,
+          this.voiceFor(state, command.message),
           intent.clarificationReason
         ),
         status:
@@ -535,7 +550,7 @@ export class WaiterTurnController {
             state,
             cart: currentCart,
             message: this.responseRenderer.clarification(
-              state.language,
+              this.voiceFor(state, command.message),
               "ambiguous_action"
             ),
             status: "rejected_action",
@@ -553,7 +568,7 @@ export class WaiterTurnController {
             state,
             cart: currentCart,
             message: this.responseRenderer.clarification(
-              state.language,
+              this.voiceFor(state, command.message),
               intent.clarificationReason ?? "action_not_authorized"
             ),
             status: "rejected_action",
@@ -624,7 +639,7 @@ export class WaiterTurnController {
               state,
               cart: currentCart,
               message: this.responseRenderer.clarification(
-                state.language,
+                this.voiceFor(state, command.message),
                 decision.reason
               ),
               status: "rejected_action",
@@ -849,7 +864,7 @@ export class WaiterTurnController {
         state: stateAfter ?? command.state,
         cart: command.currentCart,
         message: this.responseRenderer.staffEscalation(
-          command.state.language
+          this.voiceFor(command.state, command.command.message)
         ),
         status: "clarification_required",
         fallbackUsed: command.runtime.providerLoop.fallbackUsed,
@@ -877,7 +892,9 @@ export class WaiterTurnController {
       (isFoodSafetyQuestion(command.command.message) ||
         /\b(safe|saug\w*)\b/iu.test(message))
     ) {
-      message = this.responseRenderer.allergySafety(command.state.language);
+      message = this.responseRenderer.allergySafety(
+        this.voiceFor(command.state, command.command.message)
+      );
       referencedProductIds.length = 0;
     } else if (command.step.kind === "final") {
       const claims = await this.claimValidation.validate(

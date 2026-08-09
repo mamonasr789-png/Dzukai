@@ -57,6 +57,7 @@ import type {
   SupportedLanguage,
   WaiterReference,
 } from "@/lib/ai-waiter/schemas";
+import { products } from "@/lib/data";
 import { useCartStore } from "@/lib/store";
 import { useT } from "@/lib/i18n";
 import { tProduct } from "@/lib/product-translations";
@@ -103,6 +104,46 @@ function timestamp(language: SupportedLanguage): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+const TYPING_BASE_MS = 700;
+const TYPING_PER_CHARACTER_MS = 16;
+const TYPING_CEILING_MS = 2_600;
+
+/**
+ * A local turn answers in milliseconds, which reads as a machine. Holding the
+ * typing indicator for a length-proportional beat is what makes it read human.
+ */
+// Captured at import: the test suite mutates NODE_ENV to exercise provider modes.
+const TYPING_HOLD_ENABLED = process.env.NODE_ENV !== "test";
+
+function typingHoldMs(reply: string): number {
+  if (!TYPING_HOLD_ENABLED) return 0;
+  return Math.min(
+    TYPING_CEILING_MS,
+    TYPING_BASE_MS + reply.length * TYPING_PER_CHARACTER_MS
+  );
+}
+
+async function holdTyping(startedAt: number, reply: string): Promise<void> {
+  const remaining = typingHoldMs(reply) - (Date.now() - startedAt);
+  if (remaining <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, remaining));
+}
+
+/**
+ * The waiter owns an authoritative server cart while the rest of the app reads
+ * the browser cart. Mirroring keeps the nav badge, /cart and the order flow
+ * showing what the waiter actually put in.
+ */
+function mirrorServerCart(cart: Cart): void {
+  const items = cart.lines.flatMap((line) => {
+    const product = products.find(
+      (candidate) => candidate.id === line.productId
+    );
+    return product ? [{ product, quantity: line.quantity }] : [];
+  });
+  useCartStore.setState({ items });
 }
 
 function makeGreeting(language: SupportedLanguage): Message {
@@ -462,6 +503,7 @@ export function AIPageClient({
   const [cart, setCart] = useState<Cart | null>(null);
   const [staffRequestsAvailable, setStaffRequestsAvailable] =
     useState(false);
+  const [tableSession, setTableSession] = useState(false);
   const [sessionPersistent, setSessionPersistent] = useState(false);
   const [retryMessageId, setRetryMessageId] = useState<string | null>(null);
   const [retryModeDisplay, setRetryModeDisplay] = useState<
@@ -512,10 +554,12 @@ export function AIPageClient({
       sessionRef.current = { ...snapshot, cart: authoritativeCart };
       if (!mountedRef.current) return true;
       setCart(authoritativeCart);
+      mirrorServerCart(authoritativeCart);
       setActiveSessionId(snapshot.state.sessionId);
       setStaffRequestsAvailable(
         snapshot.capabilities.staffRequestsAvailable
       );
+      setTableSession(snapshot.capabilities.mode === "table");
       setSessionPersistent(snapshot.capabilities.persistent);
       setSessionStatus("ready");
       return true;
@@ -578,13 +622,10 @@ export function AIPageClient({
         return;
       }
       tableTokenRef.current = null;
-      const restoredLanguage = snapshot.state.language;
-      if (
-        established.data.source === "restored" &&
-        useCartStore.getState().lang !== restoredLanguage
-      ) {
-        useCartStore.setState({ lang: restoredLanguage });
-      }
+      // The language the guest picked in the app wins. Restoring an older
+      // session used to push its stale language back into the store, which
+      // silently dragged the whole app back to Lithuanian.
+      const restoredLanguage = useCartStore.getState().lang;
       const identity = {
         sessionId: snapshot.state.sessionId,
         restaurantId: snapshot.state.restaurantId,
@@ -861,6 +902,7 @@ export function AIPageClient({
       setRetryMessageId(null);
       setInput("");
       setTyping(true);
+      const typingStartedAt = Date.now();
 
       try {
         const result: LiveWaiterTurnResult =
@@ -975,6 +1017,7 @@ export function AIPageClient({
         }
         if (authoritativeCart) {
           setCart(authoritativeCart);
+          mirrorServerCart(authoritativeCart);
           sessionRef.current = {
             ...session,
             cart: authoritativeCart,
@@ -997,6 +1040,8 @@ export function AIPageClient({
             : copy.cartRefreshFailed,
           noticeTone: authoritativeCart ? presentation.tone : "error",
         };
+        await holdTyping(typingStartedAt, assistantMessage.content);
+        if (!mountedRef.current) return;
         setMessages((previous) => [...previous, assistantMessage]);
         if (retryModeForSuccess === "new_id") {
           setRetryMessageId(assistantMessage.id);
@@ -1126,14 +1171,22 @@ export function AIPageClient({
     setInput("");
   }, [language]);
 
+  // The greeting is the only line not tied to a past turn, so it follows the
+  // app language instead of freezing at session creation.
+  const displayedMessages = useMemo(
+    () =>
+      messages.map((message) =>
+        message.id.startsWith("greeting-") ? makeGreeting(language) : message
+      ),
+    [messages, language]
+  );
+
   const totalItems = cart ? cartItemCount(cart) : 0;
   const showSuggestions = messages.length <= 2;
   const busy = typing || sessionStatus !== "ready";
   const newTurnBlocked = retryModeDisplay === "same_id";
-  const modeLabel = staffRequestsAvailable
-    ? copy.tableMode
-    : copy.demoMode;
-  const modeDot = staffRequestsAvailable ? "bg-green-500" : "bg-amber-500";
+  const modeLabel = tableSession ? copy.tableMode : copy.demoMode;
+  const modeDot = tableSession ? "bg-green-500" : "bg-amber-500";
   const defaultSessionNotice = [
     !sessionPersistent ? copy.nonPersistentNotice : null,
     !staffRequestsAvailable ? copy.demoNotice : null,
@@ -1302,7 +1355,7 @@ export function AIPageClient({
           aria-live="polite"
           aria-relevant="additions text"
         >
-          {messages.map((message) => (
+          {displayedMessages.map((message) => (
             <div key={message.id}>
               <MessageBubble
                 message={message}

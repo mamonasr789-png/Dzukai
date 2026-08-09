@@ -426,6 +426,10 @@ test.afterEach(() => {
   setLanguage("en");
 });
 
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
 test("development provider selector defaults safely and persists an explicit mode", async () => {
   setNodeEnvironment("development");
   setLanguage("en");
@@ -933,12 +937,17 @@ test("route-backed lost add response recreates the page and replays to exactly o
     fireEvent.click(
       screen.getByRole("button", { name: "What do you recommend?" })
     );
-    const firstCard = await screen.findByTestId("product-reference-u1");
-    fireEvent.click(
-      within(firstCard).getByRole("button", {
-        name: "Add: Herring with marinated onions and hot potatoes",
-      })
+    const firstCard = (
+      await screen.findAllByTestId(/^product-reference-/u)
+    )[0];
+    const addButton = within(firstCard).getByRole("button", {
+      name: /^Add: /u,
+    });
+    const addedName = (addButton.getAttribute("aria-label") ?? "").replace(
+      /^Add: /u,
+      ""
     );
+    fireEvent.click(addButton);
     await screen.findByTestId("pending-turn-recovery");
     const routeSessionId = readStoredSessionId(storage);
     assert.ok(routeSessionId);
@@ -959,16 +968,14 @@ test("route-backed lost add response recreates the page and replays to exactly o
     await screen.findByTestId("pending-turn-recovery");
     assert.equal(addRequests, 1);
     fireEvent.click(screen.getByTestId("retry-turn"));
-    await screen.findByText(
-      /added.*Herring with marinated onions and hot potatoes.*cart/iu
-    );
+    await screen.findByText(new RegExp(`“${escapeForRegExp(addedName)}”`, "u"));
 
     fireEvent.click(screen.getByLabelText("Cart"));
     const cartLines = screen.getAllByTestId(/^cart-line-/u);
     assert.equal(cartLines.length, 1);
     assert.match(
       cartLines[0].textContent ?? "",
-      /Herring with marinated onions and hot potatoes/iu
+      new RegExp(escapeForRegExp(addedName), "iu")
     );
     assert.match(cartLines[0].textContent ?? "", /1 ×/u);
     assert.equal(
@@ -1023,7 +1030,7 @@ test("confirmed no-side-effect retry uses a new turn ID without duplicating the 
   assert.equal(screen.getAllByText("Recommend dinner").length, 1);
 });
 
-test("both /ai cart entries use the restored server cart while cards stay localized and Add-only", async () => {
+test("the /ai cart panel shows the restored server cart, mirrors it into the browser cart, and cards stay localized and Add-only", async () => {
   setLanguage("en");
   const storage = new MemorySessionStorage();
   const turnBodies: Array<Record<string, unknown>> = [];
@@ -1118,17 +1125,27 @@ test("both /ai cart entries use the restored server cart while cards stay locali
   });
   assert.match(String(turnBodies[1].message), /recommendation 2/iu);
   const cartButtons = screen.getAllByLabelText("Cart");
-  assert.equal(cartButtons.length, 2);
+  assert.equal(cartButtons.length, 1);
   assert.match(cartButtons[0].textContent ?? "", /1/u);
   fireEvent.click(cartButtons[0]);
-  let cartPanel = screen.getByTestId("server-cart");
+  const cartPanel = screen.getByTestId("server-cart");
   assert.match(cartPanel.textContent ?? "", /Herring with roasted vegetables/u);
   assert.match(cartPanel.textContent ?? "", /€10\.00/u);
-  fireEvent.click(within(cartPanel).getByLabelText("Close cart"));
-  fireEvent.click(screen.getByTestId("ai-bottom-cart"));
-  cartPanel = screen.getByTestId("server-cart");
-  assert.match(cartPanel.textContent ?? "", /Herring with roasted vegetables/u);
   assert.equal(screen.getAllByTestId(/^cart-line-/u).length, 1);
+  fireEvent.click(within(cartPanel).getByLabelText("Close cart"));
+
+  // The bottom tab is a plain link to the real cart and order status; the
+  // waiter's line is mirrored there so the guest sees one cart, not two.
+  assert.equal(screen.queryByTestId("ai-bottom-cart"), null);
+  assert.ok(
+    screen
+      .getAllByRole("link")
+      .some((link) => link.getAttribute("href") === "/cart")
+  );
+  assert.deepEqual(
+    useCartStore.getState().items.map((item) => [item.product.id, item.quantity]),
+    [["u2", 1]]
+  );
   assert.deepEqual(broadcastMessages, [
     {
       type: "cart-invalidated",
@@ -1143,7 +1160,13 @@ test("both /ai cart entries use the restored server cart while cards stay locali
     ),
     false
   );
-  assert.equal(useCartStore.getState().items[0]?.quantity, 7);
+  // The seeded browser cart gives way to the authoritative server cart: the
+  // guest sees one cart, and the waiter's line is what /cart and the nav badge
+  // report.
+  assert.deepEqual(
+    useCartStore.getState().items.map((item) => [item.product.id, item.quantity]),
+    [["u2", 1]]
+  );
 
   firstPage.unmount();
   renderPage(client, storage);
@@ -1156,7 +1179,21 @@ test("both /ai cart entries use the restored server cart while cards stay locali
     "cart-line-line_00000000000000000000000000000001"
   );
   assert.match(restoredLine.textContent ?? "", /Herring with roasted vegetables/u);
-  assert.equal(useCartStore.getState().items[0]?.quantity, 7);
+  // The seeded browser cart gives way to the authoritative server cart: the
+  // guest sees one cart, and the waiter's line is what /cart and the nav badge
+  // report.
+  assert.deepEqual(
+    useCartStore.getState().items.map((item) => [item.product.id, item.quantity]),
+    [["u2", 1]]
+  );
+
+  // Regression: restoring a session used to push its own (stale) language back
+  // into the store, dragging the whole app back to the session's language.
+  cleanup();
+  useCartStore.setState({ lang: "ru" });
+  renderPage(client, storage);
+  await screen.findByLabelText("Корзина");
+  assert.equal(useCartStore.getState().lang, "ru");
 });
 
 test("a newer cross-tab restore wins over a late older response and only invalidation is broadcast", async () => {

@@ -392,7 +392,12 @@ export class SafeToolRegistry {
           ...state.allergies,
           ...parsed.data.allergies,
         ]),
-        preferredProteins: state.preferences.preferredProteins,
+        preferredProteins: unique([
+          ...state.preferences.preferredProteins,
+          ...state.temporaryPreferences.preferredProteins,
+        ]),
+        dislikedIngredients: state.dislikedIngredients,
+        spreadAcrossCategories: true,
       },
       state.language
     );

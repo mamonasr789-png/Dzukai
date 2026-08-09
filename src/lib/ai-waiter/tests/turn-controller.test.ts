@@ -28,6 +28,11 @@ import {
 } from "../server/stateExtraction.ts";
 import { SafeToolRegistry } from "../server/toolRegistry.ts";
 import { WaiterTurnController } from "../server/turnController.ts";
+import {
+  buildVoiceContext,
+  greeting,
+  turnSeed,
+} from "../server/waiterVoice.ts";
 import { InMemoryTurnIdempotencyStore } from "../server/turnIdempotencyStore.ts";
 import {
   DELETE as deleteTurn,
@@ -141,6 +146,94 @@ test("LT, EN, and RU category and continuation vocabulary is recognized determin
     assert.equal(messageRequestsAnotherRecommendation(phrase), true, phrase);
     assert.equal(messageUsesPriorReference(phrase), true, phrase);
   }
+});
+
+test("\"prie alaus\" asks for beer snacks, a bare beer word asks for beer", () => {
+  for (const phrase of [
+    "Ka valgyti prie alaus?",
+    "Ką rekomenduoji prie alaus?",
+    "What goes with beer?",
+    "something with a beer",
+    "beer snacks",
+    "что к пиву?",
+    "под пиво",
+  ]) {
+    assert.equal(menuCategoryForMessage(phrase), "prie-alaus", phrase);
+  }
+  for (const phrase of ["noriu alaus", "I want a beer", "хочу пиво"]) {
+    assert.equal(menuCategoryForMessage(phrase), "alus", phrase);
+  }
+});
+
+test("a refused category is never used as the category to recommend", () => {
+  // Regression: "не хочу рыбу" matched the fish category and recommended fish.
+  for (const phrase of [
+    "nenoriu zuvies",
+    "nemegstu vistienos",
+    "I don't want fish",
+    "не хочу рыбу",
+    "не люблю пиво",
+  ]) {
+    assert.equal(menuCategoryForMessage(phrase), null, phrase);
+  }
+  assert.equal(menuCategoryForMessage("noriu zuvies"), "zuvis");
+  assert.equal(menuCategoryForMessage("хочу рыбу"), "zuvis");
+});
+
+test("tool-result products survive the grounding cap and keep their claims valid", async () => {
+  // Regression: rebuildWithToolProvenance appended tool products last and then
+  // sliced to 8, so message-derived grounding could evict them and every price
+  // claim about them was rejected, collapsing the turn into a failure notice.
+  for (const [message, clientTurnId] of [
+    ["noriu alaus", "turn_grounding_beer"],
+    ["Ka valgyti prie alaus?", "turn_grounding_snacks"],
+  ] as const) {
+    const harness = createHarness();
+    const session = await createSession(harness);
+    const result = await harness.controller.handleWaiterTurn(
+      request(session.sessionId, message, clientTurnId)
+    );
+    assert.equal(result.ok, true, message);
+    if (!result.ok) return;
+    assert.ok(result.data.references.length > 0, message);
+    assert.doesNotMatch(
+      result.data.message,
+      /negaliu saugiai|kažkas užstrigo/iu,
+      message
+    );
+  }
+});
+
+test("waiter phrasing rotates across turns instead of collapsing to one variant", () => {
+  // Regression: summing two FNV hashes made the pool index constant under a
+  // small modulus, so every greeting came out identical.
+  const rendered = new Set<string>();
+  for (const clientTurnId of [
+    "turn_rotation_01",
+    "turn_rotation_02",
+    "turn_rotation_03",
+    "turn_rotation_04",
+    "turn_rotation_05",
+    "turn_rotation_06",
+    "turn_rotation_07",
+    "turn_rotation_08",
+  ]) {
+    rendered.add(
+      greeting(
+        buildVoiceContext({
+          language: "lt",
+          sessionId: clientTurnId,
+          turn: turnSeed("Labas", clientTurnId),
+          message: "Labas",
+          now: new Date("2026-08-09T12:00:00Z"),
+        })
+      )
+    );
+  }
+  assert.ok(
+    rendered.size >= 3,
+    `expected varied greetings, got ${rendered.size}: ${[...rendered].join(" | ")}`
+  );
 });
 
 test("grounded Lithuanian recommendation uses real products, official prices, and budget", async () => {
@@ -579,7 +672,7 @@ test("allergy is stored and response never confirms safety", async () => {
   assert.deepEqual(state?.allergies, [{ allergen: "nuts" }]);
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.match(result.data.message, /patvirtinti negaliu/iu);
+  assert.match(result.data.message, /(negaliu|pasitikslinti)/iu);
   assert.doesNotMatch(result.data.message, /saugu valgyti/iu);
 });
 
@@ -1478,9 +1571,9 @@ test("production demo override serves demo turns and hides table sessions", asyn
     };
     assert.equal(
       staffBody.data.actions.some((action) => action.type === "staff_requested"),
-      false
+      true
     );
-    assert.equal(
+    assert.notEqual(
       staffBody.data.actionLedger[0]?.result?.code,
       "table_context_required"
     );

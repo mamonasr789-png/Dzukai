@@ -48,16 +48,21 @@ async function sessionSnapshot(
       { status: cart.error.code === "session_not_found" ? 404 : 500 }
     );
   }
-  const staffRequestsAvailable = Boolean(
+  // Mirrors InMemoryStaffTaskAdapter: a verified table, or a fully anonymous
+  // demo session whose request dispatches to no real table.
+  const verifiedTable = Boolean(
     state.restaurantId && state.tableNumber && state.tableTokenId
   );
+  const anonymousDemo =
+    !state.restaurantId && !state.tableNumber && !state.tableTokenId;
+  const staffRequestsAvailable = verifiedTable || anonymousDemo;
   return safeJsonResponse(
     DiningSessionSnapshotResponseSchema.parse({
       ok: true,
       state,
       cart: cart.data.cart,
       capabilities: {
-        mode: staffRequestsAvailable ? "table" : "demo",
+        mode: verifiedTable ? "table" : "demo",
         staffRequestsAvailable,
         persistent: false,
       },

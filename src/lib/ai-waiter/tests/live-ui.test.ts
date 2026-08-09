@@ -140,7 +140,8 @@ test("live client creates a demo session and restores its authoritative cart", a
   await resetDevelopmentRuntime();
   const { storage, established, api } = await createDemo();
   assert.equal(established.source, "created_demo");
-  assert.equal(established.snapshot.capabilities.staffRequestsAvailable, false);
+  assert.equal(established.snapshot.capabilities.staffRequestsAvailable, true);
+  assert.equal(established.snapshot.capabilities.mode, "demo");
   assert.equal(established.snapshot.capabilities.persistent, false);
   assert.equal(
     readStoredSessionId(storage),
@@ -226,8 +227,9 @@ test("valid table tokens create staff-capable sessions and invalid tokens degrad
   assert.equal(invalid.data.warningCode, "invalid_table_token");
   assert.equal(
     invalid.data.snapshot.capabilities.staffRequestsAvailable,
-    false
+    true
   );
+  assert.equal(invalid.data.snapshot.capabilities.mode, "demo");
 });
 
 test("submission gate prevents duplicates and reuses clientTurnId for manual retry", () => {
@@ -282,9 +284,15 @@ test("product references retain server order and authorized add updates only the
   const sessionId = established.snapshot.state.sessionId;
   const suggested = await recommendation(api, sessionId);
   assert.ok(suggested.references.length >= 2);
+  // Order and ordinals must mirror what the server sent, whichever dishes the
+  // recommender picked.
   assert.deepEqual(
-    suggested.references.map((reference) => reference.productId),
-    ["u1", "u2", "u3"].slice(0, suggested.references.length)
+    suggested.references.map((reference) => reference.ordinal),
+    suggested.references.map((_, index) => index)
+  );
+  assert.equal(
+    new Set(suggested.references.map((reference) => reference.productId)).size,
+    suggested.references.length
   );
   assert.ok(
     suggested.references.every(
@@ -427,28 +435,24 @@ test("cart update, remove, and clear requests remain server-authorized turn acti
   if (cleared.ok) assert.equal(cleared.data.cart.lines.length, 0);
 });
 
-test("demo staff requests cannot fabricate success while signed-table requests succeed", async () => {
+test("anonymous demo staff requests are recorded and signed-table requests succeed", async () => {
   await resetDevelopmentRuntime();
   const demo = await createDemo();
-  const rejected = await demo.api.sendTurn({
+  const anonymous = await demo.api.sendTurn({
     sessionId: demo.established.snapshot.state.sessionId,
     message: "Pakviesk padavėją",
     clientTurnId: "ui_demo_waiter_001",
     requestedLanguage: "lt",
   });
-  assert.equal(rejected.ok, true);
-  if (!rejected.ok) return;
+  assert.equal(anonymous.ok, true);
+  if (!anonymous.ok) return;
   assert.equal(
-    rejected.data.actions.some(
+    anonymous.data.actions.some(
       (action) => action.type === "staff_requested"
     ),
-    false
+    true
   );
-  assert.match(rejected.data.message, /demonstraciniame režime/iu);
-  assert.match(
-    turnPresentation(rejected.data, "lt").notice ?? "",
-    /demonstraciniame režime/iu
-  );
+  assert.match(anonymous.data.message, /(kviečiu|padavėj|kolega)/iu);
 
   const token = createDevelopmentTableToken({
     restaurantId: "dzuku_ainiai",
@@ -586,7 +590,7 @@ test("server response language remains authoritative for English turns", async (
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.data.language, "en");
-  assert.match(result.data.message, /Hello|Welcome|How can I help/iu);
+  assert.match(result.data.message, /Good (morning|afternoon|evening)|Hello|Welcome|What can I get you/iu);
 });
 
 test("cart reconciliation rejects duplicate line IDs and preserves distinct official lines", async () => {
@@ -1186,8 +1190,20 @@ test("structured card selection adds the exact visible reference and rejects sta
   });
   assert.equal(guessed.ok, true);
   if (guessed.ok) {
-    assert.equal(guessed.data.status, "rejected_action");
+    // The guarantee is that a guessed product never reaches the cart; the
+    // server may either refuse outright or ask which item was meant.
+    assert.ok(
+      ["rejected_action", "clarification_required"].includes(
+        guessed.data.status
+      ),
+      guessed.data.status
+    );
     assert.equal(guessed.data.cart.lines.length, 1);
+    assert.equal(guessed.data.cart.lines[0].productId, clicked.productId);
+    assert.equal(
+      guessed.data.actions.some((action) => action.type === "cart_updated"),
+      false
+    );
   }
 
   await conversationStateStore.setLatestReferences(sessionId, ["u3"]);
@@ -1295,9 +1311,9 @@ test("Russian recommendations and explicit, negated, modifier, cart, and staff a
   if (waiter.ok) {
     assert.equal(
       waiter.data.actions.some((action) => action.type === "staff_requested"),
-      false
+      true
     );
-    assert.match(waiter.data.message, /демонстрационном режиме/iu);
+    assert.match(waiter.data.message, /(зову|официант|коллега)/iu);
   }
 });
 
