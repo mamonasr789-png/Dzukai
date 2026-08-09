@@ -747,6 +747,24 @@ export const WaiterTurnDebugSchema = z
   })
   .strict();
 
+export const DevelopmentProviderModeSchema = z.enum([
+  "deterministic",
+  "anthropic",
+  "auto",
+]);
+export type DevelopmentProviderMode = z.infer<
+  typeof DevelopmentProviderModeSchema
+>;
+
+export const DevelopmentProviderPathSchema = z.enum([
+  "deterministic",
+  "anthropic",
+  "not_used",
+]);
+export type DevelopmentProviderPath = z.infer<
+  typeof DevelopmentProviderPathSchema
+>;
+
 export const WaiterTurnDataSchema = z
   .object({
     message: safeText(1_500),
@@ -759,6 +777,7 @@ export const WaiterTurnDataSchema = z
     actionLedger: z.array(ActionLedgerEntrySchema).max(1).default([]),
     fallbackUsed: z.boolean(),
     replayed: z.boolean(),
+    developmentProviderPath: DevelopmentProviderPathSchema.optional(),
     debug: WaiterTurnDebugSchema.optional(),
   })
   .strict();
@@ -778,6 +797,7 @@ export const WaiterTurnErrorCodeSchema = z.enum([
   "rate_limited",
   "storage_not_configured",
   "storage_capacity_exceeded",
+  "provider_not_configured",
   "provider_limit_exceeded",
   "safe_fallback_failed",
   "internal_error",

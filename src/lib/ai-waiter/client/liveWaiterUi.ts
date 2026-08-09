@@ -19,6 +19,24 @@ const COPY = {
     waiter: "Padavėjas",
     demoMode: "Demonstracinis režimas",
     tableMode: "Stalo režimas",
+    developmentProvider: "Kūrimo AI teikėjo režimas",
+    developmentOnly: "Tik kūrimo aplinkoje",
+    providerDeterministic: "Deterministinis",
+    providerAnthropic: "Anthropic",
+    providerAuto: "Automatinis",
+    providerSelectedDeterministic:
+      "Pasirinktas deterministinis režimas; mokama API nebus naudojama.",
+    providerSelectedAnthropic:
+      "Pasirinktas Anthropic režimas; serveris privalo turėti sukonfigūruotą API raktą.",
+    providerSelectedAuto:
+      "Automatinis režimas naudos Anthropic, jei jis sukonfigūruotas, kitu atveju — deterministinį režimą.",
+    providerUsedDeterministic:
+      "Šiam atsakymui naudotas deterministinis teikėjas.",
+    providerUsedAnthropic: "Šiam atsakymui naudotas Anthropic teikėjas.",
+    providerNotUsed:
+      "Šiam atsakymui išorinio AI teikėjo neprireikė.",
+    providerNotConfigured:
+      "Anthropic šiame kūrimo serveryje nesukonfigūruotas. Užklausa nebuvo perduota teikėjui.",
     demoNotice:
       "Padavėjo ir sąskaitos užklausos šiame demonstraciniame režime nepasiekiamos.",
     initializing: "Ruošiamas saugus pokalbis…",
@@ -84,6 +102,24 @@ const COPY = {
     waiter: "Waiter",
     demoMode: "Demo mode",
     tableMode: "Table mode",
+    developmentProvider: "Development AI provider mode",
+    developmentOnly: "Development only",
+    providerDeterministic: "Deterministic",
+    providerAnthropic: "Anthropic",
+    providerAuto: "Auto",
+    providerSelectedDeterministic:
+      "Deterministic mode is selected; no paid API will be used.",
+    providerSelectedAnthropic:
+      "Anthropic mode is selected; the server must have an API key configured.",
+    providerSelectedAuto:
+      "Auto mode will use Anthropic when configured and deterministic mode otherwise.",
+    providerUsedDeterministic:
+      "The deterministic provider handled this response.",
+    providerUsedAnthropic: "The Anthropic provider handled this response.",
+    providerNotUsed:
+      "This response did not require an external AI provider.",
+    providerNotConfigured:
+      "Anthropic is not configured on this development server. The request was not sent to a provider.",
     demoNotice:
       "Waiter and bill requests are unavailable in this demo session.",
     initializing: "Preparing a safe conversation…",
@@ -149,6 +185,25 @@ const COPY = {
     waiter: "Официант",
     demoMode: "Демо-режим",
     tableMode: "Режим стола",
+    developmentProvider: "Режим AI-провайдера для разработки",
+    developmentOnly: "Только для разработки",
+    providerDeterministic: "Детерминированный",
+    providerAnthropic: "Anthropic",
+    providerAuto: "Автоматический",
+    providerSelectedDeterministic:
+      "Выбран детерминированный режим; платный API использоваться не будет.",
+    providerSelectedAnthropic:
+      "Выбран режим Anthropic; на сервере должен быть настроен API-ключ.",
+    providerSelectedAuto:
+      "Автоматический режим использует Anthropic, если он настроен, иначе — детерминированный режим.",
+    providerUsedDeterministic:
+      "Для этого ответа использован детерминированный провайдер.",
+    providerUsedAnthropic:
+      "Для этого ответа использован провайдер Anthropic.",
+    providerNotUsed:
+      "Для этого ответа внешний AI-провайдер не потребовался.",
+    providerNotConfigured:
+      "Anthropic не настроен на этом сервере разработки. Запрос не был отправлен провайдеру.",
     demoNotice:
       "В демо-режиме вызов официанта и запрос счёта недоступны.",
     initializing: "Подготавливаем безопасный диалог…",
@@ -303,6 +358,8 @@ export function friendlyClientError(
     case "storage_not_configured":
     case "storage_capacity_exceeded":
       return copy.storageUnavailable;
+    case "provider_not_configured":
+      return copy.providerNotConfigured;
     case "turn_id_conflict":
       return copy.conflict;
     case "session_not_found":

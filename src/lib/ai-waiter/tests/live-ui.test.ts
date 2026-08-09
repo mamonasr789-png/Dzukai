@@ -3,14 +3,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
+  LIVE_WAITER_DEVELOPMENT_PROVIDER_MODE_KEY,
   LIVE_WAITER_SESSION_KEY,
   LiveWaiterClient,
   TurnSubmissionGate,
   establishDiningSession,
   isRetryableTurnResult,
+  readDevelopmentProviderMode,
   readStoredSessionId,
   reconcileServerCart,
   retryModeForTurnResult,
+  storeDevelopmentProviderMode,
   tableTokenFromUrl,
   type SessionStoragePort,
 } from "../client/liveWaiterClient.ts";
@@ -43,6 +46,7 @@ import {
   GET as turnGet,
   OPTIONS as turnOptions,
   POST as turnPost,
+  resolveWaiterControllerSelection,
 } from "../../../app/api/ai/turn/route.ts";
 
 class MemorySessionStorage implements SessionStoragePort {
@@ -99,7 +103,7 @@ function routeFetch(): typeof fetch {
 function client(fetchImplementation: typeof fetch = routeFetch()) {
   return new LiveWaiterClient({
     fetchImplementation,
-    deterministicDevelopmentMode: true,
+    developmentProviderModeProvider: () => "deterministic",
   });
 }
 
@@ -542,6 +546,10 @@ test("client renders safe rate-limit, storage, and conflict messages in supporte
     friendlyClientError("turn_id_conflict", "lt"),
     /pakartojimo numeris/iu
   );
+  assert.match(
+    friendlyClientError("provider_not_configured", "en"),
+    /Anthropic is not configured/iu
+  );
   assert.equal(liveWaiterCopy("ru").waiter, "Официант");
 });
 
@@ -705,6 +713,135 @@ test("session client keeps table tokens and session capabilities out of request 
     },
     { action: "restore_session", sessionId },
   ]);
+});
+
+test("development provider modes send only the intended non-secret headers", async () => {
+  const modes = ["deterministic", "anthropic", "auto"] as const;
+  let currentMode: (typeof modes)[number] = "deterministic";
+  const capturedHeaders: Headers[] = [];
+  const capturedBodies: string[] = [];
+  const api = new LiveWaiterClient({
+    developmentProviderModeProvider: () => currentMode,
+    fetchImplementation: (async (_input, init) => {
+      capturedHeaders.push(new Headers(init?.headers));
+      capturedBodies.push(String(init?.body ?? ""));
+      return Response.json(
+        {
+          ok: false,
+          error: { code: "internal_error", message: "Safe test error." },
+        },
+        { status: 500 }
+      );
+    }) as typeof fetch,
+  });
+
+  for (const mode of modes) {
+    currentMode = mode;
+    await api.sendTurn({
+      sessionId: "ds_00000000000000000000000000000091",
+      message: "Hello",
+      clientTurnId: `ui_provider_${mode}`,
+      requestedLanguage: "en",
+    });
+  }
+  assert.equal(capturedHeaders.length, modes.length);
+  modes.forEach((mode, index) => {
+    const headers = capturedHeaders[index];
+    assert.equal(
+      headers.get("x-ai-waiter-test-mode"),
+      mode === "deterministic" ? "deterministic" : null
+    );
+    assert.equal(
+      headers.get("x-ai-waiter-provider-mode"),
+      mode === "deterministic" ? null : mode
+    );
+    assert.equal(headers.get("authorization"), null);
+    assert.equal(headers.get("x-api-key"), null);
+    assert.doesNotMatch(
+      capturedBodies[index] ?? "",
+      /ANTHROPIC_API_KEY|sk-ant-/u
+    );
+  });
+});
+
+test("development provider mode persistence is validated and defaults to deterministic", () => {
+  const storage = new MemorySessionStorage();
+  assert.equal(readDevelopmentProviderMode(storage), "deterministic");
+  storeDevelopmentProviderMode(storage, "auto");
+  assert.equal(
+    storage.getItem(LIVE_WAITER_DEVELOPMENT_PROVIDER_MODE_KEY),
+    "auto"
+  );
+  assert.equal(readDevelopmentProviderMode(storage), "auto");
+  storage.setItem(LIVE_WAITER_DEVELOPMENT_PROVIDER_MODE_KEY, "untrusted");
+  assert.equal(readDevelopmentProviderMode(storage), "deterministic");
+});
+
+test("development route selection supports deterministic, strict Anthropic, and auto while production ignores headers", () => {
+  const request = (headers: HeadersInit) =>
+    new Request("http://test/api/ai/turn", { method: "POST", headers });
+
+  assert.deepEqual(
+    resolveWaiterControllerSelection(
+      request({ "x-ai-waiter-test-mode": "deterministic" }),
+      { nodeEnvironment: "development", anthropicAvailable: true }
+    ),
+    {
+      kind: "deterministic",
+      requestedMode: "deterministic",
+      initialProviderPath: "deterministic",
+    }
+  );
+  assert.deepEqual(
+    resolveWaiterControllerSelection(
+      request({ "x-ai-waiter-provider-mode": "anthropic" }),
+      { nodeEnvironment: "development", anthropicAvailable: false }
+    ),
+    {
+      kind: "anthropic_not_configured",
+      requestedMode: "anthropic",
+      initialProviderPath: null,
+    }
+  );
+  assert.deepEqual(
+    resolveWaiterControllerSelection(
+      request({ "x-ai-waiter-provider-mode": "anthropic" }),
+      { nodeEnvironment: "development", anthropicAvailable: true }
+    ),
+    {
+      kind: "standard",
+      requestedMode: "anthropic",
+      initialProviderPath: "anthropic",
+    }
+  );
+  assert.equal(
+    resolveWaiterControllerSelection(
+      request({ "x-ai-waiter-provider-mode": "auto" }),
+      { nodeEnvironment: "development", anthropicAvailable: true }
+    ).initialProviderPath,
+    "anthropic"
+  );
+  assert.equal(
+    resolveWaiterControllerSelection(
+      request({ "x-ai-waiter-provider-mode": "auto" }),
+      { nodeEnvironment: "development", anthropicAvailable: false }
+    ).initialProviderPath,
+    "deterministic"
+  );
+  assert.deepEqual(
+    resolveWaiterControllerSelection(
+      request({
+        "x-ai-waiter-test-mode": "deterministic",
+        "x-ai-waiter-provider-mode": "anthropic",
+      }),
+      { nodeEnvironment: "production", anthropicAvailable: false }
+    ),
+    {
+      kind: "standard",
+      requestedMode: null,
+      initialProviderPath: null,
+    }
+  );
 });
 
 test("pending turns survive ambiguous transport, expire, and retain exact retry identity", async () => {
@@ -1173,6 +1310,10 @@ test("live /ai source has no old brain, ADD tag, tool endpoint, or browser cart 
   assert.doesNotMatch(
     source,
     /useCartStore\([^)]*\b(addItem|removeItem|updateQuantity|clearCart)\b/u
+  );
+  assert.doesNotMatch(
+    `${source}\n${clientSource}`,
+    /ANTHROPIC_API_KEY|sk-ant-/u
   );
   assert.match(clientSource, /\/api\/ai\/turn/u);
 });

@@ -22,9 +22,11 @@ import {
   TurnSubmissionGate,
   cartItemCount,
   establishDiningSession,
+  readDevelopmentProviderMode,
   readStoredSessionId,
   reconcileServerCart,
   retryModeForTurnResult,
+  storeDevelopmentProviderMode,
   tableTokenFromUrl,
   type DiningSessionSnapshot,
   type LiveWaiterTurnResult,
@@ -49,6 +51,8 @@ import {
 } from "@/lib/ai-waiter/client/liveWaiterUi";
 import type {
   Cart,
+  DevelopmentProviderMode,
+  DevelopmentProviderPath,
   SupportedLanguage,
   WaiterReference,
 } from "@/lib/ai-waiter/schemas";
@@ -58,6 +62,37 @@ import { useT } from "@/lib/i18n";
 type Message = StoredDisplayMessage;
 
 type SessionStatus = "initializing" | "ready" | "unavailable";
+type DevelopmentProviderStatus =
+  | DevelopmentProviderPath
+  | "anthropic_not_configured"
+  | null;
+
+function developmentProviderControlsEnabled(): boolean {
+  return process.env.NODE_ENV === "development";
+}
+
+function developmentProviderStatusText(
+  copy: ReturnType<typeof liveWaiterCopy>,
+  mode: DevelopmentProviderMode,
+  status: DevelopmentProviderStatus
+): string {
+  switch (status) {
+    case "deterministic":
+      return copy.providerUsedDeterministic;
+    case "anthropic":
+      return copy.providerUsedAnthropic;
+    case "not_used":
+      return copy.providerNotUsed;
+    case "anthropic_not_configured":
+      return copy.providerNotConfigured;
+    default:
+      return mode === "deterministic"
+        ? copy.providerSelectedDeterministic
+        : mode === "anthropic"
+          ? copy.providerSelectedAnthropic
+          : copy.providerSelectedAuto;
+  }
+}
 
 function timestamp(language: SupportedLanguage): string {
   const locale =
@@ -388,6 +423,8 @@ export function AIPageClient({
   const language = useCartStore((state) => state.lang);
   const tr = useT(language);
   const copy = liveWaiterCopy(language);
+  const developmentProviderControls =
+    developmentProviderControlsEnabled();
   const clientRef = useRef(client ?? new LiveWaiterClient());
   const storageRef = useRef(storage ?? safeSessionStorage());
   const gateRef = useRef(new TurnSubmissionGate());
@@ -412,6 +449,8 @@ export function AIPageClient({
   const requestSequenceRef = useRef(0);
   const acceptedResponseSequenceRef = useRef(0);
   const broadcastRef = useRef<BroadcastChannelPort | null>(null);
+  const developmentProviderModeRef =
+    useRef<DevelopmentProviderMode>("deterministic");
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -430,6 +469,10 @@ export function AIPageClient({
   const [transcriptReady, setTranscriptReady] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
+  const [developmentProviderMode, setDevelopmentProviderMode] =
+    useState<DevelopmentProviderMode>("deterministic");
+  const [developmentProviderStatus, setDevelopmentProviderStatus] =
+    useState<DevelopmentProviderStatus>(null);
 
   const updateRetryMode = useCallback(
     (mode: "same_id" | "new_id" | null) => {
@@ -437,6 +480,17 @@ export function AIPageClient({
       if (mountedRef.current) setRetryModeDisplay(mode);
     },
     []
+  );
+
+  const changeDevelopmentProviderMode = useCallback(
+    (mode: DevelopmentProviderMode) => {
+      if (!developmentProviderControls) return;
+      developmentProviderModeRef.current = mode;
+      storeDevelopmentProviderMode(storageRef.current, mode);
+      setDevelopmentProviderMode(mode);
+      setDevelopmentProviderStatus(null);
+    },
+    [developmentProviderControls]
   );
 
   const applySnapshot = useCallback(
@@ -594,6 +648,13 @@ export function AIPageClient({
     },
     [applySnapshot, updateRetryMode]
   );
+
+  useEffect(() => {
+    if (!developmentProviderControls) return;
+    const storedMode = readDevelopmentProviderMode(storageRef.current);
+    developmentProviderModeRef.current = storedMode;
+    setDevelopmentProviderMode(storedMode);
+  }, [developmentProviderControls]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -803,7 +864,15 @@ export function AIPageClient({
             ? { selectionHint: attempt.selectionHint }
             : {}),
             },
-            { signal: abortController.signal }
+            {
+              signal: abortController.signal,
+              ...(developmentProviderControls
+                ? {
+                    developmentProviderMode:
+                      developmentProviderModeRef.current,
+                  }
+                : {}),
+            }
           );
 
         const retryMode = retryModeForTurnResult(result);
@@ -830,6 +899,12 @@ export function AIPageClient({
           updateRetryMode(retryMode);
           freshRetryAttemptRef.current =
             retryMode === "new_id" ? attempt : null;
+          if (
+            developmentProviderControls &&
+            result.error.code === "provider_not_configured"
+          ) {
+            setDevelopmentProviderStatus("anthropic_not_configured");
+          }
           const errorMessage: Message = {
             id: `assistant-error-${attempt.clientTurnId}-${Date.now()}`,
             role: "assistant",
@@ -868,6 +943,12 @@ export function AIPageClient({
           return;
         }
         acceptedResponseSequenceRef.current = sequence;
+        if (developmentProviderControls) {
+          setDevelopmentProviderStatus(
+            result.data.developmentProviderPath ??
+              (result.data.fallbackUsed ? "deterministic" : "not_used")
+          );
+        }
 
         let authoritativeCart: Cart | null = null;
         try {
@@ -956,6 +1037,7 @@ export function AIPageClient({
       copy.noSideEffect,
       copy.retryProtectionUnavailable,
       copy.unknownOutcome,
+      developmentProviderControls,
       language,
       recoverExpiredSession,
       updateRetryMode,
@@ -1056,6 +1138,11 @@ export function AIPageClient({
     : copy.demoMode;
   const modeDot = staffRequestsAvailable ? "bg-green-500" : "bg-amber-500";
   const suggestions = useMemo(() => [...copy.suggestions], [copy.suggestions]);
+  const developmentProviderMessage = developmentProviderStatusText(
+    copy,
+    developmentProviderMode,
+    developmentProviderStatus
+  );
 
   return (
     <div className="relative flex h-screen flex-col bg-background">
@@ -1112,6 +1199,59 @@ export function AIPageClient({
           />
         )}
       </header>
+
+      {developmentProviderControls && (
+        <div
+          data-testid="development-provider-controls"
+          className="border-b border-sky-500/20 bg-sky-500/5 px-4 py-2"
+        >
+          <div className="mx-auto flex max-w-lg flex-wrap items-center gap-x-3 gap-y-1">
+            <label
+              htmlFor="development-provider-mode"
+              className="shrink-0 text-[11px] font-semibold text-sky-800 dark:text-sky-300"
+            >
+              {copy.developmentProvider}
+              <span className="ml-1 font-normal opacity-70">
+                ({copy.developmentOnly})
+              </span>
+            </label>
+            <select
+              id="development-provider-mode"
+              data-testid="development-provider-mode"
+              value={developmentProviderMode}
+              disabled={busy || newTurnBlocked}
+              onChange={(event) => {
+                const mode = event.target.value;
+                if (
+                  mode === "deterministic" ||
+                  mode === "anthropic" ||
+                  mode === "auto"
+                ) {
+                  changeDevelopmentProviderMode(mode);
+                }
+              }}
+              className="min-w-0 rounded-lg border border-sky-500/30 bg-background px-2 py-1 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40"
+            >
+              <option value="deterministic">
+                {copy.providerDeterministic}
+              </option>
+              <option value="anthropic">{copy.providerAnthropic}</option>
+              <option value="auto">{copy.providerAuto}</option>
+            </select>
+            <p
+              data-testid="development-provider-status"
+              role={
+                developmentProviderStatus === "anthropic_not_configured"
+                  ? "alert"
+                  : "status"
+              }
+              className="basis-full text-[11px] leading-snug text-muted-foreground"
+            >
+              {developmentProviderMessage}
+            </p>
+          </div>
+        </div>
+      )}
 
       {(sessionNotice || !staffRequestsAvailable) && (
         <div className="border-b border-border/40 px-4 py-2">

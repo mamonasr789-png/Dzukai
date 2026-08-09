@@ -41,6 +41,7 @@ export class ProviderLoopRunner {
   private readonly fallbackProvider: AIProvider;
   private readonly timeoutMs: number;
   private readonly now: () => number;
+  private readonly allowFallback: boolean;
   private providerDurationMs = 0;
   private fallback = false;
   private validationCategory: string | undefined;
@@ -50,6 +51,7 @@ export class ProviderLoopRunner {
     fallbackProvider: AIProvider;
     timeoutMs: number;
     now?: () => number;
+    allowFallback?: boolean;
   }) {
     this.activeProvider = options.provider.isAvailable()
       ? options.provider
@@ -58,6 +60,7 @@ export class ProviderLoopRunner {
     this.fallback = this.activeProvider === options.fallbackProvider;
     this.timeoutMs = options.timeoutMs;
     this.now = options.now ?? Date.now;
+    this.allowFallback = options.allowFallback ?? true;
   }
 
   async generate(
@@ -92,7 +95,12 @@ export class ProviderLoopRunner {
 
   activateFallback(category: string): boolean {
     this.validationCategory = category;
-    if (this.activeProvider === this.fallbackProvider) return false;
+    if (
+      !this.allowFallback ||
+      this.activeProvider === this.fallbackProvider
+    ) {
+      return false;
+    }
     this.activeProvider = this.fallbackProvider;
     this.fallback = true;
     return true;

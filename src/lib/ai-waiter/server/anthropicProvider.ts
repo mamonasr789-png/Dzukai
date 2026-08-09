@@ -20,6 +20,15 @@ const FINAL_RESPONSE_TOOL = "final_waiter_response";
 const CLARIFICATION_TOOL = "clarify_waiter_response";
 const STAFF_ESCALATION_TOOL = "recommend_staff_escalation";
 
+/**
+ * Output-token budget for one provider step. See the derivation comment in the
+ * constructor: the response contract bounds a final answer at roughly 1300
+ * tokens, so the default clears it with headroom and the cap bounds any
+ * caller-supplied override.
+ */
+export const DEFAULT_MAXIMUM_OUTPUT_TOKENS = 2_048;
+export const MAXIMUM_OUTPUT_TOKENS_CAP = 4_096;
+
 const AnthropicContentBlockSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }).passthrough(),
   z
@@ -67,6 +76,7 @@ const StaffEscalationInputSchema = z
 
 interface AnthropicProviderOptions {
   apiKey?: string;
+  apiKeyProvider?: () => string | undefined;
   model?: string;
   timeoutMs?: number;
   fetchImplementation?: typeof fetch;
@@ -185,7 +195,7 @@ const responseTools = [
 
 export class AnthropicAIProvider implements AIProvider {
   readonly providerId = "anthropic";
-  private readonly apiKey: string | undefined;
+  private readonly apiKeyProvider: () => string | undefined;
   private readonly model: string;
   private readonly timeoutMs: number;
   private readonly fetchImplementation: typeof fetch;
@@ -194,27 +204,44 @@ export class AnthropicAIProvider implements AIProvider {
   private readonly maximumOutputTokens: number;
 
   constructor(options: AnthropicProviderOptions = {}) {
-    this.apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
+    this.apiKeyProvider =
+      options.apiKey !== undefined
+        ? () => options.apiKey?.trim() || undefined
+        : options.apiKeyProvider ??
+          (() => process.env.ANTHROPIC_API_KEY?.trim() || undefined);
     this.model =
       options.model ??
       process.env.AI_WAITER_ANTHROPIC_MODEL ??
       "claude-sonnet-4-6";
-    this.timeoutMs = options.timeoutMs ?? 12_000;
+    // Must stay strictly below WaiterTurnController.providerTimeoutMs so the
+    // provider's own AbortSignal fires first and the loop can fall back
+    // cleanly. Observed real turns (full policy + tool schemas + grounded
+    // menu context) ran 9.6–12.0 s and were being killed by the old 12 s cap.
+    this.timeoutMs = options.timeoutMs ?? 45_000;
     this.fetchImplementation = options.fetchImplementation ?? fetch;
     this.maximumRequestBytes = options.maximumRequestBytes ?? 128_000;
     this.maximumResponseBytes = options.maximumResponseBytes ?? 128_000;
+    // Sized from the response contract's own bounds, not guesswork: a final
+    // response allows message ≤ 1500 chars (~400 tokens) + up to 20 claims
+    // (~700 tokens) + up to 10 referencedProductIds + JSON overhead ≈ 1300
+    // tokens worst case. The old 700/1024 pair sat below that, so ordinary
+    // multi-item grounded menu answers terminated with stop_reason
+    // "max_tokens" and were (correctly) rejected as truncated. 2048 clears the
+    // contract-bounded worst case with headroom; 4096 caps configuration so an
+    // over-large override cannot make turns unboundedly slow or expensive.
     this.maximumOutputTokens = Math.min(
-      options.maximumOutputTokens ?? 700,
-      1_024
+      options.maximumOutputTokens ?? DEFAULT_MAXIMUM_OUTPUT_TOKENS,
+      MAXIMUM_OUTPUT_TOKENS_CAP
     );
   }
 
   isAvailable(): boolean {
-    return Boolean(this.apiKey);
+    return Boolean(this.apiKeyProvider());
   }
 
   async generateStep(request: AIProviderStepRequest): Promise<unknown> {
-    if (!this.apiKey) throw new Error("provider_unavailable");
+    const apiKey = this.apiKeyProvider();
+    if (!apiKey) throw new Error("provider_unavailable");
     const body = JSON.stringify({
       model: this.model,
       max_tokens: this.maximumOutputTokens,
@@ -238,7 +265,7 @@ export class AnthropicAIProvider implements AIProvider {
       {
         method: "POST",
         headers: {
-          "x-api-key": this.apiKey,
+          "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
           "content-type": "application/json",
         },
@@ -274,13 +301,15 @@ export class AnthropicAIProvider implements AIProvider {
       (block): block is Extract<typeof block, { type: "tool_use" }> =>
         block.type === "tool_use"
     );
-    const textBlocks = raw.data.content.filter(
-      (block): block is Extract<typeof block, { type: "text" }> =>
-        block.type === "text" && block.text.trim().length > 0
-    );
     switch (raw.data.stop_reason) {
       case "tool_use":
-        if (toolBlocks.length === 0 || textBlocks.length > 0) {
+        // Accompanying text blocks are permitted alongside tool_use blocks —
+        // the model routinely emits a short lead-in or trailing remark next to
+        // the tool call. That text is deliberately DISCARDED here: it is never
+        // surfaced to the customer and never treated as a grounded final
+        // answer. Only the validated structured tool payload below is used.
+        // A response with no tool block is still rejected.
+        if (toolBlocks.length === 0) {
           throw new Error("provider_response_invalid");
         }
         break;

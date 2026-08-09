@@ -7,6 +7,7 @@ import { JSDOM } from "jsdom";
 import type { ReactNode } from "react";
 
 import {
+  LIVE_WAITER_DEVELOPMENT_PROVIDER_MODE_KEY,
   LiveWaiterClient,
   readStoredSessionId,
   storeSessionId,
@@ -128,6 +129,13 @@ class MalformedPendingStorage extends MemorySessionStorage {
 const SESSION_A = "ds_000000000000000000000000000000a1" as const;
 const SESSION_B = "ds_000000000000000000000000000000b2" as const;
 const NOW = "2026-07-27T12:00:00.000Z";
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+
+function setNodeEnvironment(value: string | undefined): void {
+  const environment = process.env as Record<string, string | undefined>;
+  if (value === undefined) delete environment.NODE_ENV;
+  else environment.NODE_ENV = value;
+}
 
 function emptyCart(
   sessionId: DiningSessionId = SESSION_A,
@@ -398,10 +406,281 @@ function setLanguage(language: "lt" | "en" | "ru") {
 
 test.afterEach(() => {
   cleanup();
+  setNodeEnvironment(ORIGINAL_NODE_ENV);
   dom.reconfigure({ url: "http://ui.test/ai" });
   localStorage.clear();
   sessionStorage.clear();
   setLanguage("en");
+});
+
+test("development provider selector defaults safely and persists an explicit mode", async () => {
+  setNodeEnvironment("development");
+  setLanguage("en");
+  const storage = new MemorySessionStorage();
+  const client = new LiveWaiterClient({
+    fetchImplementation: (async () =>
+      jsonSnapshot(snapshot({ language: "en" }), 201)) as typeof fetch,
+  });
+
+  const firstRender = renderPage(client, storage);
+  const selector = await screen.findByTestId("development-provider-mode");
+  await screen.findByTestId("waiter-input");
+  await waitFor(() =>
+    assert.equal((selector as HTMLSelectElement).disabled, false)
+  );
+  assert.equal((selector as HTMLSelectElement).value, "deterministic");
+  assert.match(
+    screen.getByTestId("development-provider-status").textContent ?? "",
+    /no paid API/iu
+  );
+
+  fireEvent.change(selector, { target: { value: "auto" } });
+  await waitFor(() =>
+    assert.equal((selector as HTMLSelectElement).value, "auto")
+  );
+  assert.equal(
+    storage.getItem(LIVE_WAITER_DEVELOPMENT_PROVIDER_MODE_KEY),
+    "auto"
+  );
+  assert.match(
+    screen.getByTestId("development-provider-status").textContent ?? "",
+    /use Anthropic when configured/iu
+  );
+
+  firstRender.unmount();
+  renderPage(client, storage);
+  const restoredSelector = await screen.findByTestId(
+    "development-provider-mode"
+  );
+  await waitFor(() =>
+    assert.equal((restoredSelector as HTMLSelectElement).value, "auto")
+  );
+  assert.match(
+    screen.getByTestId("development-provider-status").textContent ?? "",
+    /use Anthropic when configured/iu
+  );
+});
+
+test("changing the selector immediately changes every subsequent turn request without recreating the session", async () => {
+  setNodeEnvironment("development");
+  setLanguage("en");
+  const storage = new MemorySessionStorage();
+  const turnHeaders: Headers[] = [];
+  let sessionCalls = 0;
+  const client = new LiveWaiterClient({
+    fetchImplementation: (async (input, init) => {
+      if (String(input).endsWith("/session")) {
+        sessionCalls += 1;
+        return jsonSnapshot(snapshot({ language: "en" }), 201);
+      }
+      const headers = new Headers(init?.headers);
+      turnHeaders.push(headers);
+      const requestedMode =
+        headers.get("x-ai-waiter-provider-mode") ??
+        (headers.get("x-ai-waiter-test-mode") === "deterministic"
+          ? "deterministic"
+          : "auto");
+      const providerPath =
+        requestedMode === "anthropic" ? "anthropic" : "deterministic";
+      return Response.json({
+        ok: true,
+        data: turnData(emptyCart(), {
+          fallbackUsed: providerPath === "deterministic",
+          developmentProviderPath: providerPath,
+        }),
+      });
+    }) as typeof fetch,
+  });
+
+  renderPage(client, storage);
+  const selector = await screen.findByTestId("development-provider-mode");
+  const input = await screen.findByTestId("waiter-input");
+  const sendButton = screen.getByTestId("send-turn");
+  await waitFor(() =>
+    assert.equal((selector as HTMLSelectElement).disabled, false)
+  );
+
+  fireEvent.change(input, { target: { value: "Deterministic turn" } });
+  fireEvent.click(sendButton);
+  await waitFor(() => assert.equal(turnHeaders.length, 1));
+  await waitFor(() =>
+    assert.equal((selector as HTMLSelectElement).disabled, false)
+  );
+
+  fireEvent.change(selector, { target: { value: "anthropic" } });
+  assert.equal((selector as HTMLSelectElement).value, "anthropic");
+  assert.match(
+    screen.getByTestId("development-provider-status").textContent ?? "",
+    /Anthropic mode is selected/iu
+  );
+  fireEvent.change(input, { target: { value: "Anthropic turn" } });
+  fireEvent.click(sendButton);
+  await waitFor(() => assert.equal(turnHeaders.length, 2));
+  await waitFor(() =>
+    assert.equal((selector as HTMLSelectElement).disabled, false)
+  );
+
+  fireEvent.change(selector, { target: { value: "auto" } });
+  assert.equal((selector as HTMLSelectElement).value, "auto");
+  assert.match(
+    screen.getByTestId("development-provider-status").textContent ?? "",
+    /Auto mode will use Anthropic when configured/iu
+  );
+  fireEvent.change(input, { target: { value: "Auto turn" } });
+  fireEvent.click(sendButton);
+  await waitFor(() => assert.equal(turnHeaders.length, 3));
+
+  assert.equal(
+    turnHeaders[0]?.get("x-ai-waiter-test-mode"),
+    "deterministic"
+  );
+  assert.equal(
+    turnHeaders[0]?.get("x-ai-waiter-provider-mode"),
+    null
+  );
+  assert.equal(turnHeaders[1]?.get("x-ai-waiter-test-mode"), null);
+  assert.equal(
+    turnHeaders[1]?.get("x-ai-waiter-provider-mode"),
+    "anthropic"
+  );
+  assert.equal(turnHeaders[2]?.get("x-ai-waiter-test-mode"), null);
+  assert.equal(
+    turnHeaders[2]?.get("x-ai-waiter-provider-mode"),
+    "auto"
+  );
+  assert.equal(sessionCalls, 1);
+});
+
+test("missing Anthropic configuration renders a clear development-only error without exposing secrets", async () => {
+  setNodeEnvironment("development");
+  const storage = new MemorySessionStorage();
+  let turnCalls = 0;
+  let turnHeaders = new Headers();
+  let turnBody = "";
+  const client = new LiveWaiterClient({
+    fetchImplementation: (async (input, init) => {
+      if (String(input).endsWith("/session")) {
+        return jsonSnapshot(snapshot({ language: "en" }), 201);
+      }
+      turnCalls += 1;
+      turnHeaders = new Headers(init?.headers);
+      turnBody = String(init?.body ?? "");
+      return Response.json(
+        {
+          ok: false,
+          error: {
+            code: "provider_not_configured",
+            message: "secret backend configuration detail",
+          },
+        },
+        { status: 503 }
+      );
+    }) as typeof fetch,
+  });
+
+  renderPage(client, storage);
+  const selector = await screen.findByTestId("development-provider-mode");
+  await screen.findByTestId("waiter-input");
+  await waitFor(() =>
+    assert.equal((selector as HTMLSelectElement).disabled, false)
+  );
+  fireEvent.change(selector, { target: { value: "anthropic" } });
+  await waitFor(() =>
+    assert.equal((selector as HTMLSelectElement).value, "anthropic")
+  );
+  const input = screen.getByTestId("waiter-input");
+  fireEvent.change(input, { target: { value: "What do you recommend?" } });
+  fireEvent.click(screen.getByTestId("send-turn"));
+
+  const status = await screen.findByTestId("development-provider-status");
+  await waitFor(() => assert.equal(status.getAttribute("role"), "alert"));
+  assert.match(status.textContent ?? "", /Anthropic is not configured/iu);
+  assert.equal(turnCalls, 1);
+  assert.equal(turnHeaders.get("x-ai-waiter-test-mode"), null);
+  assert.equal(
+    turnHeaders.get("x-ai-waiter-provider-mode"),
+    "anthropic"
+  );
+  assert.equal(turnHeaders.get("authorization"), null);
+  assert.equal(turnHeaders.get("x-api-key"), null);
+  assert.doesNotMatch(turnBody, /ANTHROPIC_API_KEY|sk-ant-/u);
+  assert.equal(screen.queryByText("secret backend configuration detail"), null);
+});
+
+test("auto mode reports whether Anthropic or deterministic fallback handled each response", async () => {
+  setNodeEnvironment("development");
+  const storage = new MemorySessionStorage();
+  const turnHeaders: Headers[] = [];
+  let turnCalls = 0;
+  const client = new LiveWaiterClient({
+    fetchImplementation: (async (input, init) => {
+      if (String(input).endsWith("/session")) {
+        return jsonSnapshot(snapshot({ language: "en" }), 201);
+      }
+      turnHeaders.push(new Headers(init?.headers));
+      turnCalls += 1;
+      const anthropic = turnCalls === 1;
+      return Response.json({
+        ok: true,
+        data: turnData(emptyCart(), {
+          fallbackUsed: !anthropic,
+          developmentProviderPath: anthropic
+            ? "anthropic"
+            : "deterministic",
+        }),
+      });
+    }) as typeof fetch,
+  });
+
+  renderPage(client, storage);
+  const selector = await screen.findByTestId("development-provider-mode");
+  await screen.findByTestId("waiter-input");
+  await waitFor(() =>
+    assert.equal((selector as HTMLSelectElement).disabled, false)
+  );
+  fireEvent.change(selector, { target: { value: "auto" } });
+  await waitFor(() =>
+    assert.equal((selector as HTMLSelectElement).value, "auto")
+  );
+
+  const input = screen.getByTestId("waiter-input");
+  fireEvent.change(input, { target: { value: "First request" } });
+  fireEvent.click(screen.getByTestId("send-turn"));
+  await waitFor(() =>
+    assert.match(
+      screen.getByTestId("development-provider-status").textContent ?? "",
+      /Anthropic provider handled/iu
+    )
+  );
+
+  fireEvent.change(input, { target: { value: "Second request" } });
+  fireEvent.click(screen.getByTestId("send-turn"));
+  await waitFor(() =>
+    assert.match(
+      screen.getByTestId("development-provider-status").textContent ?? "",
+      /deterministic provider handled/iu
+    )
+  );
+  assert.equal(turnCalls, 2);
+  for (const headers of turnHeaders) {
+    assert.equal(headers.get("x-ai-waiter-test-mode"), null);
+    assert.equal(headers.get("x-ai-waiter-provider-mode"), "auto");
+  }
+});
+
+test("production never renders development provider controls", async () => {
+  setNodeEnvironment("production");
+  const client = new LiveWaiterClient({
+    fetchImplementation: (async () =>
+      jsonSnapshot(snapshot({ language: "en" }), 201)) as typeof fetch,
+  });
+  renderPage(client, new MemorySessionStorage());
+  await screen.findByTestId("waiter-input");
+  assert.equal(
+    screen.queryByTestId("development-provider-controls"),
+    null
+  );
+  assert.equal(screen.queryByTestId("development-provider-mode"), null);
 });
 
 test("Strict Mode initializes once after language hydration and restores the scoped transcript", async () => {
@@ -629,7 +908,7 @@ test("route-backed lost add response recreates the page and replays to exactly o
     }) as typeof fetch;
     const firstClient = new LiveWaiterClient({
       fetchImplementation: routeFetch,
-      deterministicDevelopmentMode: true,
+      developmentProviderModeProvider: () => "deterministic",
     });
 
     const firstPage = renderPage(firstClient, storage);
@@ -660,7 +939,7 @@ test("route-backed lost add response recreates the page and replays to exactly o
     const secondClient = new LiveWaiterClient({
       fetchImplementation: (async (input, init) =>
         fetch(new URL(String(input), host.baseUrl), init)) as typeof fetch,
-      deterministicDevelopmentMode: true,
+      developmentProviderModeProvider: () => "deterministic",
     });
     renderPage(secondClient, storage);
     await screen.findByTestId("pending-turn-recovery");

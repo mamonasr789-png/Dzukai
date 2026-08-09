@@ -61,6 +61,15 @@ export class TurnResultFactory {
       actionLedger: command.actionLedger,
       fallbackUsed: command.fallbackUsed,
       replayed: false,
+      ...(process.env.NODE_ENV === "development"
+        ? {
+            developmentProviderPath: runtime
+              ? runtime.providerLoop.providerId === "anthropic"
+                ? ("anthropic" as const)
+                : ("deterministic" as const)
+              : ("not_used" as const),
+          }
+        : {}),
       ...(debugEnabled && runtime
         ? {
             debug: {

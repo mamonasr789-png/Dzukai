@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   CartSchema,
   CreateDiningSessionResponseSchema,
+  DevelopmentProviderModeSchema,
   DiningSessionIdSchema,
   DiningSessionSnapshotResponseSchema,
   WaiterTurnResultSchema,
@@ -9,11 +10,14 @@ import {
   type ClientSelectionHint,
   type DiningSessionCapabilities,
   type DiningSessionId,
+  type DevelopmentProviderMode,
   type SupportedLanguage,
   type WaiterTurnData,
 } from "../schemas.ts";
 
 export const LIVE_WAITER_SESSION_KEY = "vaise-ai-waiter-session-v1";
+export const LIVE_WAITER_DEVELOPMENT_PROVIDER_MODE_KEY =
+  "vaise-ai-waiter-development-provider-mode-v1";
 
 const ApiErrorEnvelopeSchema = z
   .object({
@@ -44,6 +48,7 @@ export type ClientApiErrorCode =
   | "rate_limited"
   | "storage_not_configured"
   | "storage_capacity_exceeded"
+  | "provider_not_configured"
   | "provider_limit_exceeded"
   | "safe_fallback_failed"
   | "internal_error"
@@ -77,7 +82,7 @@ export interface SessionStoragePort {
 
 export interface LiveWaiterClientOptions {
   fetchImplementation?: typeof fetch;
-  deterministicDevelopmentMode?: boolean;
+  developmentProviderModeProvider?: () => DevelopmentProviderMode | null;
   requestTimeoutMs?: number;
 }
 
@@ -106,15 +111,18 @@ function parseServerError(value: unknown): ClientApiError | null {
 
 export class LiveWaiterClient {
   private readonly fetchImplementation: typeof fetch;
-  private readonly deterministicDevelopmentMode: boolean;
+  private readonly developmentProviderModeProvider: () =>
+    | DevelopmentProviderMode
+    | null;
   private readonly requestTimeoutMs: number;
 
   constructor(options: LiveWaiterClientOptions = {}) {
     this.fetchImplementation =
       options.fetchImplementation ?? globalThis.fetch.bind(globalThis);
-    this.deterministicDevelopmentMode =
-      options.deterministicDevelopmentMode ??
-      process.env.NODE_ENV === "development";
+    this.developmentProviderModeProvider =
+      options.developmentProviderModeProvider ??
+      (() =>
+        process.env.NODE_ENV === "development" ? "deterministic" : null);
     this.requestTimeoutMs = options.requestTimeoutMs ?? 20_000;
   }
 
@@ -277,8 +285,14 @@ export class LiveWaiterClient {
       requestedLanguage: SupportedLanguage;
       selectionHint?: ClientSelectionHint;
     },
-    options: { signal?: AbortSignal } = {}
+    options: {
+      signal?: AbortSignal;
+      developmentProviderMode?: DevelopmentProviderMode;
+    } = {}
   ): Promise<LiveWaiterTurnResult> {
+    const developmentProviderMode =
+      options.developmentProviderMode ??
+      this.developmentProviderModeProvider();
     const requested = await this.request(
       "/api/ai/turn",
       {
@@ -287,8 +301,14 @@ export class LiveWaiterClient {
         credentials: "same-origin",
         headers: {
           "content-type": "application/json",
-          ...(this.deterministicDevelopmentMode
+          ...(developmentProviderMode === "deterministic"
             ? { "x-ai-waiter-test-mode": "deterministic" }
+            : {}),
+          ...(developmentProviderMode === "anthropic" ||
+          developmentProviderMode === "auto"
+            ? {
+                "x-ai-waiter-provider-mode": developmentProviderMode,
+              }
             : {}),
         },
         body: JSON.stringify(command),
@@ -317,6 +337,31 @@ export class LiveWaiterClient {
       "The waiter response could not be read safely.",
       "unknown"
     );
+  }
+}
+
+export function readDevelopmentProviderMode(
+  storage: SessionStoragePort
+): DevelopmentProviderMode {
+  try {
+    const parsed = DevelopmentProviderModeSchema.safeParse(
+      storage.getItem(LIVE_WAITER_DEVELOPMENT_PROVIDER_MODE_KEY)
+    );
+    return parsed.success ? parsed.data : "deterministic";
+  } catch {
+    return "deterministic";
+  }
+}
+
+export function storeDevelopmentProviderMode(
+  storage: SessionStoragePort,
+  mode: DevelopmentProviderMode
+): void {
+  const parsed = DevelopmentProviderModeSchema.parse(mode);
+  try {
+    storage.setItem(LIVE_WAITER_DEVELOPMENT_PROVIDER_MODE_KEY, parsed);
+  } catch {
+    // Development ergonomics remain optional if browser storage is blocked.
   }
 }
 

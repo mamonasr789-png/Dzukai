@@ -90,6 +90,10 @@ interface WaiterTurnControllerOptions {
   now?: () => number;
 }
 
+export interface WaiterTurnExecutionOptions {
+  allowProviderFallback?: boolean;
+}
+
 interface TurnRuntime {
   startedAt: number;
   turnId: string;
@@ -127,7 +131,10 @@ export class WaiterTurnController {
     this.dependencies = dependencies;
     this.maximumToolRounds = options.maximumToolRounds ?? 4;
     this.maximumToolCalls = options.maximumToolCalls ?? 12;
-    this.providerTimeoutMs = options.providerTimeoutMs ?? 15_000;
+    // Outer guard around each provider step. Must stay above
+    // AnthropicAIProvider.timeoutMs (45 s) so the provider's own timeout wins
+    // and the loop records a clean provider_failure instead of being cut off here.
+    this.providerTimeoutMs = options.providerTimeoutMs ?? 60_000;
     this.now = options.now ?? Date.now;
     this.actionLedger =
       dependencies.actionLedger ?? new InMemoryActionLedger();
@@ -160,7 +167,10 @@ export class WaiterTurnController {
     );
   }
 
-  async handleWaiterTurn(rawCommand: unknown): Promise<WaiterTurnResult> {
+  async handleWaiterTurn(
+    rawCommand: unknown,
+    options: WaiterTurnExecutionOptions = {}
+  ): Promise<WaiterTurnResult> {
     const parsed = ConversationTurnRequestSchema.safeParse(rawCommand);
     if (!parsed.success) {
       return this.resultFactory.error(
@@ -189,7 +199,7 @@ export class WaiterTurnController {
         try {
           return await this.sessionCoordinator.runExclusive(
             parsed.data.sessionId,
-            () => this.runTurn(parsed.data, turnId)
+            () => this.runTurn(parsed.data, turnId, options)
           );
         } catch (error) {
           if (error instanceof SessionTurnCapacityError) {
@@ -232,7 +242,8 @@ export class WaiterTurnController {
 
   private async runTurn(
     command: ConversationTurnRequest,
-    turnId: string
+    turnId: string,
+    options: WaiterTurnExecutionOptions
   ): Promise<WaiterTurnResult> {
     const startedAt = this.now();
     const initialState =
@@ -385,6 +396,7 @@ export class WaiterTurnController {
         fallbackProvider: this.dependencies.fallbackProvider,
         timeoutMs: this.providerTimeoutMs,
         now: this.now,
+        allowFallback: options.allowProviderFallback,
       }),
     };
 
@@ -401,7 +413,7 @@ export class WaiterTurnController {
           cart: currentCart,
           message: TURN_COPY[state.language].failure,
           status: "provider_failed_without_side_effect",
-          fallbackUsed: true,
+          fallbackUsed: runtime.providerLoop.fallbackUsed,
           actionLedger: [],
           runtime,
         });
@@ -426,7 +438,7 @@ export class WaiterTurnController {
           cart: currentCart,
           message: TURN_COPY[state.language].failure,
           status: "provider_failed_without_side_effect",
-          fallbackUsed: true,
+          fallbackUsed: runtime.providerLoop.fallbackUsed,
           actionLedger: [],
           runtime,
         });
@@ -504,7 +516,7 @@ export class WaiterTurnController {
             cart: currentCart,
             message: TURN_COPY[state.language].limit,
             status: "clarification_required",
-            fallbackUsed: true,
+            fallbackUsed: runtime.providerLoop.fallbackUsed,
             actionLedger: [],
             runtime,
           });
@@ -800,7 +812,7 @@ export class WaiterTurnController {
         cart: currentCart,
         message: TURN_COPY[state.language].failure,
         status: "provider_failed_without_side_effect",
-        fallbackUsed: true,
+        fallbackUsed: runtime.providerLoop.fallbackUsed,
         actionLedger: [],
         runtime,
       });

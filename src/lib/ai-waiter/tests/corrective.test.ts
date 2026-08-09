@@ -911,18 +911,14 @@ function anthropic(
 
 const providerRequest = { context: {}, exchanges: [] } as never;
 
-test("Anthropic accepts only clean tool_use and rejects all unsafe stop reasons", async () => {
+test("Anthropic accepts tool_use with optional text and rejects all unsafe stop reasons", async () => {
   const toolBlock = {
     type: "tool_use",
     id: "toolu_corrective",
     name: "request_waiter",
     input: {},
   };
-  const valid = await anthropic({
-    content: [toolBlock],
-    stop_reason: "tool_use",
-  }).generateStep(providerRequest);
-  assert.deepEqual(valid, {
+  const expected = {
     kind: "tool_requests",
     toolCalls: [
       {
@@ -931,7 +927,20 @@ test("Anthropic accepts only clean tool_use and rejects all unsafe stop reasons"
         input: {},
       },
     ],
-  });
+  };
+  const valid = await anthropic({
+    content: [toolBlock],
+    stop_reason: "tool_use",
+  }).generateStep(providerRequest);
+  assert.deepEqual(valid, expected);
+
+  // Accompanying text beside the tool call is permitted and discarded — the
+  // provider-neutral step carries only the validated tool payload.
+  const withText = await anthropic({
+    content: [{ type: "text", text: "calling" }, toolBlock],
+    stop_reason: "tool_use",
+  }).generateStep(providerRequest);
+  assert.deepEqual(withText, expected);
 
   const invalid = [
     { content: [{ type: "text", text: "done" }], stop_reason: "end_turn" },
@@ -940,8 +949,9 @@ test("Anthropic accepts only clean tool_use and rejects all unsafe stop reasons"
     { content: [toolBlock], stop_reason: "pause_turn" },
     { content: [toolBlock] },
     { content: [toolBlock], stop_reason: "future_reason" },
+    // tool_use with text but NO tool block is still rejected.
     {
-      content: [{ type: "text", text: "calling" }, toolBlock],
+      content: [{ type: "text", text: "answering without a tool" }],
       stop_reason: "tool_use",
     },
   ];

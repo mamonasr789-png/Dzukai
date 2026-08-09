@@ -1,4 +1,8 @@
-import { ConversationTurnRequestSchema } from "../../../../lib/ai-waiter/schemas.ts";
+import {
+  ConversationTurnRequestSchema,
+  DevelopmentProviderModeSchema,
+  type DevelopmentProviderMode,
+} from "../../../../lib/ai-waiter/schemas.ts";
 import {
   methodNotAllowedResponse,
   optionsResponse,
@@ -7,17 +11,112 @@ import {
 } from "../../../../lib/ai-waiter/server/http.ts";
 import { requestFingerprint } from "../../../../lib/ai-waiter/server/rateLimitPort.ts";
 import {
+  anthropicProvider,
   conversationStateStore,
   deterministicWaiterTurnController,
   getAiWaiterRuntimeAvailability,
   rateLimitPort,
   waiterTurnController,
 } from "../../../../lib/ai-waiter/server/runtime.ts";
+import type { WaiterTurnExecutionOptions } from "../../../../lib/ai-waiter/server/turnController.ts";
 
 const MAXIMUM_TURN_REQUEST_BYTES = 4_096;
 const ALLOWED_METHODS = ["OPTIONS", "POST"];
 
 export const runtime = "nodejs";
+
+export type WaiterControllerSelection =
+  | {
+      kind: "standard" | "deterministic";
+      requestedMode: DevelopmentProviderMode | null;
+      initialProviderPath: "anthropic" | "deterministic" | null;
+    }
+  | {
+      kind: "anthropic_not_configured";
+      requestedMode: "anthropic";
+      initialProviderPath: null;
+    };
+
+export function resolveWaiterControllerSelection(
+  request: Request,
+  options: {
+    nodeEnvironment?: string;
+    anthropicAvailable?: boolean;
+  } = {}
+): WaiterControllerSelection {
+  const nodeEnvironment = options.nodeEnvironment ?? process.env.NODE_ENV;
+  if (nodeEnvironment === "production") {
+    return {
+      kind: "standard",
+      requestedMode: null,
+      initialProviderPath: null,
+    };
+  }
+
+  const explicitMode = DevelopmentProviderModeSchema.safeParse(
+    request.headers.get("x-ai-waiter-provider-mode")
+  );
+  const requestedMode: DevelopmentProviderMode =
+    request.headers.get("x-ai-waiter-test-mode") === "deterministic"
+      ? "deterministic"
+      : explicitMode.success
+        ? explicitMode.data
+        : "auto";
+  const anthropicAvailable =
+    options.anthropicAvailable ?? anthropicProvider.isAvailable();
+
+  if (requestedMode === "deterministic") {
+    return {
+      kind: "deterministic",
+      requestedMode,
+      initialProviderPath: "deterministic",
+    };
+  }
+  if (requestedMode === "anthropic" && !anthropicAvailable) {
+    return {
+      kind: "anthropic_not_configured",
+      requestedMode,
+      initialProviderPath: null,
+    };
+  }
+  return {
+    kind: "standard",
+    requestedMode,
+    initialProviderPath: anthropicAvailable
+      ? "anthropic"
+      : "deterministic",
+  };
+}
+
+interface WaiterControllerPort {
+  handleWaiterTurn(
+    command: unknown,
+    options?: WaiterTurnExecutionOptions
+  ): ReturnType<typeof waiterTurnController.handleWaiterTurn>;
+}
+
+export function executeWaiterControllerSelection(
+  selection: Exclude<
+    WaiterControllerSelection,
+    { kind: "anthropic_not_configured" }
+  >,
+  command: unknown,
+  controllers: {
+    standard: WaiterControllerPort;
+    deterministic: WaiterControllerPort;
+  } = {
+    standard: waiterTurnController,
+    deterministic: deterministicWaiterTurnController,
+  }
+): ReturnType<typeof waiterTurnController.handleWaiterTurn> {
+  const controller =
+    selection.kind === "deterministic"
+      ? controllers.deterministic
+      : controllers.standard;
+  return controller.handleWaiterTurn(command, {
+    allowProviderFallback: selection.requestedMode !== "anthropic",
+  });
+}
 
 function statusForResult(
   result: Awaited<ReturnType<typeof waiterTurnController.handleWaiterTurn>>
@@ -32,6 +131,7 @@ function statusForResult(
       return 429;
     case "storage_not_configured":
     case "storage_capacity_exceeded":
+    case "provider_not_configured":
       return 503;
     case "internal_error":
     case "safe_fallback_failed":
@@ -149,13 +249,24 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const useDeterministicTestMode =
-      process.env.NODE_ENV !== "production" &&
-      request.headers.get("x-ai-waiter-test-mode") === "deterministic";
-    const controller = useDeterministicTestMode
-      ? deterministicWaiterTurnController
-      : waiterTurnController;
-    const result = await controller.handleWaiterTurn(parsed.data);
+    const selection = resolveWaiterControllerSelection(request);
+    if (selection.kind === "anthropic_not_configured") {
+      return safeJsonResponse(
+        {
+          ok: false,
+          error: {
+            code: "provider_not_configured",
+            message:
+              "Anthropic is not configured for this development server.",
+          },
+        },
+        { status: 503 }
+      );
+    }
+    const result = await executeWaiterControllerSelection(
+      selection,
+      parsed.data
+    );
     return safeJsonResponse(result, { status: statusForResult(result) });
   } catch {
     return safeJsonResponse(
