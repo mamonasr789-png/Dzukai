@@ -39,6 +39,8 @@ const COPY = {
       "Anthropic šiame kūrimo serveryje nesukonfigūruotas. Užklausa nebuvo perduota teikėjui.",
     demoNotice:
       "Padavėjo ir sąskaitos užklausos šiame demonstraciniame režime nepasiekiamos.",
+    nonPersistentNotice:
+      "Demonstracinė versija — sesija gali būti atstatyta iš naujo.",
     initializing: "Ruošiamas saugus pokalbis…",
     unavailable:
       "AI padavėjo paslauga šiuo metu nepasiekiama. Krepšelis nepakeistas.",
@@ -122,6 +124,8 @@ const COPY = {
       "Anthropic is not configured on this development server. The request was not sent to a provider.",
     demoNotice:
       "Waiter and bill requests are unavailable in this demo session.",
+    nonPersistentNotice:
+      "Demo version — the session may reset and start again.",
     initializing: "Preparing a safe conversation…",
     unavailable:
       "The AI waiter is currently unavailable. Your cart was not changed.",
@@ -206,6 +210,8 @@ const COPY = {
       "Anthropic не настроен на этом сервере разработки. Запрос не был отправлен провайдеру.",
     demoNotice:
       "В демо-режиме вызов официанта и запрос счёта недоступны.",
+    nonPersistentNotice:
+      "Демонстрационная версия — сессия может сброситься и начаться заново.",
     initializing: "Подготавливаем безопасный диалог…",
     unavailable:
       "AI-официант сейчас недоступен. Корзина не изменена.",

@@ -1058,7 +1058,9 @@ test("turn route validates HTTP, returns no-store, and exposes turn conflicts sa
 
 test("turn route is blocked by the process-local production storage guard", async () => {
   const environment = process.env as Record<string, string | undefined>;
-  const previous = environment.NODE_ENV;
+  const previousNodeEnvironment = environment.NODE_ENV;
+  const previousDemoOverride = environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
+  delete environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
   environment.NODE_ENV = "production";
   try {
     const response = await postTurn(
@@ -1079,7 +1081,95 @@ test("turn route is blocked by the process-local production storage guard", asyn
       },
     });
   } finally {
-    if (previous === undefined) delete environment.NODE_ENV;
-    else environment.NODE_ENV = previous;
+    if (previousNodeEnvironment === undefined) delete environment.NODE_ENV;
+    else environment.NODE_ENV = previousNodeEnvironment;
+    if (previousDemoOverride === undefined) {
+      delete environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
+    } else {
+      environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY = previousDemoOverride;
+    }
+  }
+});
+
+test("production demo override serves demo turns and hides table sessions", async () => {
+  const environment = process.env as Record<string, string | undefined>;
+  const previousNodeEnvironment = environment.NODE_ENV;
+  const previousDemoOverride = environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
+  const previousAnthropicKey = environment.ANTHROPIC_API_KEY;
+  environment.NODE_ENV = "test";
+  delete environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
+  await resetDevelopmentRuntime();
+  const demo = await runtimeConversationStore.createSession({
+    language: "lt",
+    tableContext: null,
+  });
+  const table = await runtimeConversationStore.createSession({
+    language: "lt",
+    tableContext: {
+      restaurantId: "dzuku_ainiai",
+      tableNumber: "12-A",
+      tableTokenId: "qr_turn_demo_override",
+    },
+  });
+  assert.equal(demo.ok, true);
+  assert.equal(table.ok, true);
+  if (!demo.ok || !table.ok) return;
+
+  environment.NODE_ENV = "production";
+  environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY = "true";
+  delete environment.ANTHROPIC_API_KEY;
+  try {
+    const demoResponse = await postTurn(
+      jsonRequest(request(demo.data.sessionId, "Labas", "turn_demo_override"))
+    );
+    assert.equal(demoResponse.status, 200);
+
+    const staffResponse = await postTurn(
+      jsonRequest(
+        request(
+          demo.data.sessionId,
+          "Pakviesk padavėją",
+          "turn_demo_staff_blocked"
+        )
+      )
+    );
+    assert.equal(staffResponse.status, 200);
+    const staffBody = (await staffResponse.json()) as {
+      data: {
+        actions: Array<{ type: string }>;
+        actionLedger: Array<{ result: { code: string | null } | null }>;
+      };
+    };
+    assert.equal(
+      staffBody.data.actions.some((action) => action.type === "staff_requested"),
+      false
+    );
+    assert.equal(
+      staffBody.data.actionLedger[0]?.result?.code,
+      "table_context_required"
+    );
+
+    const tableResponse = await postTurn(
+      jsonRequest(
+        request(table.data.sessionId, "Labas", "turn_table_override_blocked")
+      )
+    );
+    assert.equal(tableResponse.status, 404);
+    const tableBody = (await tableResponse.json()) as {
+      error: { code: string };
+    };
+    assert.equal(tableBody.error.code, "session_not_found");
+  } finally {
+    environment.NODE_ENV = "test";
+    await resetDevelopmentRuntime();
+    if (previousNodeEnvironment === undefined) delete environment.NODE_ENV;
+    else environment.NODE_ENV = previousNodeEnvironment;
+    if (previousDemoOverride === undefined) {
+      delete environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
+    } else {
+      environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY = previousDemoOverride;
+    }
+    if (previousAnthropicKey === undefined) delete environment.ANTHROPIC_API_KEY;
+    else environment.ANTHROPIC_API_KEY = previousAnthropicKey;
   }
 });

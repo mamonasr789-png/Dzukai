@@ -23,9 +23,14 @@ export interface RuntimeAvailability {
 
 export function getAiWaiterRuntimeAvailability(
   nodeEnvironment = process.env.NODE_ENV,
-  storageKind: string = runtimeStorageKind
+  storageKind: string = runtimeStorageKind,
+  demoAllowInMemory = process.env.AI_WAITER_DEMO_ALLOW_IN_MEMORY
 ): RuntimeAvailability {
-  if (nodeEnvironment === "production" && storageKind === runtimeStorageKind) {
+  if (
+    nodeEnvironment === "production" &&
+    storageKind === runtimeStorageKind &&
+    demoAllowInMemory !== "true"
+  ) {
     return {
       available: false,
       code: "storage_not_configured",
@@ -34,6 +39,18 @@ export function getAiWaiterRuntimeAvailability(
     };
   }
   return { available: true };
+}
+
+export function isProductionInMemoryDemoOverride(
+  nodeEnvironment = process.env.NODE_ENV,
+  demoAllowInMemory = process.env.AI_WAITER_DEMO_ALLOW_IN_MEMORY,
+  storageKind: string = runtimeStorageKind
+): boolean {
+  return (
+    nodeEnvironment === "production" &&
+    storageKind === runtimeStorageKind &&
+    demoAllowInMemory === "true"
+  );
 }
 
 export const conversationStateStore =

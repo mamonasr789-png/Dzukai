@@ -461,6 +461,7 @@ export function AIPageClient({
   const [cart, setCart] = useState<Cart | null>(null);
   const [staffRequestsAvailable, setStaffRequestsAvailable] =
     useState(false);
+  const [sessionPersistent, setSessionPersistent] = useState(false);
   const [retryMessageId, setRetryMessageId] = useState<string | null>(null);
   const [retryModeDisplay, setRetryModeDisplay] = useState<
     "same_id" | "new_id" | null
@@ -514,6 +515,7 @@ export function AIPageClient({
       setStaffRequestsAvailable(
         snapshot.capabilities.staffRequestsAvailable
       );
+      setSessionPersistent(snapshot.capabilities.persistent);
       setSessionStatus("ready");
       return true;
     },
@@ -1137,6 +1139,12 @@ export function AIPageClient({
     ? copy.tableMode
     : copy.demoMode;
   const modeDot = staffRequestsAvailable ? "bg-green-500" : "bg-amber-500";
+  const defaultSessionNotice = [
+    !sessionPersistent ? copy.nonPersistentNotice : null,
+    !staffRequestsAvailable ? copy.demoNotice : null,
+  ]
+    .filter((notice) => notice !== null)
+    .join(" ");
   const suggestions = useMemo(() => [...copy.suggestions], [copy.suggestions]);
   const developmentProviderMessage = developmentProviderStatusText(
     copy,
@@ -1253,14 +1261,14 @@ export function AIPageClient({
         </div>
       )}
 
-      {(sessionNotice || !staffRequestsAvailable) && (
+      {(sessionNotice || defaultSessionNotice) && (
         <div className="border-b border-border/40 px-4 py-2">
           <div
             data-testid="session-notice"
             role={sessionStatus === "unavailable" ? "alert" : "status"}
             className="mx-auto max-w-lg text-xs leading-relaxed text-muted-foreground"
           >
-            {sessionNotice ?? copy.demoNotice}
+            {sessionNotice ?? defaultSessionNotice}
           </div>
         </div>
       )}

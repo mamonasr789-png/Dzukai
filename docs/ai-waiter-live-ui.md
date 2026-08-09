@@ -71,10 +71,21 @@ negative action intent, ordinals, cart actions, waiter/bill requests, allergy
 and dietary language, and unsupported modifiers in the deterministic
 development path.
 
+## Demo persistence notice
+
+Session capabilities explicitly report whether the backing runtime is
+persistent. The current process-local runtime reports `persistent: false`, and
+the UI displays a demo notice explaining that the session may reset. A missing
+stored session is replaced with a new demo session without automatically
+replaying the previous turn; allergies and preferences must be stated again.
+
 ## Development limitations
 
 The process-local session, cart, idempotency, coordination, rate-limit, and
-staff-task adapters remain development-only and are blocked in production.
+staff-task adapters remain development-only by default. The explicitly unsafe,
+temporary production demo override is documented in
+`docs/ai-waiter-foundation.md`; it permits demo sessions only and keeps all
+staff-capable behavior blocked.
 Staff requests are not delivered to the existing waiter UI. Production
 persistence, distributed coordination, POS, payments, voice, and paid-provider
 operations are outside this phase.

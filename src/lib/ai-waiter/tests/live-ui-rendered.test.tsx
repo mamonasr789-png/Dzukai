@@ -243,6 +243,7 @@ function snapshot(
     capabilities: {
       mode: table ? "table" : "demo",
       staffRequestsAvailable: table,
+      persistent: false,
     },
   };
 }
@@ -425,6 +426,10 @@ test("development provider selector defaults safely and persists an explicit mod
   const firstRender = renderPage(client, storage);
   const selector = await screen.findByTestId("development-provider-mode");
   await screen.findByTestId("waiter-input");
+  assert.match(
+    screen.getByTestId("session-notice").textContent ?? "",
+    /Demo version — the session may reset and start again\./u
+  );
   await waitFor(() =>
     assert.equal((selector as HTMLSelectElement).disabled, false)
   );

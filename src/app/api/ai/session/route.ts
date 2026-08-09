@@ -15,6 +15,7 @@ import {
   cartPort,
   conversationStateStore,
   getAiWaiterRuntimeAvailability,
+  isProductionInMemoryDemoOverride,
   rateLimitPort,
 } from "../../../../lib/ai-waiter/server/runtime.ts";
 import {
@@ -58,6 +59,7 @@ async function sessionSnapshot(
       capabilities: {
         mode: staffRequestsAvailable ? "table" : "demo",
         staffRequestsAvailable,
+        persistent: false,
       },
     }),
     { status }
@@ -68,10 +70,23 @@ async function createSession(
   request: Extract<
     DiningSessionRequest,
     { action: "create_demo_session" | "create_table_session" }
-  >
+  >,
+  demoOnly: boolean
 ): Promise<Response> {
   let tableContext = null;
   if (request.action === "create_table_session") {
+    if (demoOnly) {
+      return safeJsonResponse(
+        {
+          ok: false,
+          error: {
+            code: "invalid_table_token",
+            message: "Table sessions are unavailable in demo mode.",
+          },
+        },
+        { status: 401 }
+      );
+    }
     const secret = getTableTokenSecret();
     if (!secret) {
       return safeJsonResponse(
@@ -122,10 +137,17 @@ async function createSession(
 }
 
 async function restoreSession(
-  request: Extract<DiningSessionRequest, { action: "restore_session" }>
+  request: Extract<DiningSessionRequest, { action: "restore_session" }>,
+  demoOnly: boolean
 ): Promise<Response> {
   const state = await conversationStateStore.getSession(request.sessionId);
-  if (!state) {
+  if (
+    !state ||
+    (demoOnly &&
+      Boolean(
+        state.restaurantId || state.tableNumber || state.tableTokenId
+      ))
+  ) {
     return safeJsonResponse(
       {
         ok: false,
@@ -155,6 +177,7 @@ export async function POST(request: Request): Promise<Response> {
         { status: 503 }
       );
     }
+    const demoOnly = isProductionInMemoryDemoOverride();
 
     const json = await readLimitedJson(request, MAXIMUM_SESSION_REQUEST_BYTES);
     if (!json.ok) {
@@ -203,8 +226,8 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     return parsed.data.action === "restore_session"
-      ? restoreSession(parsed.data)
-      : createSession(parsed.data);
+      ? restoreSession(parsed.data, demoOnly)
+      : createSession(parsed.data, demoOnly);
   } catch {
     return safeJsonResponse(
       {

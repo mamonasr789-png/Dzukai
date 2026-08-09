@@ -15,6 +15,7 @@ import {
   conversationStateStore,
   deterministicWaiterTurnController,
   getAiWaiterRuntimeAvailability,
+  isProductionInMemoryDemoOverride,
   rateLimitPort,
   waiterTurnController,
 } from "../../../../lib/ai-waiter/server/runtime.ts";
@@ -156,6 +157,7 @@ export async function POST(request: Request): Promise<Response> {
         { status: 503 }
       );
     }
+    const demoOnly = isProductionInMemoryDemoOverride();
 
     const fingerprint = requestFingerprint(request);
     const ipDecision = await rateLimitPort.consume({
@@ -213,6 +215,21 @@ export async function POST(request: Request): Promise<Response> {
       parsed.data.sessionId
     );
     if (!state) {
+      return safeJsonResponse(
+        {
+          ok: false,
+          error: {
+            code: "session_not_found",
+            message: "Dining session was not found or expired.",
+          },
+        },
+        { status: 404 }
+      );
+    }
+    if (
+      demoOnly &&
+      Boolean(state.restaurantId || state.tableNumber || state.tableTokenId)
+    ) {
       return safeJsonResponse(
         {
           ok: false,

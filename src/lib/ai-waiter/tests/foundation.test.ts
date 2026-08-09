@@ -26,7 +26,9 @@ import {
 } from "../server/menuRepository.ts";
 import { InMemoryRateLimitAdapter } from "../server/rateLimitPort.ts";
 import {
+  conversationStateStore,
   getAiWaiterRuntimeAvailability,
+  isProductionInMemoryDemoOverride,
   resetDevelopmentRuntime,
 } from "../server/runtime.ts";
 import { InMemoryStaffTaskAdapter } from "../server/staffTaskPort.ts";
@@ -1438,14 +1440,25 @@ test("session creation route returns 429 after the development limit", async () 
 });
 
 test("production guard returns an explicit 503 and cannot use memory", async () => {
+  const environment = process.env as Record<string, string | undefined>;
+  const previousNodeEnvironment = environment.NODE_ENV;
+  const previousDemoOverride = environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
+  delete environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
   assert.deepEqual(getAiWaiterRuntimeAvailability("production"), {
     available: false,
     code: "storage_not_configured",
     message:
       "AI waiter persistent storage and shared production adapters are not configured.",
   });
-  const environment = process.env as Record<string, string | undefined>;
-  const previous = environment.NODE_ENV;
+  assert.equal(isProductionInMemoryDemoOverride("production", "TRUE"), false);
+  assert.equal(
+    getAiWaiterRuntimeAvailability(
+      "production",
+      "process-local-memory",
+      "TRUE"
+    ).available,
+    false
+  );
   environment.NODE_ENV = "production";
   try {
     const response = await sessionPost(
@@ -1464,7 +1477,120 @@ test("production guard returns an explicit 503 and cannot use memory", async () 
     );
     assert.equal(toolsResponse.status, 503);
   } finally {
-    if (previous === undefined) delete environment.NODE_ENV;
-    else environment.NODE_ENV = previous;
+    if (previousNodeEnvironment === undefined) delete environment.NODE_ENV;
+    else environment.NODE_ENV = previousNodeEnvironment;
+    if (previousDemoOverride === undefined) {
+      delete environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
+    } else {
+      environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY = previousDemoOverride;
+    }
+  }
+});
+
+test("exact production demo override allows only non-persistent demo sessions", async () => {
+  const environment = process.env as Record<string, string | undefined>;
+  const previousNodeEnvironment = environment.NODE_ENV;
+  const previousDemoOverride = environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
+  environment.NODE_ENV = "test";
+  delete environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
+  await resetDevelopmentRuntime();
+
+  const signedTable = await conversationStateStore.createSession({
+    language: "lt",
+    tableContext: {
+      restaurantId: "dzuku_ainiai",
+      tableNumber: "12-A",
+      tableTokenId: "qr_demo_override_blocked",
+    },
+  });
+  assert.equal(signedTable.ok, true);
+  if (!signedTable.ok) return;
+
+  environment.NODE_ENV = "production";
+  environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY = "true";
+  try {
+    assert.deepEqual(getAiWaiterRuntimeAvailability(), { available: true });
+    assert.equal(isProductionInMemoryDemoOverride(), true);
+
+    const tableCreation = await sessionPost(
+      jsonRequest("http://test/api/ai/session", {
+        action: "create_table_session",
+        language: "lt",
+        tableToken: "payload_payload.signature_signature",
+      })
+    );
+    assert.equal(tableCreation.status, 401);
+
+    const tableRestore = await sessionPost(
+      jsonRequest("http://test/api/ai/session", {
+        action: "restore_session",
+        sessionId: signedTable.data.sessionId,
+      })
+    );
+    assert.equal(tableRestore.status, 404);
+
+    const demo = await sessionPost(
+      jsonRequest("http://test/api/ai/session", {
+        action: "create_demo_session",
+        language: "lt",
+      })
+    );
+    assert.equal(demo.status, 201);
+    const demoBody = (await demo.json()) as {
+      state: ConversationState;
+      capabilities: {
+        mode: string;
+        staffRequestsAvailable: boolean;
+        persistent: boolean;
+      };
+    };
+    assert.deepEqual(demoBody.capabilities, {
+      mode: "demo",
+      staffRequestsAvailable: false,
+      persistent: false,
+    });
+
+    const viewCart = await toolsPost(
+      jsonRequest("http://test/api/ai/tools", {
+        sessionId: demoBody.state.sessionId,
+        toolName: "view_cart",
+        input: {},
+      })
+    );
+    assert.equal(viewCart.status, 200);
+
+    for (const toolName of ["request_waiter", "request_bill"] as const) {
+      const staffAction = await toolsPost(
+        jsonRequest("http://test/api/ai/tools", {
+          sessionId: demoBody.state.sessionId,
+          toolName,
+          input: { idempotencyKey: `demo_${toolName}_blocked` },
+        })
+      );
+      assert.equal(staffAction.status, 400);
+      const staffBody = (await staffAction.json()) as {
+        error: { code: string };
+      };
+      assert.equal(staffBody.error.code, "table_context_required");
+    }
+
+    const tableTool = await toolsPost(
+      jsonRequest("http://test/api/ai/tools", {
+        sessionId: signedTable.data.sessionId,
+        toolName: "view_cart",
+        input: {},
+      })
+    );
+    assert.equal(tableTool.status, 404);
+  } finally {
+    environment.NODE_ENV = "test";
+    await resetDevelopmentRuntime();
+    if (previousNodeEnvironment === undefined) delete environment.NODE_ENV;
+    else environment.NODE_ENV = previousNodeEnvironment;
+    if (previousDemoOverride === undefined) {
+      delete environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY;
+    } else {
+      environment.AI_WAITER_DEMO_ALLOW_IN_MEMORY = previousDemoOverride;
+    }
   }
 });

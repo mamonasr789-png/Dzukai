@@ -141,6 +141,7 @@ test("live client creates a demo session and restores its authoritative cart", a
   const { storage, established, api } = await createDemo();
   assert.equal(established.source, "created_demo");
   assert.equal(established.snapshot.capabilities.staffRequestsAvailable, false);
+  assert.equal(established.snapshot.capabilities.persistent, false);
   assert.equal(
     readStoredSessionId(storage),
     established.snapshot.state.sessionId
@@ -683,6 +684,7 @@ test("session client keeps table tokens and session capabilities out of request 
     capabilities: {
       mode: "demo" as const,
       staffRequestsAvailable: false,
+      persistent: false,
     },
   };
   const transport = (async (

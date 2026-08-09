@@ -1,3 +1,4 @@
+import { ToolExecutionRequestSchema } from "../../../../lib/ai-waiter/schemas.ts";
 import {
   methodNotAllowedResponse,
   optionsResponse,
@@ -6,7 +7,9 @@ import {
 } from "../../../../lib/ai-waiter/server/http.ts";
 import { requestFingerprint } from "../../../../lib/ai-waiter/server/rateLimitPort.ts";
 import {
+  conversationStateStore,
   getAiWaiterRuntimeAvailability,
+  isProductionInMemoryDemoOverride,
   rateLimitPort,
   safeToolRegistry,
 } from "../../../../lib/ai-waiter/server/runtime.ts";
@@ -57,6 +60,7 @@ export async function POST(request: Request): Promise<Response> {
         { status: 503 }
       );
     }
+    const demoOnly = isProductionInMemoryDemoOverride();
 
     const fingerprint = requestFingerprint(request);
     const ipRateDecision = await rateLimitPort.consume({
@@ -90,6 +94,46 @@ export async function POST(request: Request): Promise<Response> {
         { ok: false, error: { code: json.code, message: json.message } },
         { status: json.status }
       );
+    }
+    if (demoOnly) {
+      const parsed = ToolExecutionRequestSchema.safeParse(json.value);
+      if (parsed.success) {
+        const state = await conversationStateStore.getSession(
+          parsed.data.sessionId
+        );
+        if (
+          state &&
+          Boolean(state.restaurantId || state.tableNumber || state.tableTokenId)
+        ) {
+          return safeJsonResponse(
+            {
+              ok: false,
+              toolName: parsed.data.toolName,
+              error: {
+                code: "session_not_found",
+                message: "Dining session was not found or expired.",
+              },
+            },
+            { status: 404 }
+          );
+        }
+        if (
+          parsed.data.toolName === "request_waiter" ||
+          parsed.data.toolName === "request_bill"
+        ) {
+          return safeJsonResponse(
+            {
+              ok: false,
+              toolName: parsed.data.toolName,
+              error: {
+                code: "table_context_required",
+                message: "Staff requests are unavailable in demo mode.",
+              },
+            },
+            { status: 400 }
+          );
+        }
+      }
     }
     const result = await safeToolRegistry.execute(json.value, {
       requestFingerprint: fingerprint,

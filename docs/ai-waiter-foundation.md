@@ -220,8 +220,8 @@ process-local implementation, they return HTTP 503:
 }
 ```
 
-There is no environment-variable bypass that makes the memory adapter appear
-production-safe. Production enablement requires code/configuration selecting:
+Normal production behavior has no implicit fallback to process-local memory.
+Production enablement requires code/configuration selecting:
 
 - shared persistent conversation/cart/idempotency storage;
 - signed table-token secret management;
@@ -229,6 +229,27 @@ production-safe. Production enablement requires code/configuration selecting:
 - a real shared staff-task adapter visible to staff.
 
 This foundation does not claim Vercel readiness.
+
+### Temporary Vercel demo override
+
+For the temporary client demo only, add this exact server-side environment
+variable to the Vercel Production environment:
+
+```text
+AI_WAITER_DEMO_ALLOW_IN_MEMORY=true
+```
+
+Redeploy the Vercel project after adding or changing the variable. Vercel must
+build and start a new deployment before the setting takes effect.
+
+The value is case-sensitive and only the exact string `true` enables the
+override. When enabled in production, the process-local runtime accepts demo
+sessions only. It does not verify or accept table tokens, restore or operate on
+signed-table sessions, or allow `request_waiter` / `request_bill`. Sessions are
+reported to the client as demo and non-persistent, and the UI warns that a
+serverless instance reset can start a fresh session. The override does not make
+the memory adapter production-safe; remove the variable and redeploy after the
+presentation to restore the normal HTTP 503 guard.
 
 ## Rate limits
 

@@ -622,6 +622,7 @@ export const DiningSessionCapabilitiesSchema = z
   .object({
     mode: z.enum(["demo", "table"]),
     staffRequestsAvailable: z.boolean(),
+    persistent: z.boolean(),
   })
   .strict();
 export type DiningSessionCapabilities = z.infer<
