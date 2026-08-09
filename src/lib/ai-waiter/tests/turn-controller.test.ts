@@ -21,6 +21,11 @@ import {
   resetDevelopmentRuntime,
 } from "../server/runtime.ts";
 import { InMemoryStaffTaskAdapter } from "../server/staffTaskPort.ts";
+import {
+  menuCategoryForMessage,
+  messageRequestsAnotherRecommendation,
+  messageUsesPriorReference,
+} from "../server/stateExtraction.ts";
 import { SafeToolRegistry } from "../server/toolRegistry.ts";
 import { WaiterTurnController } from "../server/turnController.ts";
 import { InMemoryTurnIdempotencyStore } from "../server/turnIdempotencyStore.ts";
@@ -110,6 +115,34 @@ function request(
   return { sessionId, message, clientTurnId };
 }
 
+test("LT, EN, and RU category and continuation vocabulary is recognized deterministically", () => {
+  for (const phrase of [
+    "Drink",
+    "a drink",
+    "drinks",
+    "beverage",
+    "gėrimas",
+    "gėrimų",
+    "noriu gėrimo",
+    "напиток",
+    "напитки",
+  ]) {
+    assert.equal(menuCategoryForMessage(phrase), "gerimai", phrase);
+  }
+  for (const phrase of [
+    "Another",
+    "another one",
+    "something else",
+    "dar",
+    "dar vieną",
+    "kitą",
+    "другой",
+  ]) {
+    assert.equal(messageRequestsAnotherRecommendation(phrase), true, phrase);
+    assert.equal(messageUsesPriorReference(phrase), true, phrase);
+  }
+});
+
 test("grounded Lithuanian recommendation uses real products, official prices, and budget", async () => {
   const harness = createHarness();
   const session = await createSession(harness);
@@ -176,6 +209,256 @@ test("ordinal reference adds the second grounded product through the registry", 
     ["u2"]
   );
   assert.equal(result.data.cart.lines[0].product.officialUnitPrice, 6.2);
+});
+
+test("English drink category, ordinal add, and another stay on the safe server flow", async () => {
+  const harness = createHarness(
+    new ScriptedTestAIProvider([
+      {
+        kind: "final",
+        message: "Would you like food, drinks, or help with your order?",
+        referencedProductIds: [],
+        stateUpdate: { stage: "discovering_preferences" },
+      },
+      new Error("provider unavailable after category prompt"),
+      new Error("provider unavailable for ordinal add"),
+      new Error("provider unavailable for continuation"),
+    ])
+  );
+  const session = await createSession(harness, "en");
+  const opener = await harness.controller.handleWaiterTurn(
+    request(
+      session.sessionId,
+      "What do you recommend?",
+      "turn_drink_en_open"
+    )
+  );
+  assert.equal(opener.ok, true);
+  if (!opener.ok) return;
+  assert.deepEqual(opener.data.references, []);
+  assert.match(opener.data.message, /food.*drinks.*order/iu);
+
+  const drinks = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "Drink", "turn_drink_en_category")
+  );
+  assert.equal(drinks.ok, true);
+  if (!drinks.ok) return;
+  assert.equal(drinks.data.fallbackUsed, true);
+  assert.ok(drinks.data.references.length > 0);
+  assert.doesNotMatch(drinks.data.message, /how can i help/iu);
+  for (const reference of drinks.data.references) {
+    const product = await harness.menuRepository.getProductDetails(
+      reference.productId
+    );
+    assert.equal(product?.category, "gerimai");
+    assert.equal(reference.officialUnitPrice, product?.officialUnitPrice);
+  }
+
+  const first = drinks.data.references[0];
+  assert.ok(first.referenceSetId);
+  assert.equal(first.ordinal, 0);
+  if (!first.referenceSetId || first.ordinal === undefined) return;
+  const added = await harness.controller.handleWaiterTurn({
+    ...request(
+      session.sessionId,
+      "Add recommendation 1",
+      "turn_drink_en_add"
+    ),
+    selectionHint: {
+      actionType: "add_to_cart",
+      referenceSetId: first.referenceSetId,
+      productId: first.productId,
+      ordinal: first.ordinal,
+    },
+  });
+  assert.equal(added.ok, true);
+  if (!added.ok) return;
+  assert.equal(added.data.cart.revision, 1);
+  assert.equal(added.data.cart.lines[0]?.productId, first.productId);
+  assert.equal(
+    added.data.cart.lines[0]?.product.officialUnitPrice,
+    first.officialUnitPrice
+  );
+
+  const another = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "another", "turn_drink_en_another")
+  );
+  assert.equal(another.ok, true);
+  if (!another.ok) return;
+  assert.ok(another.data.references.length > 0);
+  assert.doesNotMatch(another.data.message, /how can i help/iu);
+  const previousIds = new Set(
+    drinks.data.references.map((reference) => reference.productId)
+  );
+  for (const reference of another.data.references) {
+    const product = await harness.menuRepository.getProductDetails(
+      reference.productId
+    );
+    assert.equal(product?.category, "gerimai");
+    assert.equal(previousIds.has(reference.productId), false);
+  }
+  assert.equal(another.data.cart.revision, 1);
+  assert.equal(another.data.cart.lines[0]?.productId, first.productId);
+});
+
+test("English article-form drink request and follow-up keep category context", async () => {
+  const harness = createHarness();
+  const session = await createSession(harness, "en");
+  const drinks = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "a drink", "turn_drink_article_01")
+  );
+  assert.equal(drinks.ok, true);
+  if (!drinks.ok) return;
+  assert.ok(drinks.data.references.length > 0);
+
+  const another = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "another one", "turn_drink_article_02")
+  );
+  assert.equal(another.ok, true);
+  if (!another.ok) return;
+  assert.ok(another.data.references.length > 0);
+  assert.doesNotMatch(another.data.message, /how can i help/iu);
+  for (const reference of another.data.references) {
+    const product = await harness.menuRepository.getProductDetails(
+      reference.productId
+    );
+    assert.equal(product?.category, "gerimai");
+  }
+});
+
+test("Lithuanian drink category, safe ordinal add, and Dar rotate recommendations", async () => {
+  const harness = createHarness();
+  const session = await createSession(harness, "lt");
+  const opener = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "Ką rekomenduotum?", "turn_drink_lt_open")
+  );
+  assert.equal(opener.ok, true);
+  if (!opener.ok) return;
+  assert.ok(opener.data.references.length > 0);
+
+  const drinks = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "Gėrimo", "turn_drink_lt_category")
+  );
+  assert.equal(drinks.ok, true);
+  if (!drinks.ok) return;
+  assert.ok(drinks.data.references.length > 0);
+  const first = drinks.data.references[0];
+  assert.ok(first.referenceSetId);
+  assert.equal(first.ordinal, 0);
+  if (!first.referenceSetId || first.ordinal === undefined) return;
+
+  const added = await harness.controller.handleWaiterTurn({
+    ...request(session.sessionId, "Pridėk pirmą", "turn_drink_lt_add"),
+    selectionHint: {
+      actionType: "add_to_cart",
+      referenceSetId: first.referenceSetId,
+      productId: first.productId,
+      ordinal: first.ordinal,
+    },
+  });
+  assert.equal(added.ok, true);
+  if (!added.ok) return;
+  assert.equal(added.data.cart.revision, 1);
+  assert.equal(added.data.cart.lines[0]?.productId, first.productId);
+
+  const another = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "Dar", "turn_drink_lt_another")
+  );
+  assert.equal(another.ok, true);
+  if (!another.ok) return;
+  assert.ok(another.data.references.length > 0);
+  assert.doesNotMatch(another.data.message, /kuo galeciau padeti/iu);
+  for (const reference of another.data.references) {
+    const product = await harness.menuRepository.getProductDetails(
+      reference.productId
+    );
+    assert.equal(product?.category, "gerimai");
+  }
+});
+
+test("Russian drink category, safe ordinal add, and follow-up retain context", async () => {
+  const harness = createHarness();
+  const session = await createSession(harness, "ru");
+  const opener = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "Что порекомендуете?", "turn_drink_ru_open")
+  );
+  assert.equal(opener.ok, true);
+  if (!opener.ok) return;
+  assert.ok(opener.data.references.length > 0);
+
+  const drinks = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "Напитки", "turn_drink_ru_category")
+  );
+  assert.equal(drinks.ok, true);
+  if (!drinks.ok) return;
+  assert.ok(drinks.data.references.length > 0);
+  const first = drinks.data.references[0];
+  assert.ok(first.referenceSetId);
+  assert.equal(first.ordinal, 0);
+  if (!first.referenceSetId || first.ordinal === undefined) return;
+
+  const added = await harness.controller.handleWaiterTurn({
+    ...request(session.sessionId, "Добавь первое", "turn_drink_ru_add"),
+    selectionHint: {
+      actionType: "add_to_cart",
+      referenceSetId: first.referenceSetId,
+      productId: first.productId,
+      ordinal: first.ordinal,
+    },
+  });
+  assert.equal(added.ok, true);
+  if (!added.ok) return;
+  assert.equal(added.data.cart.revision, 1);
+  assert.equal(added.data.cart.lines[0]?.productId, first.productId);
+
+  const another = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "Другой", "turn_drink_ru_another")
+  );
+  assert.equal(another.ok, true);
+  if (!another.ok) return;
+  assert.ok(another.data.references.length > 0);
+  assert.doesNotMatch(another.data.message, /с чем помочь/iu);
+  for (const reference of another.data.references) {
+    const product = await harness.menuRepository.getProductDetails(
+      reference.productId
+    );
+    assert.equal(product?.category, "gerimai");
+  }
+});
+
+test("food categories still recommend while greetings and stale ordinals remain non-mutating", async () => {
+  const foodHarness = createHarness();
+  const foodSession = await createSession(foodHarness, "en");
+  const food = await foodHarness.controller.handleWaiterTurn(
+    request(foodSession.sessionId, "I want food", "turn_food_still_works")
+  );
+  assert.equal(food.ok, true);
+  if (!food.ok) return;
+  assert.ok(food.data.references.length > 0);
+  assert.equal(food.data.cart.revision, 0);
+
+  const greetingHarness = createHarness();
+  const greetingSession = await createSession(greetingHarness, "en");
+  const greeting = await greetingHarness.controller.handleWaiterTurn(
+    request(greetingSession.sessionId, "Hello", "turn_greeting_no_rec")
+  );
+  assert.equal(greeting.ok, true);
+  if (!greeting.ok) return;
+  assert.deepEqual(greeting.data.references, []);
+  assert.equal(greeting.data.cart.revision, 0);
+
+  const stale = await greetingHarness.controller.handleWaiterTurn(
+    request(
+      greetingSession.sessionId,
+      "Add recommendation 1",
+      "turn_stale_ordinal"
+    )
+  );
+  assert.equal(stale.ok, true);
+  if (!stale.ok) return;
+  assert.equal(stale.data.status, "clarification_required");
+  assert.equal(stale.data.cart.revision, 0);
+  assert.deepEqual(stale.data.cart.lines, []);
 });
 
 test("ambiguous demonstrative asks one clarification and does not mutate", async () => {

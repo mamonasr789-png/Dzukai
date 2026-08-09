@@ -17,6 +17,63 @@ function normalize(value: string): string {
     .replace(/[’']/gu, "");
 }
 
+const menuCategoryPatterns: ReadonlyArray<{
+  category: string;
+  pattern: RegExp;
+}> = [
+  { category: "alus", pattern: /\b(alus|alaus|alu|beers?)\b|пив/u },
+  { category: "vynas", pattern: /\b(vyn\w*|wines?)\b|вин(?:о|а|у|ом)?/u },
+  {
+    category: "kokteiliai",
+    pattern: /\b(kokteil\w*|cocktails?)\b|коктейл/u,
+  },
+  { category: "sidras", pattern: /\b(sidr\w*|ciders?)\b|сидр/u },
+  {
+    category: "limonadai",
+    pattern: /\b(limonad\w*|lemonades?)\b|лимонад/u,
+  },
+  { category: "kava", pattern: /\b(kav\w*|coffee|tea)\b|кофе|ча[йя]/u },
+  { category: "picos", pattern: /\b(pic\w*|pizzas?)\b|пицц/u },
+  { category: "salotos", pattern: /\b(salot\w*|salads?)\b|салат/u },
+  { category: "sriubos", pattern: /\b(sriub\w*|soups?)\b|суп/u },
+  { category: "desertai", pattern: /\b(desert\w*|desserts?)\b|десерт/u },
+  { category: "wok", pattern: /\bwok\b|вок/u },
+  {
+    category: "bulviniai",
+    pattern: /\b(bulvin\w*|potato(?: dishes?)?)\b|картоф/u,
+  },
+  {
+    category: "grilinis",
+    pattern: /\b(gril\w*|grill(?:ed)?)\b|грил/u,
+  },
+  {
+    category: "vaikiskas",
+    pattern: /\b(vaik\w*|kids?(?: menu)?|children(?:s menu)?)\b|детск/u,
+  },
+  {
+    category: "gerimai",
+    pattern:
+      /\b(?:a\s+)?(?:drinks?|beverages?)\b|\bgerim(?:as|o|u|a|ai|us|ams|ais)?\b|напит(?:ок|ка|ки|ков|ку|ками)?/u,
+  },
+];
+
+/** Maps explicit customer category wording to an official menu category. */
+export function menuCategoryForMessage(message: string): string | null {
+  const normalized = normalize(message);
+  return (
+    menuCategoryPatterns.find(({ pattern }) => pattern.test(normalized))
+      ?.category ?? null
+  );
+}
+
+/** True only for wording that asks to continue the current recommendation set. */
+export function messageRequestsAnotherRecommendation(message: string): boolean {
+  const normalized = normalize(message);
+  return /\b(another(?: one)?|something else|different one|more options?)\b|\b(dar(?: viena)?|kit(?:a|ka|as|ok\w*))\b|друг(?:ои|ую|ое|ие)|ещ[её]/u.test(
+    normalized
+  );
+}
+
 export function detectLanguage(
   message: string,
   current: SupportedLanguage
@@ -24,7 +81,7 @@ export function detectLanguage(
   if (/[а-яё]/iu.test(message)) return "ru";
   const normalized = normalize(message);
   if (
-    /\b(speak english|in english|the|please|want|would|allergic|vegetarian|under|something|add|remove|hello|hi|hey)\b/u.test(
+    /\b(speak english|in english|the|please|want|would|recommend|allergic|vegetarian|under|something|food|drinks?|beverages?|another|else|add|remove|hello|hi|hey)\b/u.test(
       normalized
     )
   ) {
@@ -32,7 +89,7 @@ export function detectLanguage(
   }
   if (
     /[ąčęėįšųūž]/iu.test(message) ||
-    /\b(kalbek lietuviskai|noriu|prasau|pridek|parodyk|geriau|esu|iki|sotus|sotaus)\b/u.test(
+    /\b(kalbek lietuviskai|noriu|prasau|pridek|parodyk|rekomend\w*|gerim\w*|dar|kita|geriau|esu|iki|sotus|sotaus)\b/u.test(
       normalized
     )
   ) {
@@ -93,8 +150,15 @@ const ingredientTerms = [
 ];
 
 export function messageUsesPriorReference(message: string): boolean {
-  return /\b(sita|sitas|this one|that one|antr\w*|second|pirm\w*|first|toki pat|same)\b|эт[оа]|перв|втор|трет|тако[йе]\s+же|предлож/u.test(
-    normalize(message)
+  const normalized = normalize(message);
+  return (
+    messageRequestsAnotherRecommendation(message) ||
+    /\b(sita|sitas|this one|that one|antr\w*|second|pirm\w*|first|toki pat|same)\b|эт[оа]|перв|втор|трет|тако[йе]\s+же|предлож/u.test(
+      normalized
+    ) ||
+    /recommendation[^\d]{0,12}[1-9]|[1-9][^\d]{0,12}recommendation/u.test(
+      normalized
+    )
   );
 }
 
@@ -111,10 +175,24 @@ export function extractTurnState(
 ): ExtractedTurnState {
   const normalized = normalize(message);
   const operations: ConversationStateDelta["operations"] = [];
+  const menuCategory = menuCategoryForMessage(message);
+  const contextualFollowUp = messageRequestsAnotherRecommendation(message);
   const language =
     requestedLanguage ?? detectLanguage(message, state.language);
   if (language !== state.language) {
     operations.push({ kind: "set_language", language });
+  }
+
+  if (menuCategory) {
+    operations.push({
+      kind: "clear_temporary_preference",
+      field: "preferredCategories",
+    });
+    operations.push({
+      kind: "set_temporary_preference",
+      field: "preferredCategories",
+      value: menuCategory,
+    });
   }
 
   const budget = extractBudget(message);
@@ -290,9 +368,19 @@ export function extractTurnState(
     stage = "greeting";
   }
   if (
-    /\b(noriu|want|recommend|pasiulyk|parodyk|something|kazko)\b|хочу|рекоменд|посовет|покаж/u.test(
+    /\b(noriu|want|recommend|rekomend\w*|pasiulyk|parodyk|something|kazko)\b|хочу|рекоменд|посовет|покаж/u.test(
       normalized
     )
+  ) {
+    intent = "recommendation";
+    stage = "discovering_preferences";
+  }
+  if (
+    menuCategory ||
+    (contextualFollowUp &&
+      (state.latestReferencedProductIds.length > 0 ||
+        state.preferences.preferredCategories.length > 0 ||
+        state.temporaryPreferences.preferredCategories.length > 0))
   ) {
     intent = "recommendation";
     stage = "discovering_preferences";

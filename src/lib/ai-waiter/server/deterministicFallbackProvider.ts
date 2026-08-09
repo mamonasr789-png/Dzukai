@@ -7,6 +7,10 @@ import type {
 } from "./aiProvider.ts";
 import type { ProviderStep } from "./providerTooling.ts";
 import { safeLegacyGreeting } from "./legacyDeterministicBoundary.ts";
+import {
+  menuCategoryForMessage,
+  messageRequestsAnotherRecommendation,
+} from "./stateExtraction.ts";
 
 function normalize(value: string): string {
   return value
@@ -23,6 +27,50 @@ function referencedOrdinal(message: string): number {
   if (/\b(antr\w*|second)\b|втор/u.test(message)) return 1;
   if (/\b(treci\w*|third)\b|трет/u.test(message)) return 2;
   return 0;
+}
+
+function recommendationCategory(request: AIProviderStepRequest): {
+  category: string | undefined;
+  contextualFollowUp: boolean;
+  explicitCategory: boolean;
+} {
+  const explicitCategory = menuCategoryForMessage(
+    request.context.customerMessage
+  );
+  const contextualFollowUp = messageRequestsAnotherRecommendation(
+    request.context.customerMessage
+  );
+  if (explicitCategory) {
+    return {
+      category: explicitCategory,
+      contextualFollowUp,
+      explicitCategory: true,
+    };
+  }
+  if (!contextualFollowUp) {
+    return {
+      category: undefined,
+      contextualFollowUp: false,
+      explicitCategory: false,
+    };
+  }
+
+  const storedCategory =
+    request.context.state.temporaryPreferences.preferredCategories.at(-1) ??
+    request.context.state.preferences.preferredCategories.at(-1);
+  const referencedCategories = request.context.state.latestReferencedProductIds
+    .map((productId) =>
+      request.context.relevantProducts.find(
+        (product) => product.productId === productId
+      )?.category
+    )
+    .filter((category): category is string => Boolean(category));
+
+  return {
+    category: storedCategory ?? referencedCategories[0],
+    contextualFollowUp,
+    explicitCategory: false,
+  };
 }
 
 const text = {
@@ -231,6 +279,7 @@ export class DeterministicFallbackProvider implements AIProvider {
     const { context } = request;
     const copy = text[context.language];
     const message = normalize(context.customerMessage);
+    const categoryRequest = recommendationCategory(request);
     if (/\b(saskait\w*|bill)\b|сч[её]т/u.test(message)) {
       return Promise.resolve({
         kind: "tool_requests",
@@ -442,6 +491,40 @@ export class DeterministicFallbackProvider implements AIProvider {
       } satisfies ProviderStep);
     }
 
+    const recommendationRequested =
+      categoryRequest.explicitCategory ||
+      (categoryRequest.contextualFollowUp &&
+        (Boolean(categoryRequest.category) ||
+          context.state.latestReferencedProductIds.length > 0)) ||
+      /\b(noriu|want|recommend|rekomend\w*|pasiulyk|parodyk|something|kazko|vegetar\w*|beef|jautien\w*)\b|хочу|рекоменд|посовет|покаж|вегетари|говядин/u.test(
+        message
+      );
+
+    if (recommendationRequested) {
+      return Promise.resolve({
+        kind: "tool_requests",
+        toolCalls: [
+          {
+            callId: "fallback_recommend",
+            toolName: "recommend_products",
+            input: {
+              ...(categoryRequest.category
+                ? { category: categoryRequest.category }
+                : {}),
+              ...(context.state.budget
+                ? { maxPrice: context.state.budget }
+                : {}),
+              excludeProductIds:
+                context.state.latestReferencedProductIds,
+              dietaryRequirements: context.state.dietaryRequirements,
+              allergies: context.state.allergies,
+              limit: /\b(du|dvi|two)\b/u.test(message) ? 2 : 3,
+            },
+          },
+        ],
+      } satisfies ProviderStep);
+    }
+
     if (context.restaurantKnowledge.length > 0) {
       return Promise.resolve({
         kind: "final",
@@ -457,31 +540,6 @@ export class DeterministicFallbackProvider implements AIProvider {
           proposedValue: record.value,
           provenance: "restaurant_knowledge" as const,
         })),
-      } satisfies ProviderStep);
-    }
-
-    if (
-      /\b(noriu|want|recommend|pasiulyk|parodyk|something|kazko|vegetar\w*|beef|jautien\w*)\b|хочу|рекоменд|посовет|покаж|вегетари|говядин/u.test(
-        message
-      )
-    ) {
-      return Promise.resolve({
-        kind: "tool_requests",
-        toolCalls: [
-          {
-            callId: "fallback_recommend",
-            toolName: "recommend_products",
-            input: {
-              ...(context.state.budget
-                ? { maxPrice: context.state.budget }
-                : {}),
-              excludeProductIds: [],
-              dietaryRequirements: context.state.dietaryRequirements,
-              allergies: context.state.allergies,
-              limit: /\b(du|dvi|two)\b/u.test(message) ? 2 : 3,
-            },
-          },
-        ],
       } satisfies ProviderStep);
     }
 

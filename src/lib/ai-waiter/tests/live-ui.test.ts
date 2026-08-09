@@ -1305,6 +1305,10 @@ test("live /ai source has no old brain, ADD tag, tool endpoint, or browser cart 
     new URL("../client/liveWaiterClient.ts", import.meta.url),
     "utf8"
   );
+  const fallbackSource = await readFile(
+    new URL("../server/deterministicFallbackProvider.ts", import.meta.url),
+    "utf8"
+  );
   assert.doesNotMatch(source, /@\/lib\/ai-engine/u);
   assert.doesNotMatch(source, /generateReply|updateContext|emptyContext/u);
   assert.doesNotMatch(source, /\[ADD:|extractAddIds|stripAddTags/u);
@@ -1312,6 +1316,10 @@ test("live /ai source has no old brain, ADD tag, tool endpoint, or browser cart 
   assert.doesNotMatch(
     source,
     /useCartStore\([^)]*\b(addItem|removeItem|updateQuantity|clearCart)\b/u
+  );
+  assert.doesNotMatch(
+    fallbackSource,
+    /(?:useCartStore|@\/lib\/store|\.\.\/\.\.\/store)/u
   );
   assert.doesNotMatch(
     `${source}\n${clientSource}`,
