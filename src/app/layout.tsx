@@ -4,6 +4,7 @@ import "./globals.css";
 import BottomNav from "@/components/BottomNav";
 import GuestWelcome from "@/components/GuestWelcome";
 import AppShell from "@/components/AppShell";
+import SyncBridge from "@/components/SyncBridge";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -56,6 +57,7 @@ export default function RootLayout({
         <AppShell>{children}</AppShell>
         <BottomNav />
         <GuestWelcome />
+        <SyncBridge />
       </body>
     </html>
   );

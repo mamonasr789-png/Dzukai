@@ -50,6 +50,8 @@ export interface Order {
    * Optional for backward compat — old orders default to "together".
    */
   servingPreference?: ServingPreference;
+  /** Last modification time — powers cross-device last-write-wins sync. */
+  updatedAt?: string;
   /** Set to true when customer pays for this specific order (single-order scope). */
   isPaid?: boolean;
   /** ISO timestamp of when the order was paid — powers the receipt confirmation. */
@@ -157,10 +159,12 @@ export function createOrder(params: {
   language?: string;
   servingPreference?: ServingPreference;
 }): Order {
+  const createdAt = new Date().toISOString();
   const order: Order = {
     id: generateId(),
     tableNumber: params.tableNumber,
-    createdAt: new Date().toISOString(),
+    createdAt,
+    updatedAt: createdAt,
     status: "NEW",
     items: params.items.map((i) => ({ ...i, itemStatus: "NEW" })),
     total: params.total,
@@ -199,6 +203,7 @@ export function updateItemStatus(
     ...order,
     items: updatedItems,
     status: deriveOrderStatus(updatedItems, order.servingPreference),
+    updatedAt: new Date().toISOString(),
   };
   orders[idx] = updatedOrder;
   writeAll(orders);
@@ -215,6 +220,7 @@ export function updateOrderStatus(id: string, status: OrderStatus): Order | unde
     ...order,
     status,
     items: order.items.map((i) => ({ ...i, itemStatus: status })),
+    updatedAt: new Date().toISOString(),
   };
   writeAll(orders);
   return orders[idx];
@@ -240,6 +246,7 @@ export function startItemsDelivery(orderId: string, productIds: string[]): Order
     ...order,
     items: updatedItems,
     status: deriveOrderStatus(updatedItems, order.servingPreference),
+    updatedAt: new Date().toISOString(),
   };
   writeAll(orders);
   return orders[idx];
@@ -265,6 +272,7 @@ export function completeItemsDelivery(orderId: string, productIds: string[]): Or
     ...order,
     items: updatedItems,
     status: deriveOrderStatus(updatedItems, order.servingPreference),
+    updatedAt: new Date().toISOString(),
   };
   writeAll(orders);
   return orders[idx];
@@ -300,7 +308,7 @@ export function markOrderPaid(id: string): Order | undefined {
   const idx = orders.findIndex((o) => o.id === id);
   if (idx === -1) return undefined;
   // Keep the first paid timestamp if already set (idempotent re-pay is a no-op).
-  orders[idx] = { ...orders[idx], isPaid: true, paidAt: orders[idx].paidAt ?? new Date().toISOString() };
+  orders[idx] = { ...orders[idx], isPaid: true, paidAt: orders[idx].paidAt ?? new Date().toISOString(), updatedAt: new Date().toISOString() };
   writeAll(orders);
   return orders[idx];
 }
