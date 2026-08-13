@@ -7,8 +7,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isKitchen = pathname.startsWith("/kitchen");
   const isAdmin = pathname.startsWith("/admin");
   const isWaiter = pathname.startsWith("/waiter");
+  const isStaffHub = pathname.startsWith("/app");
 
-  if (isKitchen || isAdmin || isWaiter) {
+  if (isKitchen || isAdmin || isWaiter || isStaffHub) {
     return <>{children}</>;
   }
 
