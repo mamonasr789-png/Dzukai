@@ -1,0 +1,8 @@
+# Keep line endings consistent between Mac and Windows checkouts.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.db binary
