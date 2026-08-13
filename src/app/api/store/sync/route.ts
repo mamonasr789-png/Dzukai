@@ -46,7 +46,7 @@ function unauthorized(request: Request): boolean {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const store = getSyncStore();
+  const store = await getSyncStore();
   if (!store) {
     return Response.json(
       { ok: false, error: "sync_not_configured" },
@@ -78,8 +78,8 @@ export async function POST(request: Request): Promise<Response> {
   for (const collection of SYNC_COLLECTIONS) {
     const req = parsed.data.collections[collection as SyncCollection];
     if (!req) continue;
-    if (req.push.length > 0) store.push(collection, req.push);
-    const { records, watermark } = store.pull(collection, req.since);
+    if (req.push.length > 0) await store.push(collection, req.push);
+    const { records, watermark } = await store.pull(collection, req.since);
     result[collection] = {
       records: records.map(({ id, data, updatedAt }) => ({ id, data, updatedAt })),
       watermark,

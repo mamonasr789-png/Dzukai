@@ -1,17 +1,19 @@
 import "server-only";
 
-import { mkdirSync } from "node:fs";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { neon } from "@neondatabase/serverless";
 
 /**
  * Shared order/session/task store — the "one notebook on the bar".
  *
  * Every device pushes its local writes here and pulls everyone else's, so the
  * guest's phone, the kitchen tablet and the waiter screen finally see the same
- * data. SQLite via node:sqlite: real SQL, zero npm dependencies, one file on
- * disk. When multi-restaurant/auth arrive, this module is the swap point for
- * Postgres — the API route and the client engine never touch SQL directly.
+ * data.
+ *
+ * Two backends behind one interface:
+ * - Postgres (Neon) whenever DATABASE_URL / POSTGRES_URL is set — this is what
+ *   Vercel production uses.
+ * - SQLite via node:sqlite as the local-dev fallback (zero setup, one file on
+ *   disk). Loaded lazily so runtimes without node:sqlite never touch it.
  *
  * Conflict rule: last-write-wins per record by the client's updatedAt stamp.
  * Fine for MVP volume; revisit alongside real accounts.
@@ -32,14 +34,106 @@ export interface PulledRecord extends SyncRecord {
   seq: number;
 }
 
+export interface SyncStore {
+  push(collection: SyncCollection, records: SyncRecord[]): Promise<number>;
+  pull(
+    collection: SyncCollection,
+    since: number
+  ): Promise<{ records: PulledRecord[]; watermark: number }>;
+}
+
 /** Initial pulls only receive rows younger than this — old history stays out. */
 const INITIAL_PULL_WINDOW_MS = 48 * 60 * 60 * 1_000;
 
-export class SqliteSyncStore {
-  private readonly db: DatabaseSync;
+// ── Postgres (production) ─────────────────────────────────────────────────────
 
-  constructor(filePath: string) {
-    this.db = new DatabaseSync(filePath);
+class PostgresSyncStore implements SyncStore {
+  private readonly sql: ReturnType<typeof neon>;
+  private ready: Promise<void> | undefined;
+
+  constructor(connectionString: string) {
+    this.sql = neon(connectionString);
+  }
+
+  private ensureSchema(): Promise<void> {
+    this.ready ??= (async () => {
+      await this.sql`
+        CREATE TABLE IF NOT EXISTS sync_records (
+          collection TEXT NOT NULL,
+          id TEXT NOT NULL,
+          data TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          seq BIGINT NOT NULL,
+          server_time BIGINT NOT NULL,
+          PRIMARY KEY (collection, id)
+        )`;
+      await this.sql`CREATE SEQUENCE IF NOT EXISTS sync_records_seq`;
+      await this.sql`
+        CREATE INDEX IF NOT EXISTS sync_records_by_seq
+        ON sync_records (collection, seq)`;
+    })();
+    return this.ready;
+  }
+
+  async push(collection: SyncCollection, records: SyncRecord[]): Promise<number> {
+    await this.ensureSchema();
+    let accepted = 0;
+    for (const record of records) {
+      // The WHERE clause makes last-write-wins atomic under concurrency.
+      const rows = (await this.sql`
+        INSERT INTO sync_records (collection, id, data, updated_at, seq, server_time)
+        VALUES (${collection}, ${record.id}, ${record.data}, ${record.updatedAt},
+                nextval('sync_records_seq'), ${Date.now()})
+        ON CONFLICT (collection, id) DO UPDATE
+        SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at,
+            seq = EXCLUDED.seq, server_time = EXCLUDED.server_time
+        WHERE sync_records.updated_at <= EXCLUDED.updated_at
+        RETURNING id`) as Array<{ id: string }>;
+      accepted += rows.length;
+    }
+    return accepted;
+  }
+
+  async pull(
+    collection: SyncCollection,
+    since: number
+  ): Promise<{ records: PulledRecord[]; watermark: number }> {
+    await this.ensureSchema();
+    const floor = since === 0 ? Date.now() - INITIAL_PULL_WINDOW_MS : 0;
+    const rows = (await this.sql`
+      SELECT id, data, updated_at, seq FROM sync_records
+      WHERE collection = ${collection} AND seq > ${since} AND server_time >= ${floor}
+      ORDER BY seq`) as Array<{
+      id: string;
+      data: string;
+      updated_at: string;
+      seq: string | number;
+    }>;
+    const top = (await this.sql`
+      SELECT COALESCE(MAX(seq), 0)::float8 AS m FROM sync_records`) as Array<{
+      m: number;
+    }>;
+    return {
+      records: rows.map((row) => ({
+        id: row.id,
+        data: row.data,
+        updatedAt: row.updated_at,
+        seq: Number(row.seq),
+      })),
+      watermark: Math.max(since, Number(top[0]?.m ?? 0)),
+    };
+  }
+}
+
+// ── SQLite (local development) ────────────────────────────────────────────────
+
+type SqliteDatabase = import("node:sqlite").DatabaseSync;
+
+class SqliteSyncStore implements SyncStore {
+  private readonly db: SqliteDatabase;
+
+  constructor(db: SqliteDatabase) {
+    this.db = db;
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS records (
         collection TEXT NOT NULL,
@@ -61,8 +155,7 @@ export class SqliteSyncStore {
     return row.m + 1;
   }
 
-  /** Upserts a record unless the stored copy is already newer. */
-  push(collection: SyncCollection, records: SyncRecord[]): number {
+  async push(collection: SyncCollection, records: SyncRecord[]): Promise<number> {
     let accepted = 0;
     const read = this.db.prepare(
       "SELECT updated_at FROM records WHERE collection = ? AND id = ?"
@@ -92,11 +185,10 @@ export class SqliteSyncStore {
     return accepted;
   }
 
-  /** Returns records changed after `since`, plus the new watermark. */
-  pull(
+  async pull(
     collection: SyncCollection,
     since: number
-  ): { records: PulledRecord[]; watermark: number } {
+  ): Promise<{ records: PulledRecord[]; watermark: number }> {
     const floor = since === 0 ? Date.now() - INITIAL_PULL_WINDOW_MS : 0;
     const rows = this.db
       .prepare(
@@ -125,21 +217,36 @@ export class SqliteSyncStore {
   }
 }
 
-let store: SqliteSyncStore | null | undefined;
+// ── Factory ───────────────────────────────────────────────────────────────────
 
-/**
- * Opens the store once per process. Returns null where the filesystem is
- * read-only (e.g. Vercel) — the API answers 503 and clients fall back to
- * device-local behaviour, exactly as before this backend existed.
- */
-export function getSyncStore(): SqliteSyncStore | null {
-  if (store !== undefined) return store;
+let storePromise: Promise<SyncStore | null> | undefined;
+
+async function createStore(): Promise<SyncStore | null> {
+  const connectionString =
+    process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+  if (connectionString) {
+    return new PostgresSyncStore(connectionString);
+  }
   try {
+    // Lazy: node:sqlite exists only on Node ≥23.4, and Vercel never gets here
+    // (it always has a connection string).
+    const { DatabaseSync } = await import("node:sqlite");
+    const { mkdirSync } = await import("node:fs");
+    const path = await import("node:path");
     const dir = path.join(process.cwd(), "data");
     mkdirSync(dir, { recursive: true });
-    store = new SqliteSyncStore(path.join(dir, "vaise.db"));
+    return new SqliteSyncStore(new DatabaseSync(path.join(dir, "vaise.db")));
   } catch {
-    store = null;
+    return null;
   }
-  return store;
+}
+
+/**
+ * Opens the store once per process. Null only where neither Postgres is
+ * configured nor a writable disk exists — the API then answers 503 and
+ * clients fall back to device-local behaviour.
+ */
+export function getSyncStore(): Promise<SyncStore | null> {
+  storePromise ??= createStore();
+  return storePromise;
 }
