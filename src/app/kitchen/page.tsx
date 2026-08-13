@@ -21,6 +21,7 @@ import {
   minutesAgoLabel,
 } from "@/lib/staff-i18n";
 import StaffLangSwitch from "@/components/StaffLangSwitch";
+import StaffLogoutButton from "@/components/StaffLogoutButton";
 import { tProduct } from "@/lib/product-translations";
 import {
   Clock, ChefHat, Bell, CheckCircle2, XCircle,
@@ -195,6 +196,7 @@ export default function KitchenPage() {
             </div>
 
             <StaffLangSwitch lang={lang} onChange={setLang} variant="panel" />
+            <StaffLogoutButton lang={lang} />
 
             <button
               onClick={toggleTheme}

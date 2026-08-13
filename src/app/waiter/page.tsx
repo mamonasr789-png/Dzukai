@@ -50,6 +50,7 @@ import {
   dishesCount,
 } from "@/lib/staff-i18n";
 import StaffLangSwitch from "@/components/StaffLangSwitch";
+import StaffLogoutButton from "@/components/StaffLogoutButton";
 import { tProduct } from "@/lib/product-translations";
 import {
   UtensilsCrossed, Receipt, Bell, ShoppingBag,
@@ -262,6 +263,7 @@ export default function WaiterPage() {
           </div>
           <div className="flex items-center gap-2">
             <StaffLangSwitch lang={lang} onChange={setLang} />
+            <StaffLogoutButton lang={lang} />
             <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
               <ViewBtn active={view === "tasks"} onClick={() => setView("tasks")}>
                 <List size={13} />

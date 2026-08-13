@@ -32,6 +32,8 @@ import {
   SERVING_SHORT,
 } from "@/lib/staff-i18n";
 import StaffLangSwitch from "@/components/StaffLangSwitch";
+import StaffLogoutButton from "@/components/StaffLogoutButton";
+import StaffAccountsPanel from "@/components/StaffAccountsPanel";
 import { tProduct } from "@/lib/product-translations";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -144,6 +146,7 @@ export default function AdminPage() {
 
           <div className="flex items-center gap-2">
             <StaffLangSwitch lang={lang} onChange={setLang} />
+            <StaffLogoutButton lang={lang} />
 
             {/* Filter */}
             <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 gap-1">
@@ -317,6 +320,8 @@ export default function AdminPage() {
             </div>
           </>
         )}
+
+        <StaffAccountsPanel lang={lang} />
       </div>
     </div>
   );

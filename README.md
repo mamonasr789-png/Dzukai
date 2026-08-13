@@ -22,6 +22,16 @@ Open [http://localhost:3000](http://localhost:3000) for the guest menu, or [http
 
 Local dev uses a SQLite file at `data/vaise.db` (auto-created, gitignored) for cross-device order sync. Production (Vercel) uses Postgres instead — see `.env.local.example` for the environment variables that switch between them.
 
+## Staff accounts
+
+`/admin`, `/waiter`, `/kitchen` and `/app` all require a login. Waiter and kitchen accounts are created from the admin panel; the Admin account itself is bootstrapped once, by us, from the command line:
+
+```bash
+node --experimental-strip-types scripts/create-staff-account.mjs <username> <password> admin
+```
+
+Run it locally (writes to `data/vaise.db`) or with the production `DATABASE_URL` set (writes to Postgres). Set `STAFF_AUTH_SECRET` in `.env.local` / Vercel env vars — see `.env.local.example`.
+
 ## Tests
 
 ```bash
