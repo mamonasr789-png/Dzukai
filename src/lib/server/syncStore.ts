@@ -45,6 +45,19 @@ export interface SyncStore {
 /** Initial pulls only receive rows younger than this — old history stays out. */
 const INITIAL_PULL_WINDOW_MS = 48 * 60 * 60 * 1_000;
 
+/** Caps one pull; the watermark advances per page, so the rest follows next tick. */
+const PULL_PAGE_SIZE = 500;
+
+/**
+ * The watermark must come from the rows actually handed to the client, never
+ * from a separate MAX(seq) query: a row committed between the two queries
+ * would push the watermark past a record the client never received, and that
+ * record would be skipped forever.
+ */
+function watermarkFrom(records: PulledRecord[], since: number): number {
+  return records.reduce((max, record) => Math.max(max, record.seq), since);
+}
+
 // ── Postgres (production) ─────────────────────────────────────────────────────
 
 class PostgresSyncStore implements SyncStore {
@@ -103,25 +116,20 @@ class PostgresSyncStore implements SyncStore {
     const rows = (await this.sql`
       SELECT id, data, updated_at, seq FROM sync_records
       WHERE collection = ${collection} AND seq > ${since} AND server_time >= ${floor}
-      ORDER BY seq`) as Array<{
+      ORDER BY seq
+      LIMIT ${PULL_PAGE_SIZE}`) as Array<{
       id: string;
       data: string;
       updated_at: string;
       seq: string | number;
     }>;
-    const top = (await this.sql`
-      SELECT COALESCE(MAX(seq), 0)::float8 AS m FROM sync_records`) as Array<{
-      m: number;
-    }>;
-    return {
-      records: rows.map((row) => ({
-        id: row.id,
-        data: row.data,
-        updatedAt: row.updated_at,
-        seq: Number(row.seq),
-      })),
-      watermark: Math.max(since, Number(top[0]?.m ?? 0)),
-    };
+    const records = rows.map((row) => ({
+      id: row.id,
+      data: row.data,
+      updatedAt: row.updated_at,
+      seq: Number(row.seq),
+    }));
+    return { records, watermark: watermarkFrom(records, since) };
   }
 }
 
@@ -129,7 +137,7 @@ class PostgresSyncStore implements SyncStore {
 
 type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
-class SqliteSyncStore implements SyncStore {
+export class SqliteSyncStore implements SyncStore {
   private readonly db: SqliteDatabase;
 
   constructor(db: SqliteDatabase) {
@@ -194,26 +202,22 @@ class SqliteSyncStore implements SyncStore {
       .prepare(
         `SELECT id, data, updated_at, seq FROM records
          WHERE collection = ? AND seq > ? AND server_time >= ?
-         ORDER BY seq`
+         ORDER BY seq
+         LIMIT ?`
       )
-      .all(collection, since, floor) as Array<{
+      .all(collection, since, floor, PULL_PAGE_SIZE) as Array<{
       id: string;
       data: string;
       updated_at: string;
       seq: number;
     }>;
-    const top = this.db
-      .prepare("SELECT COALESCE(MAX(seq), 0) AS m FROM records")
-      .get() as { m: number };
-    return {
-      records: rows.map((row) => ({
-        id: row.id,
-        data: row.data,
-        updatedAt: row.updated_at,
-        seq: row.seq,
-      })),
-      watermark: Math.max(since, top.m),
-    };
+    const records = rows.map((row) => ({
+      id: row.id,
+      data: row.data,
+      updatedAt: row.updated_at,
+      seq: row.seq,
+    }));
+    return { records, watermark: watermarkFrom(records, since) };
   }
 }
 

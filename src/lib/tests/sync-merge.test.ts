@@ -7,8 +7,6 @@
 const { describe, it, expect, printResults } = await import("../assistant/tests/runner.ts");
 const { diffLocal, applyRemote, recordStamp, parseCollection } = await import("../sync/merge.ts");
 
-const NONE = new Set<string>();
-
 describe("recordStamp", () => {
   it("prefers updatedAt over createdAt", () => {
     expect(recordStamp({ id: "a", createdAt: "2026-01-01", updatedAt: "2026-02-01" })).toBe("2026-02-01");
@@ -56,7 +54,6 @@ describe("applyRemote", () => {
     const { next, changed } = applyRemote(
       JSON.stringify([{ id: "a", updatedAt: "1" }]),
       [{ id: "b", data: JSON.stringify({ id: "b", updatedAt: "2" }) }],
-      NONE
     );
     expect(changed).toBe(true);
     expect(next.map((r) => r.id)).toEqual(["a", "b"]);
@@ -67,32 +64,40 @@ describe("applyRemote", () => {
     const stale = applyRemote(
       local,
       [{ id: "a", data: JSON.stringify({ id: "a", status: "OLD", updatedAt: "2026-01-01" }) }],
-      NONE
     );
     expect(stale.changed).toBe(false);
     const fresh = applyRemote(
       local,
       [{ id: "a", data: JSON.stringify({ id: "a", status: "READY", updatedAt: "2026-01-03" }) }],
-      NONE
     );
     expect(fresh.changed).toBe(true);
     expect(fresh.next[0].status).toBe("READY");
   });
 
-  it("never touches records the device changed this tick", () => {
-    const local = JSON.stringify([{ id: "a", status: "MINE", updatedAt: "1" }]);
-    const { changed, next } = applyRemote(
-      local,
-      [{ id: "a", data: JSON.stringify({ id: "a", status: "THEIRS", updatedAt: "9" }) }],
-      new Set(["a"])
-    );
+  it("keeps a local edit that is newer than the echoed remote copy", () => {
+    const local = JSON.stringify([{ id: "a", status: "MINE", updatedAt: "9" }]);
+    const { changed, next } = applyRemote(local, [
+      { id: "a", data: JSON.stringify({ id: "a", status: "THEIRS", updatedAt: "1" }) },
+    ]);
     expect(changed).toBe(false);
     expect(next[0].status).toBe("MINE");
   });
 
+  it("accepts a fresher remote copy of a record this device also pushed", () => {
+    // Regression: the device used to skip ids it had just pushed while the
+    // watermark moved past them, so a push the server rejected as older left
+    // that device showing its stale version forever.
+    const local = JSON.stringify([{ id: "a", status: "MINE", updatedAt: "1" }]);
+    const { changed, next } = applyRemote(local, [
+      { id: "a", data: JSON.stringify({ id: "a", status: "THEIRS", updatedAt: "9" }) },
+    ]);
+    expect(changed).toBe(true);
+    expect(next[0].status).toBe("THEIRS");
+  });
+
   it("ignores corrupt remote payloads", () => {
     const local = JSON.stringify([{ id: "a", updatedAt: "1" }]);
-    const { changed } = applyRemote(local, [{ id: "x", data: "{broken" }], NONE);
+    const { changed } = applyRemote(local, [{ id: "x", data: "{broken" }]);
     expect(changed).toBe(false);
   });
 });

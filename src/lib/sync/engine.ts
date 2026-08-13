@@ -63,12 +63,10 @@ async function tick(): Promise<void> {
   try {
     const state = readState();
     const request: Record<string, { since: number; push: unknown[] }> = {};
-    const dirtyIds: Record<string, Set<string>> = {};
 
     for (const [name, binding] of Object.entries(COLLECTIONS)) {
       const current = localStorage.getItem(binding.storageKey);
       const push = diffLocal(state.shadows[name] ?? null, current);
-      dirtyIds[name] = new Set(push.map((r) => r.id));
       request[name] = { since: state.watermarks[name] ?? 0, push };
     }
 
@@ -102,11 +100,7 @@ async function tick(): Promise<void> {
       const result = body.collections[name];
       if (!result) continue;
       const current = localStorage.getItem(binding.storageKey);
-      const { next, changed } = applyRemote(
-        current,
-        result.records,
-        dirtyIds[name]
-      );
+      const { next, changed } = applyRemote(current, result.records);
       const finalJson = changed ? JSON.stringify(next) : (current ?? "[]");
       if (changed) {
         localStorage.setItem(binding.storageKey, finalJson);

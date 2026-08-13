@@ -58,21 +58,21 @@ export function diffLocal(
 /**
  * Applies remote records onto the current collection.
  *
- * A remote record wins when it's new locally or strictly fresher. Records the
- * device itself changed this tick (`skipIds`) are left alone — they were just
- * pushed, and the server's last-write-wins verdict arrives with the next pull.
+ * A remote record wins only when it is new locally or strictly fresher, so a
+ * change this device just made is never clobbered by an older echo. Records
+ * the device pushed this tick are deliberately NOT excluded: the server has
+ * already arbitrated, and skipping them while the watermark moved past meant a
+ * device could keep showing its own rejected version forever.
  */
 export function applyRemote(
   currentJson: string | null,
-  remote: { id: string; data: string }[],
-  skipIds: ReadonlySet<string>
+  remote: { id: string; data: string }[]
 ): { next: SyncedRecord[]; changed: boolean } {
   const records = parseCollection(currentJson);
   const indexById = new Map(records.map((r, i) => [r.id, i]));
   let changed = false;
 
   for (const incoming of remote) {
-    if (skipIds.has(incoming.id)) continue;
     let parsed: SyncedRecord;
     try {
       parsed = JSON.parse(incoming.data) as SyncedRecord;
