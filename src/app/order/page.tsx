@@ -37,6 +37,12 @@ import {
 } from "@/lib/i18n";
 import { tProduct } from "@/lib/product-translations";
 import { processPayment } from "@/lib/payment";
+import {
+  splitEqually,
+  splitByItems,
+  type SplitLine,
+  type ItemGuest,
+} from "@/lib/splitBill";
 
 // ── Status display maps ───────────────────────────────────────────────────────
 
@@ -98,6 +104,7 @@ function OrderContent() {
   // Payment state
   const [justPaid, setJustPaid] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showSplitModal, setShowSplitModal] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [billCalledFeedback, setBillCalledFeedback] = useState(false);
 
@@ -202,6 +209,15 @@ function OrderContent() {
   // Amount the customer will actually pay now.
   const payableOrders = isSessionScope ? unpaidOrders : (order && !order.isPaid ? [order] : []);
   const payableTotal = payableOrders.reduce((s, o) => s + o.total, 0);
+  // Split-the-bill is informational only, so line ids just need to be stable
+  // for this render — they never persist beyond the open modal.
+  const splitLines: SplitLine[] = payableOrders.flatMap((o) =>
+    o.items.map((item, index) => ({
+      id: `${o.id}:${index}`,
+      name: tProduct(item.productId, lang, "name", item.name),
+      lineTotal: item.price * item.quantity,
+    }))
+  );
   // Full session total shown in the session view header.
   const sessionTotal = allOrders.reduce((s, o) => s + o.total, 0);
 
@@ -289,7 +305,16 @@ function OrderContent() {
           isBillRequested={!!isBillRequested}
           onPayInApp={() => setShowPaymentModal(true)}
           onCallWaiter={handleCallWaiter}
+          onSplitBill={() => setShowSplitModal(true)}
         />
+        {showSplitModal && (
+          <SplitBillModal
+            lang={lang}
+            total={payableTotal}
+            lines={splitLines}
+            onClose={() => setShowSplitModal(false)}
+          />
+        )}
         {showPaymentModal && (
           <PaymentModal
             lang={lang}
@@ -470,6 +495,7 @@ function OrderContent() {
             isBillRequested={!!isBillRequested}
             onPayInApp={() => setShowPaymentModal(true)}
             onCallWaiter={handleCallWaiter}
+            onSplitBill={() => setShowSplitModal(true)}
           />
         )}
 
@@ -483,6 +509,14 @@ function OrderContent() {
         </div>
       </div>
 
+      {showSplitModal && (
+        <SplitBillModal
+          lang={lang}
+          total={payableTotal}
+          lines={splitLines}
+          onClose={() => setShowSplitModal(false)}
+        />
+      )}
       {showPaymentModal && (
         <PaymentModal
           lang={lang}
@@ -505,6 +539,7 @@ function ActionCard({
   isBillRequested,
   onPayInApp,
   onCallWaiter,
+  onSplitBill,
 }: {
   lang: Lang;
   total: number;
@@ -512,6 +547,7 @@ function ActionCard({
   isBillRequested: boolean;
   onPayInApp: () => void;
   onCallWaiter: () => void;
+  onSplitBill: () => void;
 }) {
   const copy = useT(lang);
   const hint =
@@ -539,6 +575,12 @@ function ActionCard({
           className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors"
         >
           💳 {copy.pay_in_app}
+        </button>
+        <button
+          onClick={onSplitBill}
+          className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors"
+        >
+          🧾 {copy.split_bill}
         </button>
         {isBillRequested ? (
           <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-3">
@@ -616,6 +658,235 @@ function PaymentModal({
   );
 }
 
+// ── Split-the-bill modal ──────────────────────────────────────────────────────
+// Informational only: no order or payment data changes. One device computes
+// shares so the table can settle among themselves or pay together.
+
+function SplitBillModal({
+  lang,
+  total,
+  lines,
+  onClose,
+}: {
+  lang: Lang;
+  total: number;
+  lines: SplitLine[];
+  onClose: () => void;
+}) {
+  const copy = useT(lang);
+  const [tab, setTab] = useState<"equal" | "items">("equal");
+  const [guestCount, setGuestCount] = useState(2);
+  const guestCounterRef = useRef(2);
+  const [itemGuests, setItemGuests] = useState<ItemGuest[]>([
+    { id: "g1", name: `${copy.split_guest} 1` },
+    { id: "g2", name: `${copy.split_guest} 2` },
+  ]);
+  const [assignments, setAssignments] = useState<Record<string, string[]>>({});
+
+  const equalShares = splitEqually(total, guestCount);
+  const { shares: itemShares, unassigned } = splitByItems(
+    lines,
+    itemGuests,
+    assignments
+  );
+
+  const addGuest = () => {
+    guestCounterRef.current += 1;
+    const id = `g${guestCounterRef.current}`;
+    setItemGuests((prev) => [
+      ...prev,
+      { id, name: `${copy.split_guest} ${guestCounterRef.current}` },
+    ]);
+  };
+  const removeGuest = (id: string) => {
+    setItemGuests((prev) => prev.filter((g) => g.id !== id));
+    setAssignments((prev) => {
+      const next: Record<string, string[]> = {};
+      for (const [lineId, guestIds] of Object.entries(prev)) {
+        next[lineId] = guestIds.filter((g) => g !== id);
+      }
+      return next;
+    });
+  };
+  const toggleAssignment = (lineId: string, guestId: string) => {
+    setAssignments((prev) => {
+      const current = prev[lineId] ?? [];
+      const nextForLine = current.includes(guestId)
+        ? current.filter((g) => g !== guestId)
+        : [...current, guestId];
+      return { ...prev, [lineId]: nextForLine };
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 px-4">
+      <div className="bg-card border border-border rounded-t-3xl sm:rounded-2xl p-6 w-full max-w-sm shadow-xl max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="font-black text-lg">{copy.split_bill_title}</h2>
+          <button
+            onClick={onClose}
+            aria-label={copy.split_close}
+            className="text-muted-foreground hover:text-foreground text-xl leading-none px-1"
+          >
+            ×
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground mb-4">
+          {copy.split_informational_hint}
+        </p>
+
+        <div className="flex gap-2 mb-4 bg-secondary/60 rounded-2xl p-1">
+          <button
+            onClick={() => setTab("equal")}
+            className={`flex-1 h-9 rounded-xl text-xs font-bold transition-colors ${
+              tab === "equal" ? "bg-card text-primary shadow-sm" : "text-muted-foreground"
+            }`}
+          >
+            {copy.split_equal_tab}
+          </button>
+          <button
+            onClick={() => setTab("items")}
+            className={`flex-1 h-9 rounded-xl text-xs font-bold transition-colors ${
+              tab === "items" ? "bg-card text-primary shadow-sm" : "text-muted-foreground"
+            }`}
+          >
+            {copy.split_items_tab}
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 -mx-1 px-1">
+          {tab === "equal" ? (
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm font-semibold">{copy.split_guest_count}</span>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setGuestCount((n) => Math.max(1, n - 1))}
+                    aria-label="-"
+                    className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center font-bold"
+                  >
+                    −
+                  </button>
+                  <span className="w-6 text-center font-black tabular-nums">{guestCount}</span>
+                  <button
+                    onClick={() => setGuestCount((n) => Math.min(20, n + 1))}
+                    aria-label="+"
+                    className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center font-bold"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {equalShares.map((share) => (
+                  <div
+                    key={share.guestIndex}
+                    className="flex items-center justify-between bg-secondary/40 rounded-xl px-3 py-2.5"
+                  >
+                    <span className="text-sm font-medium">
+                      {copy.split_guest} {share.guestIndex + 1}
+                    </span>
+                    <span className="font-bold tabular-nums">{share.amount.toFixed(2)} €</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <p className="text-xs text-muted-foreground mb-3">{copy.split_tap_hint}</p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {itemGuests.map((guest) => (
+                  <span
+                    key={guest.id}
+                    className="inline-flex items-center gap-1.5 bg-primary/10 text-primary rounded-full pl-3 pr-1.5 py-1 text-xs font-bold"
+                  >
+                    {guest.name}
+                    {itemGuests.length > 1 && (
+                      <button
+                        onClick={() => removeGuest(guest.id)}
+                        aria-label={copy.split_remove_guest}
+                        className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center leading-none"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </span>
+                ))}
+                <button
+                  onClick={addGuest}
+                  className="inline-flex items-center gap-1 bg-secondary rounded-full px-3 py-1 text-xs font-bold text-muted-foreground hover:text-foreground"
+                >
+                  + {copy.split_add_guest}
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {lines.map((line) => (
+                  <div key={line.id} className="bg-secondary/40 rounded-xl px-3 py-2.5">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">{line.name}</span>
+                      <span className="text-xs font-bold text-muted-foreground tabular-nums">
+                        {line.lineTotal.toFixed(2)} €
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {itemGuests.map((guest) => {
+                        const active = (assignments[line.id] ?? []).includes(guest.id);
+                        return (
+                          <button
+                            key={guest.id}
+                            onClick={() => toggleAssignment(line.id, guest.id)}
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-colors ${
+                              active
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-card border border-border/60 text-muted-foreground"
+                            }`}
+                          >
+                            {guest.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {itemShares.map((share) => (
+                  <div
+                    key={share.guestId}
+                    className="flex items-center justify-between bg-secondary/40 rounded-xl px-3 py-2.5"
+                  >
+                    <span className="text-sm font-medium">{share.guestName}</span>
+                    <span className="font-bold tabular-nums">{share.amount.toFixed(2)} €</span>
+                  </div>
+                ))}
+                {unassigned > 0 && (
+                  <div className="flex items-center justify-between bg-amber-500/10 rounded-xl px-3 py-2.5">
+                    <span className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                      {copy.split_unassigned}
+                    </span>
+                    <span className="font-bold tabular-nums text-amber-700 dark:text-amber-400">
+                      {unassigned.toFixed(2)} €
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={onClose}
+          className="mt-5 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors"
+        >
+          {copy.split_close}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Payment success banner ────────────────────────────────────────────────────
 // Non-blocking: payment is confirmed but the order tracking stays on screen so
 // the customer can keep following food preparation and delivery.
@@ -644,6 +915,7 @@ function SessionView({
   isBillRequested,
   onPayInApp,
   onCallWaiter,
+  onSplitBill,
 }: {
   lang: Lang;
   session: TableSession;
@@ -654,6 +926,7 @@ function SessionView({
   isBillRequested: boolean;
   onPayInApp: () => void;
   onCallWaiter: () => void;
+  onSplitBill: () => void;
 }) {
   const copy = useT(lang);
   // Remaining amount: only unpaid orders. Paid orders are kept in history.
@@ -693,6 +966,7 @@ function SessionView({
           isBillRequested={isBillRequested}
           onPayInApp={onPayInApp}
           onCallWaiter={onCallWaiter}
+          onSplitBill={onSplitBill}
         />
       )}
 
