@@ -8,14 +8,15 @@ import StaffLogoutButton from "@/components/StaffLogoutButton";
 /**
  * Staff hub — the PWA entry point. Staff install this page to the home
  * screen; guests never see it (they arrive through table QR codes).
- * proxy.ts requires a valid session to reach this page at all; here we only
- * filter which cards are shown, since an admin session may open all three.
+ * Public by design: no session needed to see the hub. Tapping into a role
+ * (/waiter, /kitchen, /admin) is what proxy.ts gates behind login. The
+ * logout button here is shown only when a session exists — useful for
+ * switching between accounts while testing without visiting a role page.
  */
 
 const ROLES = [
   {
     href: "/waiter",
-    role: "waiter",
     label: "Padavėjas",
     description: "Užsakymų pristatymas, staliukai, iškvietimai",
     icon: ClipboardList,
@@ -23,7 +24,6 @@ const ROLES = [
   },
   {
     href: "/kitchen",
-    role: "kitchen",
     label: "Virtuvė",
     description: "Aktyvūs užsakymai ir gaminimo eiga",
     icon: ChefHat,
@@ -31,7 +31,6 @@ const ROLES = [
   },
   {
     href: "/admin",
-    role: "admin",
     label: "Administratorius",
     description: "Pardavimai, statistika, staliukų apžvalga",
     icon: BarChart3,
@@ -40,16 +39,13 @@ const ROLES = [
 ] as const;
 
 export default function StaffHubPage() {
-  const [role, setRole] = useState<string | null>(null);
+  const [loggedIn, setLoggedIn] = useState(false);
 
   useEffect(() => {
     fetch("/api/staff/session")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setRole(data?.role ?? null))
-      .catch(() => setRole(null));
+      .then((res) => setLoggedIn(res.ok))
+      .catch(() => setLoggedIn(false));
   }, []);
-
-  const visibleRoles = ROLES.filter((r) => role === "admin" || role === r.role);
 
   return (
     <main className="min-h-screen bg-background flex flex-col px-6 pt-16 pb-10 max-w-lg mx-auto">
@@ -62,11 +58,11 @@ export default function StaffHubPage() {
             Pasirinkite darbo vietą
           </h1>
         </div>
-        <StaffLogoutButton lang="lt" />
+        {loggedIn && <StaffLogoutButton lang="lt" variant="light" />}
       </header>
 
       <div className="flex flex-col gap-4">
-        {visibleRoles.map(({ href, label, description, icon: Icon, accent }) => (
+        {ROLES.map(({ href, label, description, icon: Icon, accent }) => (
           <Link
             key={href}
             href={href}

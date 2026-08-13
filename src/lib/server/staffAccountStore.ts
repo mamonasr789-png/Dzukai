@@ -76,6 +76,8 @@ class PostgresStaffAccountStore implements StaffAccountStore {
     await this.ensureSchema();
     const id = randomUUID();
     const createdAt = new Date().toISOString();
+    const existing = await this.findByUsername(input.username);
+    if (existing) throw new DuplicateUsernameError(input.username);
     try {
       await this.sql`
         INSERT INTO staff_accounts (id, username, password_hash, role, created_at)
@@ -91,9 +93,11 @@ class PostgresStaffAccountStore implements StaffAccountStore {
 
   async findByUsername(username: string): Promise<StaffAccountWithHash | null> {
     await this.ensureSchema();
+    // Case-insensitive: staff type their own name casually (phone
+    // autocapitalize, etc.) and expect "rytis" to match "Rytis".
     const rows = (await this.sql`
       SELECT id, username, password_hash, role, created_at
-      FROM staff_accounts WHERE username = ${username}`) as Array<{
+      FROM staff_accounts WHERE LOWER(username) = LOWER(${username})`) as Array<{
       id: string;
       username: string;
       password_hash: string;
@@ -175,6 +179,8 @@ export class SqliteStaffAccountStore implements StaffAccountStore {
   }): Promise<StaffAccount> {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
+    const existing = await this.findByUsername(input.username);
+    if (existing) throw new DuplicateUsernameError(input.username);
     try {
       this.db
         .prepare(
@@ -192,9 +198,10 @@ export class SqliteStaffAccountStore implements StaffAccountStore {
   }
 
   async findByUsername(username: string): Promise<StaffAccountWithHash | null> {
+    // Case-insensitive, matching the Postgres backend.
     const row = this.db
       .prepare(
-        "SELECT id, username, password_hash, role, created_at FROM staff_accounts WHERE username = ?"
+        "SELECT id, username, password_hash, role, created_at FROM staff_accounts WHERE username = ? COLLATE NOCASE"
       )
       .get(username) as
       | { id: string; username: string; password_hash: string; role: string; created_at: string }

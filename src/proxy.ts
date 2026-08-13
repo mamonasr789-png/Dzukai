@@ -32,12 +32,6 @@ function roleForPath(pathname: string): StaffRole | null {
 export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
 
-  // The staff manifest must stay reachable without a session, or browsers
-  // can't evaluate PWA installability before the user has logged in.
-  if (pathname === "/app/manifest.webmanifest") {
-    return NextResponse.next();
-  }
-
   const secret = getStaffSessionSecret();
   const token = request.cookies.get(STAFF_SESSION_COOKIE)?.value;
   const verification = secret ? verifyStaffSession(token, secret) : { ok: false as const };
@@ -50,9 +44,10 @@ export function proxy(request: NextRequest): NextResponse {
     return NextResponse.next();
   }
 
+  // /app (the role hub) stays public by design: staff open it without a
+  // session and only hit a login wall once they tap into a specific role.
   const requiredRole = roleForPath(pathname);
-  const isStaffHub = pathname === "/app" || pathname.startsWith("/app/");
-  if (!requiredRole && !isStaffHub) {
+  if (!requiredRole) {
     return NextResponse.next();
   }
 
@@ -62,7 +57,7 @@ export function proxy(request: NextRequest): NextResponse {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (requiredRole && !roleAllows(session.role, requiredRole)) {
+  if (!roleAllows(session.role, requiredRole)) {
     return NextResponse.redirect(new URL(ROLE_HOME[session.role], request.url));
   }
 
@@ -70,5 +65,5 @@ export function proxy(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/waiter/:path*", "/kitchen/:path*", "/app", "/app/:path*", "/staff-login"],
+  matcher: ["/admin/:path*", "/waiter/:path*", "/kitchen/:path*", "/staff-login"],
 };

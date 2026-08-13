@@ -25,7 +25,8 @@ export default function BottomNav() {
     pathname.startsWith("/kitchen") ||
     pathname.startsWith("/admin") ||
     pathname.startsWith("/waiter") ||
-    pathname.startsWith("/app")
+    pathname.startsWith("/app") ||
+    pathname.startsWith("/staff-login")
   ) return null;
 
   const navItems = [
