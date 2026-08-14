@@ -9,6 +9,7 @@ export async function GET(): Promise<Response> {
   }
   return Response.json({
     ok: true,
+    accountId: session.accountId,
     username: session.username,
     role: session.role,
   });

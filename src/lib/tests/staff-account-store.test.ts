@@ -55,6 +55,30 @@ describe("staff account store", () => {
     await s.remove(account.id);
     expect(await s.findByUsername("Arnas")).toBe(null);
   });
+
+  it("starts with no last-seen timestamp", async () => {
+    const s = store();
+    const account = await s.create({ username: "Ona", passwordHash: "hash", role: "waiter" });
+    expect(account.lastSeenAt).toBe(null);
+  });
+
+  it("touchLastSeen sets a timestamp visible on list() and findById()", async () => {
+    const s = store();
+    const account = await s.create({ username: "Petras", passwordHash: "hash", role: "kitchen" });
+    await s.touchLastSeen(account.id);
+    const found = await s.findById(account.id);
+    expect(typeof found?.lastSeenAt).toBe("string");
+    const listed = (await s.list()).find((a) => a.id === account.id);
+    expect(typeof listed?.lastSeenAt).toBe("string");
+  });
+
+  it("updatePassword replaces the stored hash — old hash no longer matches", async () => {
+    const s = store();
+    const account = await s.create({ username: "Jonas", passwordHash: "old-hash", role: "waiter" });
+    await s.updatePassword(account.id, "new-hash");
+    const found = await s.findByUsername("Jonas");
+    expect(found?.passwordHash).toBe("new-hash");
+  });
 });
 
 printResults();

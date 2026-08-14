@@ -19,6 +19,8 @@ export interface StaffAccount {
   username: string;
   role: StaffRole;
   createdAt: string;
+  /** Last heartbeat from an authenticated /waiter, /kitchen or /admin tab. Null until first ping. */
+  lastSeenAt: string | null;
 }
 
 export interface StaffAccountWithHash extends StaffAccount {
@@ -35,6 +37,8 @@ export interface StaffAccountStore {
   findById(id: string): Promise<StaffAccount | null>;
   list(): Promise<StaffAccount[]>;
   remove(id: string): Promise<void>;
+  touchLastSeen(id: string): Promise<void>;
+  updatePassword(id: string, passwordHash: string): Promise<void>;
 }
 
 export class DuplicateUsernameError extends Error {
@@ -64,6 +68,8 @@ class PostgresStaffAccountStore implements StaffAccountStore {
           role TEXT NOT NULL,
           created_at TEXT NOT NULL
         )`;
+      // Added after the table already existed in some environments.
+      await this.sql`ALTER TABLE staff_accounts ADD COLUMN IF NOT EXISTS last_seen_at TEXT`;
     })();
     return this.ready;
   }
@@ -88,7 +94,7 @@ class PostgresStaffAccountStore implements StaffAccountStore {
       }
       throw error;
     }
-    return { id, username: input.username, role: input.role, createdAt };
+    return { id, username: input.username, role: input.role, createdAt, lastSeenAt: null };
   }
 
   async findByUsername(username: string): Promise<StaffAccountWithHash | null> {
@@ -96,13 +102,14 @@ class PostgresStaffAccountStore implements StaffAccountStore {
     // Case-insensitive: staff type their own name casually (phone
     // autocapitalize, etc.) and expect "rytis" to match "Rytis".
     const rows = (await this.sql`
-      SELECT id, username, password_hash, role, created_at
+      SELECT id, username, password_hash, role, created_at, last_seen_at
       FROM staff_accounts WHERE LOWER(username) = LOWER(${username})`) as Array<{
       id: string;
       username: string;
       password_hash: string;
       role: string;
       created_at: string;
+      last_seen_at: string | null;
     }>;
     const row = rows[0];
     if (!row) return null;
@@ -112,43 +119,63 @@ class PostgresStaffAccountStore implements StaffAccountStore {
       passwordHash: row.password_hash,
       role: row.role as StaffRole,
       createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at,
     };
   }
 
   async findById(id: string): Promise<StaffAccount | null> {
     await this.ensureSchema();
     const rows = (await this.sql`
-      SELECT id, username, role, created_at FROM staff_accounts WHERE id = ${id}`) as Array<{
+      SELECT id, username, role, created_at, last_seen_at FROM staff_accounts WHERE id = ${id}`) as Array<{
       id: string;
       username: string;
       role: string;
       created_at: string;
+      last_seen_at: string | null;
     }>;
     const row = rows[0];
     if (!row) return null;
-    return { id: row.id, username: row.username, role: row.role as StaffRole, createdAt: row.created_at };
+    return {
+      id: row.id,
+      username: row.username,
+      role: row.role as StaffRole,
+      createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at,
+    };
   }
 
   async list(): Promise<StaffAccount[]> {
     await this.ensureSchema();
     const rows = (await this.sql`
-      SELECT id, username, role, created_at FROM staff_accounts ORDER BY created_at`) as Array<{
+      SELECT id, username, role, created_at, last_seen_at FROM staff_accounts ORDER BY created_at`) as Array<{
       id: string;
       username: string;
       role: string;
       created_at: string;
+      last_seen_at: string | null;
     }>;
     return rows.map((row) => ({
       id: row.id,
       username: row.username,
       role: row.role as StaffRole,
       createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at,
     }));
   }
 
   async remove(id: string): Promise<void> {
     await this.ensureSchema();
     await this.sql`DELETE FROM staff_accounts WHERE id = ${id}`;
+  }
+
+  async touchLastSeen(id: string): Promise<void> {
+    await this.ensureSchema();
+    await this.sql`UPDATE staff_accounts SET last_seen_at = ${new Date().toISOString()} WHERE id = ${id}`;
+  }
+
+  async updatePassword(id: string, passwordHash: string): Promise<void> {
+    await this.ensureSchema();
+    await this.sql`UPDATE staff_accounts SET password_hash = ${passwordHash} WHERE id = ${id}`;
   }
 }
 
@@ -170,6 +197,13 @@ export class SqliteStaffAccountStore implements StaffAccountStore {
         created_at TEXT NOT NULL
       );
     `);
+    try {
+      // SQLite has no "ADD COLUMN IF NOT EXISTS" — ignore the duplicate-column
+      // error on every startup after the first one.
+      this.db.exec(`ALTER TABLE staff_accounts ADD COLUMN last_seen_at TEXT`);
+    } catch {
+      // already applied
+    }
   }
 
   async create(input: {
@@ -194,17 +228,24 @@ export class SqliteStaffAccountStore implements StaffAccountStore {
       }
       throw error;
     }
-    return { id, username: input.username, role: input.role, createdAt };
+    return { id, username: input.username, role: input.role, createdAt, lastSeenAt: null };
   }
 
   async findByUsername(username: string): Promise<StaffAccountWithHash | null> {
     // Case-insensitive, matching the Postgres backend.
     const row = this.db
       .prepare(
-        "SELECT id, username, password_hash, role, created_at FROM staff_accounts WHERE username = ? COLLATE NOCASE"
+        "SELECT id, username, password_hash, role, created_at, last_seen_at FROM staff_accounts WHERE username = ? COLLATE NOCASE"
       )
       .get(username) as
-      | { id: string; username: string; password_hash: string; role: string; created_at: string }
+      | {
+          id: string;
+          username: string;
+          password_hash: string;
+          role: string;
+          created_at: string;
+          last_seen_at: string | null;
+        }
       | undefined;
     if (!row) return null;
     return {
@@ -213,31 +254,51 @@ export class SqliteStaffAccountStore implements StaffAccountStore {
       passwordHash: row.password_hash,
       role: row.role as StaffRole,
       createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at,
     };
   }
 
   async findById(id: string): Promise<StaffAccount | null> {
     const row = this.db
-      .prepare("SELECT id, username, role, created_at FROM staff_accounts WHERE id = ?")
-      .get(id) as { id: string; username: string; role: string; created_at: string } | undefined;
+      .prepare("SELECT id, username, role, created_at, last_seen_at FROM staff_accounts WHERE id = ?")
+      .get(id) as
+      | { id: string; username: string; role: string; created_at: string; last_seen_at: string | null }
+      | undefined;
     if (!row) return null;
-    return { id: row.id, username: row.username, role: row.role as StaffRole, createdAt: row.created_at };
+    return {
+      id: row.id,
+      username: row.username,
+      role: row.role as StaffRole,
+      createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at,
+    };
   }
 
   async list(): Promise<StaffAccount[]> {
     const rows = this.db
-      .prepare("SELECT id, username, role, created_at FROM staff_accounts ORDER BY created_at")
-      .all() as Array<{ id: string; username: string; role: string; created_at: string }>;
+      .prepare("SELECT id, username, role, created_at, last_seen_at FROM staff_accounts ORDER BY created_at")
+      .all() as Array<{ id: string; username: string; role: string; created_at: string; last_seen_at: string | null }>;
     return rows.map((row) => ({
       id: row.id,
       username: row.username,
       role: row.role as StaffRole,
       createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at,
     }));
   }
 
   async remove(id: string): Promise<void> {
     this.db.prepare("DELETE FROM staff_accounts WHERE id = ?").run(id);
+  }
+
+  async touchLastSeen(id: string): Promise<void> {
+    this.db
+      .prepare("UPDATE staff_accounts SET last_seen_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), id);
+  }
+
+  async updatePassword(id: string, passwordHash: string): Promise<void> {
+    this.db.prepare("UPDATE staff_accounts SET password_hash = ? WHERE id = ?").run(passwordHash, id);
   }
 }
 

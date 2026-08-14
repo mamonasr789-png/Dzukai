@@ -506,4 +506,103 @@ describe("customer order tracking translations", () => {
   });
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// GROUP — staff activity stamps (who did what today)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("staff stamps on order items", () => {
+  it("stamps preparedBy/preparedAt only when moving to READY, not PREPARING", () => {
+    reset();
+    const o = makeOrder(10);
+    const cook = { id: "acc_1", username: "Karolis" };
+    orders.updateItemStatus(o.id, "p1", "PREPARING", cook);
+    let item = orders.getOrder(o.id)!.items[0];
+    expect(item.preparedBy).toBeFalsy();
+
+    orders.updateItemStatus(o.id, "p1", "READY", cook);
+    item = orders.getOrder(o.id)!.items[0];
+    expect(item.preparedBy?.username).toBe("Karolis");
+    expect(typeof item.preparedAt).toBe("string");
+  });
+
+  it("stamps deliveredBy/deliveredAt when a waiter completes delivery", () => {
+    reset();
+    const o = makeOrder(10);
+    const waiter = { id: "acc_2", username: "Rytis" };
+    orders.updateItemStatus(o.id, "p1", "READY");
+    orders.startItemsDelivery(o.id, ["p1"]);
+    orders.completeItemsDelivery(o.id, ["p1"], waiter);
+    const item = orders.getOrder(o.id)!.items[0];
+    expect(item.deliveredBy?.username).toBe("Rytis");
+    expect(typeof item.deliveredAt).toBe("string");
+  });
+
+  it("stays unstamped when no staff is passed (e.g. unauthenticated dev use)", () => {
+    reset();
+    const o = makeOrder(10);
+    orders.updateItemStatus(o.id, "p1", "READY");
+    expect(orders.getOrder(o.id)!.items[0].preparedBy).toBeFalsy();
+  });
+});
+
+describe("staff stamps on waiter tasks", () => {
+  it("stamps completedBy on updateTaskStatus('completed')", () => {
+    reset();
+    const o = makeOrder(10);
+    const waiter = { id: "acc_2", username: "Rytis" };
+    const task = tasks.createUniqueTask(`order:${o.id}:waiter_called`, {
+      type: "waiter_called", orderId: o.id, tableNumber: "5",
+    })!;
+    tasks.updateTaskStatus(task.id, "completed", waiter);
+    expect(tasks.listTasks().find((t) => t.id === task.id)?.completedBy?.username).toBe("Rytis");
+  });
+
+  it("stamps completedBy on completeTasksForOrders", () => {
+    reset();
+    const o = makeOrder(10);
+    const waiter = { id: "acc_2", username: "Rytis" };
+    tasks.createUniqueTask(`session:test:bill2`, {
+      type: "bill_requested", orderId: o.id, tableNumber: "5",
+    });
+    tasks.completeTasksForOrders([o.id], waiter);
+    const bill = tasks.listTasks().find((t) => t.type === "bill_requested")!;
+    expect(bill.completedBy?.username).toBe("Rytis");
+  });
+});
+
+describe("getStaffActivityToday", () => {
+  it("tallies prepared, delivered and completed-task counts per staff id", () => {
+    reset();
+    const cook = { id: "acc_1", username: "Karolis" };
+    const waiter = { id: "acc_2", username: "Rytis" };
+
+    const o1 = makeOrder(10);
+    orders.updateItemStatus(o1.id, "p1", "PREPARING", cook);
+    orders.updateItemStatus(o1.id, "p1", "READY", cook);
+    orders.startItemsDelivery(o1.id, ["p1"]);
+    orders.completeItemsDelivery(o1.id, ["p1"], waiter);
+
+    const o2 = makeOrder(8);
+    orders.updateItemStatus(o2.id, "p1", "PREPARING", cook);
+    orders.updateItemStatus(o2.id, "p1", "READY", cook);
+
+    const task = tasks.createUniqueTask(`order:${o2.id}:waiter_called`, {
+      type: "waiter_called", orderId: o2.id, tableNumber: "5",
+    })!;
+    tasks.updateTaskStatus(task.id, "completed", waiter);
+
+    const activity = analytics.getStaffActivityToday(orders.listOrders(), tasks.listTasks());
+    expect(activity.get("acc_1")?.preparedCount).toBe(2);
+    expect(activity.get("acc_2")?.deliveredCount).toBe(1);
+    expect(activity.get("acc_2")?.tasksCompletedCount).toBe(1);
+  });
+
+  it("returns an empty map when nothing is stamped", () => {
+    reset();
+    makeOrder(10);
+    const activity = analytics.getStaffActivityToday(orders.listOrders(), tasks.listTasks());
+    expect(activity.size).toBe(0);
+  });
+});
+
 printResults();

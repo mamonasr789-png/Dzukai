@@ -5,6 +5,7 @@
  */
 
 import type { Order, OrderStatus } from "./orders";
+import type { WaiterTask } from "./waiterTasks";
 
 // ── Time helpers ──────────────────────────────────────────────────────────────
 
@@ -17,6 +18,58 @@ function startOfToday(): Date {
 export function getTodayOrders(orders: Order[]): Order[] {
   const midnight = startOfToday().getTime();
   return orders.filter((o) => new Date(o.createdAt).getTime() >= midnight);
+}
+
+function isToday(iso: string | undefined): boolean {
+  if (!iso) return false;
+  return new Date(iso).getTime() >= startOfToday().getTime();
+}
+
+// ── Staff activity ────────────────────────────────────────────────────────────
+
+export interface StaffActivity {
+  username: string;
+  /** Kitchen: items marked READY today. */
+  preparedCount: number;
+  /** Waiter: items marked delivered (COMPLETED) today. */
+  deliveredCount: number;
+  /** Waiter: bill/call/etc. tasks resolved today. */
+  tasksCompletedCount: number;
+}
+
+/**
+ * Per-account "what did I do today" tally, keyed by staff account id.
+ * Reads the staff stamps written by updateItemStatus / completeItemsDelivery /
+ * updateTaskStatus / completeTasksForOrders — nothing here is stored
+ * separately, it's derived fresh from orders and tasks each time.
+ */
+export function getStaffActivityToday(orders: Order[], tasks: WaiterTask[]): Map<string, StaffActivity> {
+  const activity = new Map<string, StaffActivity>();
+
+  const bump = (id: string, username: string, field: keyof Omit<StaffActivity, "username">) => {
+    const entry = activity.get(id) ?? { username, preparedCount: 0, deliveredCount: 0, tasksCompletedCount: 0 };
+    entry[field] += 1;
+    activity.set(id, entry);
+  };
+
+  for (const order of orders) {
+    for (const item of order.items) {
+      if (item.preparedBy && isToday(item.preparedAt)) {
+        bump(item.preparedBy.id, item.preparedBy.username, "preparedCount");
+      }
+      if (item.deliveredBy && isToday(item.deliveredAt)) {
+        bump(item.deliveredBy.id, item.deliveredBy.username, "deliveredCount");
+      }
+    }
+  }
+
+  for (const task of tasks) {
+    if (task.completedBy && task.status === "completed" && isToday(task.updatedAt)) {
+      bump(task.completedBy.id, task.completedBy.username, "tasksCompletedCount");
+    }
+  }
+
+  return activity;
 }
 
 // ── Revenue ───────────────────────────────────────────────────────────────────

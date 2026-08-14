@@ -25,8 +25,8 @@ if (!["admin", "waiter", "kitchen"].includes(role)) {
   console.error(`Invalid role "${role}". Use admin, waiter or kitchen.`);
   process.exit(1);
 }
-if (password.length < 8) {
-  console.error("Password must be at least 8 characters.");
+if (password.length < 1) {
+  console.error("Password cannot be empty.");
   process.exit(1);
 }
 

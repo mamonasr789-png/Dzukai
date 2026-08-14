@@ -34,6 +34,7 @@ import {
 import StaffLangSwitch from "@/components/StaffLangSwitch";
 import StaffLogoutButton from "@/components/StaffLogoutButton";
 import StaffAccountsPanel from "@/components/StaffAccountsPanel";
+import { useCurrentStaff } from "@/lib/useCurrentStaff";
 import { tProduct } from "@/lib/product-translations";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ export default function AdminPage() {
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lang, setLang] = useStaffLang();
   const t = staffT(lang);
+  useCurrentStaff(); // side effect only here: keeps this admin's last-seen ping alive
 
   const handleReset = () => {
     resetDemoData();

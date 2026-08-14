@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { ChefHat, ClipboardList, Trash2, UserPlus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChefHat, ClipboardList, KeyRound, Trash2, UserPlus } from "lucide-react";
 import type { StaffLang } from "@/lib/staff-i18n";
+import { listOrders, subscribeOrders } from "@/lib/orders";
+import { listTasks, subscribeWaiterTasks } from "@/lib/waiterTasks";
+import { getStaffActivityToday } from "@/lib/analytics";
 
 type StaffRole = "waiter" | "kitchen";
 
@@ -11,6 +14,16 @@ interface StaffAccount {
   username: string;
   role: "admin" | StaffRole;
   createdAt: string;
+  lastSeenAt: string | null;
+}
+
+/** Pinged every 30s by active tabs — a ping within this window counts as "online". */
+const ONLINE_WINDOW_MS = 90_000;
+const ACCOUNTS_POLL_MS = 20_000;
+
+function isOnline(lastSeenAt: string | null): boolean {
+  if (!lastSeenAt) return false;
+  return Date.now() - new Date(lastSeenAt).getTime() < ONLINE_WINDOW_MS;
 }
 
 const TEXT: Record<StaffLang, Record<string, string>> = {
@@ -29,9 +42,17 @@ const TEXT: Record<StaffLang, Record<string, string>> = {
     yes: "Taip",
     no: "Ne",
     usernameTaken: "Toks vartotojo vardas jau užimtas.",
-    passwordTooShort: "Slaptažodis turi būti bent 8 simbolių.",
     genericError: "Nepavyko. Bandykite dar kartą.",
     createdAt: "Sukurta",
+    online: "Dirba dabar",
+    offline: "Neprisijungęs",
+    prepared: "paruošta",
+    delivered: "pristatyta",
+    tasksDone: "užduočių atlikta",
+    noActivityToday: "Šiandien dar nieko neatliko.",
+    resetPassword: "Keisti slaptažodį",
+    resetPasswordPlaceholder: "Naujas slaptažodis",
+    save: "Išsaugoti",
   },
   en: {
     title: "Staff accounts",
@@ -48,9 +69,17 @@ const TEXT: Record<StaffLang, Record<string, string>> = {
     yes: "Yes",
     no: "No",
     usernameTaken: "That username is already taken.",
-    passwordTooShort: "Password must be at least 8 characters.",
     genericError: "Something went wrong. Try again.",
     createdAt: "Created",
+    online: "Working now",
+    offline: "Offline",
+    prepared: "prepared",
+    delivered: "delivered",
+    tasksDone: "tasks done",
+    noActivityToday: "No activity yet today.",
+    resetPassword: "Reset password",
+    resetPasswordPlaceholder: "New password",
+    save: "Save",
   },
 };
 
@@ -64,6 +93,12 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const [resettingFor, setResettingFor] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [resetSubmitting, setResetSubmitting] = useState(false);
+
+  const [orders, setOrders] = useState<ReturnType<typeof listOrders>>([]);
+  const [tasks, setTasks] = useState<ReturnType<typeof listTasks>>([]);
 
   const refresh = useCallback(async () => {
     const res = await fetch("/api/staff/accounts");
@@ -81,7 +116,32 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
         setAccounts(data.accounts);
         setLoaded(true);
       });
+    // Polling (rather than a push channel) keeps the online dot and account
+    // list fresh without adding another sync mechanism to the project.
+    const interval = setInterval(() => {
+      fetch("/api/staff/accounts")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { accounts: StaffAccount[] } | null) => {
+          if (data) setAccounts(data.accounts);
+        });
+    }, ACCOUNTS_POLL_MS);
+    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const refreshOrders = () => setOrders(listOrders());
+    const refreshTasks = () => setTasks(listTasks());
+    refreshOrders();
+    refreshTasks();
+    const unsubOrders = subscribeOrders(refreshOrders);
+    const unsubTasks = subscribeWaiterTasks(refreshTasks);
+    return () => {
+      unsubOrders();
+      unsubTasks();
+    };
+  }, []);
+
+  const activityByStaffId = useMemo(() => getStaffActivityToday(orders, tasks), [orders, tasks]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -95,10 +155,6 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
       });
       if (res.status === 409) {
         setError(t.usernameTaken);
-        return;
-      }
-      if (res.status === 400) {
-        setError(t.passwordTooShort);
         return;
       }
       if (!res.ok) {
@@ -119,6 +175,24 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
     const res = await fetch(`/api/staff/accounts/${id}`, { method: "DELETE" });
     if (res.ok) await refresh();
     setConfirmingDelete(null);
+  }
+
+  async function handleResetPassword(e: React.FormEvent, id: string) {
+    e.preventDefault();
+    setResetSubmitting(true);
+    try {
+      const res = await fetch(`/api/staff/accounts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: newPassword }),
+      });
+      if (res.ok) {
+        setResettingFor(null);
+        setNewPassword("");
+      }
+    } finally {
+      setResetSubmitting(false);
+    }
   }
 
   if (!loaded) return null;
@@ -149,7 +223,7 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={8}
+              minLength={1}
               maxLength={200}
               className="bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm w-40 focus:outline-none focus:border-primary/50"
             />
@@ -183,11 +257,18 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
         </div>
       ) : (
         <div className="border border-white/8 rounded-xl bg-white/3 divide-y divide-white/5">
-          {accounts.map((account) => (
+          {accounts.map((account) => {
+            const online = isOnline(account.lastSeenAt);
+            const activity = activityByStaffId.get(account.id);
+            return (
             <div key={account.id} className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center text-white/50">
+                <div className="relative w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center text-white/50">
                   {account.role === "kitchen" ? <ChefHat size={14} /> : <ClipboardList size={14} />}
+                  <span
+                    title={online ? t.online : t.offline}
+                    className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#0a0a0f] ${online ? "bg-emerald-400" : "bg-white/20"}`}
+                  />
                 </div>
                 <div>
                   <p className="text-sm font-semibold">{account.username}</p>
@@ -196,9 +277,62 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
                     {" · "}
                     {t.createdAt} {new Date(account.createdAt).toLocaleDateString(lang === "en" ? "en-GB" : "lt-LT")}
                   </p>
+                  {account.role !== "admin" && (
+                    <p className="text-[11px] text-white/30 mt-0.5">
+                      {activity
+                        ? [
+                            account.role === "kitchen" && activity.preparedCount > 0
+                              ? `${activity.preparedCount} ${t.prepared}`
+                              : null,
+                            account.role === "waiter" && activity.deliveredCount > 0
+                              ? `${activity.deliveredCount} ${t.delivered}`
+                              : null,
+                            account.role === "waiter" && activity.tasksCompletedCount > 0
+                              ? `${activity.tasksCompletedCount} ${t.tasksDone}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || t.noActivityToday
+                        : t.noActivityToday}
+                    </p>
+                  )}
                 </div>
               </div>
-              {account.role === "admin" ? null : confirmingDelete === account.id ? (
+              {account.role === "admin" ? null : resettingFor === account.id ? (
+                <form
+                  onSubmit={(e) => handleResetPassword(e, account.id)}
+                  className="flex items-center gap-1.5"
+                >
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder={t.resetPasswordPlaceholder}
+                    required
+                    minLength={1}
+                    maxLength={200}
+                    autoFocus
+                    className="bg-white/5 border border-white/10 rounded-md px-2 py-1 text-[11px] w-32 focus:outline-none focus:border-primary/50"
+                  />
+                  <button
+                    type="submit"
+                    disabled={resetSubmitting}
+                    className="px-2 py-1 rounded-md text-[11px] font-bold bg-primary/20 text-primary hover:bg-primary/30 border border-primary/30 disabled:opacity-50"
+                  >
+                    {t.save}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResettingFor(null);
+                      setNewPassword("");
+                    }}
+                    className="px-2 py-1 rounded-md text-[11px] text-white/40 hover:text-white/70"
+                  >
+                    {t.no}
+                  </button>
+                </form>
+              ) : confirmingDelete === account.id ? (
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] text-red-400/80">{t.confirmDelete}</span>
                   <button
@@ -215,16 +349,26 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
                   </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => setConfirmingDelete(account.id)}
-                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                >
-                  <Trash2 size={12} />
-                  {t.delete}
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setResettingFor(account.id)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-white/30 hover:text-primary hover:bg-primary/10 transition-colors"
+                  >
+                    <KeyRound size={12} />
+                    {t.resetPassword}
+                  </button>
+                  <button
+                    onClick={() => setConfirmingDelete(account.id)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  >
+                    <Trash2 size={12} />
+                    {t.delete}
+                  </button>
+                </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>

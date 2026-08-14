@@ -26,6 +26,12 @@ export type OrderStatus = "NEW" | "PREPARING" | "READY" | "DELIVERING" | "COMPLE
  */
 export type ServingPreference = "together" | "as_ready";
 
+/** Identifies which logged-in staff account performed an action, for the daily activity view. */
+export interface StaffStamp {
+  id: string;
+  username: string;
+}
+
 export interface OrderItem {
   productId: string;
   name: string;
@@ -33,6 +39,12 @@ export interface OrderItem {
   quantity: number;
   /** Per-item kitchen status. Optional for backward compat with legacy orders. */
   itemStatus?: OrderStatus;
+  /** Who marked this item READY, and when — powers "today's activity" per kitchen account. */
+  preparedBy?: StaffStamp;
+  preparedAt?: string;
+  /** Who marked this item COMPLETED (delivered), and when — same, for waiter accounts. */
+  deliveredBy?: StaffStamp;
+  deliveredAt?: string;
 }
 
 export interface Order {
@@ -189,15 +201,23 @@ export function listOrders(): Order[] {
 export function updateItemStatus(
   orderId: string,
   productId: string,
-  status: OrderStatus
+  status: OrderStatus,
+  staff?: StaffStamp
 ): Order | undefined {
   const orders = readAll();
   const idx = orders.findIndex((o) => o.id === orderId);
   if (idx === -1) return undefined;
 
   const order = normalizeOrder(orders[idx]);
+  const now = new Date().toISOString();
   const updatedItems = order.items.map((i) =>
-    i.productId === productId ? { ...i, itemStatus: status } : i
+    i.productId === productId
+      ? {
+          ...i,
+          itemStatus: status,
+          ...(status === "READY" && staff ? { preparedBy: staff, preparedAt: now } : null),
+        }
+      : i
   );
   const updatedOrder: Order = {
     ...order,
@@ -256,16 +276,25 @@ export function startItemsDelivery(orderId: string, productIds: string[]): Order
  * Waiter delivered — move specified items from DELIVERING → COMPLETED.
  * If productIds is empty, transitions all DELIVERING items in the order.
  */
-export function completeItemsDelivery(orderId: string, productIds: string[]): Order | undefined {
+export function completeItemsDelivery(
+  orderId: string,
+  productIds: string[],
+  staff?: StaffStamp
+): Order | undefined {
   const orders = readAll();
   const idx = orders.findIndex((o) => o.id === orderId);
   if (idx === -1) return undefined;
 
   const order = normalizeOrder(orders[idx]);
+  const now = new Date().toISOString();
   const targets = new Set(productIds.length ? productIds : order.items.map((i) => i.productId));
   const updatedItems = order.items.map((i) =>
     targets.has(i.productId) && (i.itemStatus ?? "NEW") === "DELIVERING"
-      ? { ...i, itemStatus: "COMPLETED" as OrderStatus }
+      ? {
+          ...i,
+          itemStatus: "COMPLETED" as OrderStatus,
+          ...(staff ? { deliveredBy: staff, deliveredAt: now } : null),
+        }
       : i
   );
   orders[idx] = {

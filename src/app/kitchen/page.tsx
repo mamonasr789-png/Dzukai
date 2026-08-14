@@ -23,6 +23,8 @@ import {
 import StaffLangSwitch from "@/components/StaffLangSwitch";
 import StaffLogoutButton from "@/components/StaffLogoutButton";
 import { tProduct } from "@/lib/product-translations";
+import { useCurrentStaff } from "@/lib/useCurrentStaff";
+import type { StaffStamp } from "@/lib/orders";
 import {
   Clock, ChefHat, Bell, CheckCircle2, XCircle,
   UtensilsCrossed, Sun, Moon, Utensils, Zap, ChevronDown, ChevronUp,
@@ -138,6 +140,7 @@ export default function KitchenPage() {
   const [theme, toggleTheme] = useKitchenTheme();
   const [lang, setLang] = useStaffLang();
   const t = staffT(lang);
+  const staff = useCurrentStaff();
 
   useEffect(() => {
     purgeOldHistory(); // clean on mount
@@ -218,7 +221,7 @@ export default function KitchenPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {activeOrders.map((order) => (
-                <OrderCard key={order.id} order={order} theme={theme} lang={lang} t={t} />
+                <OrderCard key={order.id} order={order} theme={theme} lang={lang} t={t} staff={staff} />
               ))}
             </div>
           )
@@ -260,7 +263,19 @@ function EmptyState({ message, hint }: { message: string; hint: string }) {
 
 // ── Active order card ─────────────────────────────────────────────────────────
 
-function OrderCard({ order, theme, lang, t }: { order: Order; theme: KitchenTheme; lang: StaffLang; t: StaffDict }) {
+function OrderCard({
+  order,
+  theme,
+  lang,
+  t,
+  staff,
+}: {
+  order: Order;
+  theme: KitchenTheme;
+  lang: StaffLang;
+  t: StaffDict;
+  staff: StaffStamp | null;
+}) {
   const cardBorder = theme === "dark" ? CARD_BORDER_DARK[order.status] : CARD_BORDER_LIGHT[order.status];
 
   return (
@@ -291,7 +306,7 @@ function OrderCard({ order, theme, lang, t }: { order: Order; theme: KitchenThem
 
       <div className="flex flex-col gap-2.5">
         {order.items.map((item) => (
-          <ItemRow key={item.productId} orderId={order.id} item={item} theme={theme} lang={lang} t={t} />
+          <ItemRow key={item.productId} orderId={order.id} item={item} theme={theme} lang={lang} t={t} staff={staff} />
         ))}
       </div>
 
@@ -419,7 +434,21 @@ function ServingBadge({ preference, theme, lang }: { preference: ServingPreferen
 
 // ── Item row ──────────────────────────────────────────────────────────────────
 
-function ItemRow({ orderId, item, theme, lang, t }: { orderId: string; item: OrderItem; theme: KitchenTheme; lang: StaffLang; t: StaffDict }) {
+function ItemRow({
+  orderId,
+  item,
+  theme,
+  lang,
+  t,
+  staff,
+}: {
+  orderId: string;
+  item: OrderItem;
+  theme: KitchenTheme;
+  lang: StaffLang;
+  t: StaffDict;
+  staff: StaffStamp | null;
+}) {
   const status = item.itemStatus ?? "NEW";
   const badge = theme === "dark" ? STATUS_BADGE_DARK[status] : STATUS_BADGE_LIGHT[status];
   // Kitchen's job ends at READY. DELIVERING and beyond are waiter territory.
@@ -427,7 +456,8 @@ function ItemRow({ orderId, item, theme, lang, t }: { orderId: string; item: Ord
 
   const advance = () => {
     if (status === "NEW") updateItemStatus(orderId, item.productId, "PREPARING");
-    else if (status === "PREPARING") updateItemStatus(orderId, item.productId, "READY");
+    else if (status === "PREPARING")
+      updateItemStatus(orderId, item.productId, "READY", staff ?? undefined);
     // No action for READY — waiter takes over from here
   };
 

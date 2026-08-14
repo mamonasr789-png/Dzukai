@@ -52,6 +52,8 @@ import {
 import StaffLangSwitch from "@/components/StaffLangSwitch";
 import StaffLogoutButton from "@/components/StaffLogoutButton";
 import { tProduct } from "@/lib/product-translations";
+import { useCurrentStaff } from "@/lib/useCurrentStaff";
+import type { StaffStamp } from "@/lib/orders";
 import {
   UtensilsCrossed, Receipt, Bell, ShoppingBag,
   Clock, CheckCircle2, ChevronDown, ChevronUp,
@@ -213,6 +215,7 @@ export default function WaiterPage() {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [lang, setLang] = useStaffLang();
   const t = staffT(lang);
+  const staff = useCurrentStaff();
 
   useEffect(() => {
     const refreshOrders = () => {
@@ -313,9 +316,9 @@ export default function WaiterPage() {
         {displayedGroups.length === 0 ? (
           <EmptyState filter={filter} t={t} />
         ) : view === "tables" ? (
-          <TableView groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} lang={lang} t={t} />
+          <TableView groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} lang={lang} t={t} staff={staff} />
         ) : (
-          <GroupList groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} lang={lang} t={t} />
+          <GroupList groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} lang={lang} t={t} staff={staff} />
         )}
       </div>
     </div>
@@ -431,7 +434,7 @@ function ActiveSessionCard({
 // ── Group list ────────────────────────────────────────────────────────────────
 
 function GroupList({
-  groups, orders, sessions, expandedKey, onToggle, lang, t,
+  groups, orders, sessions, expandedKey, onToggle, lang, t, staff,
 }: {
   groups: TaskGroup[];
   orders: Order[];
@@ -440,6 +443,7 @@ function GroupList({
   onToggle: (key: string) => void;
   lang: StaffLang;
   t: StaffDict;
+  staff: StaffStamp | null;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -453,6 +457,7 @@ function GroupList({
           onToggle={() => onToggle(group.key)}
           lang={lang}
           t={t}
+          staff={staff}
         />
       ))}
     </div>
@@ -462,7 +467,7 @@ function GroupList({
 // ── Table view ────────────────────────────────────────────────────────────────
 
 function TableView({
-  groups, orders, sessions, expandedKey, onToggle, lang, t,
+  groups, orders, sessions, expandedKey, onToggle, lang, t, staff,
 }: {
   groups: TaskGroup[];
   orders: Order[];
@@ -471,6 +476,7 @@ function TableView({
   onToggle: (key: string) => void;
   lang: StaffLang;
   t: StaffDict;
+  staff: StaffStamp | null;
 }) {
   // Re-group by table, preserving the already-grouped structure
   const byTable = new Map<string, TaskGroup[]>();
@@ -505,6 +511,7 @@ function TableView({
                   onToggle={() => onToggle(group.key)}
                   lang={lang}
                   t={t}
+                  staff={staff}
                 />
               ))}
             </div>
@@ -518,7 +525,7 @@ function TableView({
 // ── Group card ────────────────────────────────────────────────────────────────
 
 function GroupCard({
-  group, orders, sessions, expanded, onToggle, lang, t,
+  group, orders, sessions, expanded, onToggle, lang, t, staff,
 }: {
   group: TaskGroup;
   orders: Order[];
@@ -527,6 +534,7 @@ function GroupCard({
   onToggle: () => void;
   lang: StaffLang;
   t: StaffDict;
+  staff: StaffStamp | null;
 }) {
   const isAllCompleted = group.activeTasks.length === 0;
   const order = orders.find((o) => o.id === group.orderId);
@@ -626,6 +634,7 @@ function GroupCard({
               isLast={i === group.tasks.length - 1}
               lang={lang}
               t={t}
+              staff={staff}
             />
           ))}
         </div>
@@ -637,13 +646,14 @@ function GroupCard({
 // ── Task row (inside expanded group) ─────────────────────────────────────────
 
 function TaskRow({
-  task, order, isLast, lang, t,
+  task, order, isLast, lang, t, staff,
 }: {
   task: WaiterTask;
   order: Order | undefined;
   isLast: boolean;
   lang: StaffLang;
   t: StaffDict;
+  staff: StaffStamp | null;
 }) {
   const isCompleted = task.status === "completed";
 
@@ -656,18 +666,18 @@ function TaskRow({
       }
     } else if (task.status === "accepted") {
       if (task.type === "ready_to_serve") {
-        completeItemsDelivery(task.orderId, task.items.map((i) => i.productId));
-        updateTaskStatus(task.id, "completed");
+        completeItemsDelivery(task.orderId, task.items.map((i) => i.productId), staff ?? undefined);
+        updateTaskStatus(task.id, "completed", staff ?? undefined);
       } else if (task.type === "bill_requested") {
-        updateTaskStatus(task.id, "completed");
+        updateTaskStatus(task.id, "completed", staff ?? undefined);
         const session = getActiveSession();
         if (session && session.orderIds.includes(task.orderId)) {
-          completeTasksForOrders(session.orderIds);
+          completeTasksForOrders(session.orderIds, staff ?? undefined);
           markSessionPaid("WAITER");
           clearCartStorage();
         }
       } else {
-        updateTaskStatus(task.id, "completed");
+        updateTaskStatus(task.id, "completed", staff ?? undefined);
       }
     }
   };

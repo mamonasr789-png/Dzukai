@@ -9,7 +9,7 @@
  * "dzukai:waiter" CustomEvent (same-tab).
  */
 
-import type { Order } from "./orders";
+import type { Order, StaffStamp } from "./orders";
 
 const STORAGE_KEY = "dzukai-waiter-tasks";
 const SYNC_EVENT = "dzukai:waiter";
@@ -75,6 +75,8 @@ export interface WaiterTask {
   triggeredBy: string;
   items: WaiterTaskItem[];
   notes?: string;
+  /** Who resolved this task — powers "today's activity" per waiter account. */
+  completedBy?: StaffStamp;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -181,11 +183,20 @@ export function createTask(params: {
   return createTask({ ...params, notes: params.notes });
 }
 
-export function updateTaskStatus(id: string, status: WaiterTaskStatus): WaiterTask | undefined {
+export function updateTaskStatus(
+  id: string,
+  status: WaiterTaskStatus,
+  staff?: StaffStamp
+): WaiterTask | undefined {
   const tasks = readAll();
   const idx = tasks.findIndex((t) => t.id === id);
   if (idx === -1) return undefined;
-  tasks[idx] = { ...tasks[idx], status, updatedAt: now() };
+  tasks[idx] = {
+    ...tasks[idx],
+    status,
+    updatedAt: now(),
+    ...(status === "completed" && staff ? { completedBy: staff } : null),
+  };
   writeAll(tasks);
   return tasks[idx];
 }
@@ -202,14 +213,19 @@ export function deleteTask(id: string): void {
  * does not mean the food reached the table. If the customer pays early, the
  * waiter must still see "Nešti maistą" until they actually deliver it.
  */
-export function completeTasksForOrders(orderIds: string[]): void {
+export function completeTasksForOrders(orderIds: string[], staff?: StaffStamp): void {
   const idSet = new Set(orderIds);
   const tasks = readAll();
   let changed = false;
   const updated = tasks.map((t) => {
     if (idSet.has(t.orderId) && t.status !== "completed" && t.type !== "ready_to_serve") {
       changed = true;
-      return { ...t, status: "completed" as WaiterTaskStatus, updatedAt: now() };
+      return {
+        ...t,
+        status: "completed" as WaiterTaskStatus,
+        updatedAt: now(),
+        ...(staff ? { completedBy: staff } : null),
+      };
     }
     return t;
   });
