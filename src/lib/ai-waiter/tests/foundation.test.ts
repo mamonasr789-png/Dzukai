@@ -1468,7 +1468,7 @@ test("production guard returns an explicit 503 and cannot use memory", async () 
   assert.equal(
     getAiWaiterRuntimeAvailability(
       "production",
-      "process-local-memory",
+      "sqlite",
       "TRUE"
     ).available,
     false

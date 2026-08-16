@@ -1,20 +1,28 @@
 import "server-only";
 
-import { StandaloneVaiseCartAdapter } from "./cartPort.ts";
-import { InMemoryActionLedger } from "./actionLedger.ts";
+import { createDurableCartAdapter } from "./cartPort.ts";
+import { createDurableActionLedger } from "./actionLedger.ts";
 import { AnthropicAIProvider } from "./anthropicProvider.ts";
 import { GeminiAIProvider } from "./geminiProvider.ts";
-import { InMemoryConversationStateStore } from "./conversationStateStore.ts";
+import { createDurableConversationStateStore } from "./conversationStateStore.ts";
 import { DeterministicFallbackProvider } from "./deterministicFallbackProvider.ts";
 import { StaticMenuRepository } from "./menuRepository.ts";
 import { InMemoryRateLimitAdapter } from "./rateLimitPort.ts";
-import { InMemoryStaffTaskAdapter } from "./staffTaskPort.ts";
+import { createDurableStaffTaskAdapter } from "./staffTaskPort.ts";
 import { SafeToolRegistry } from "./toolRegistry.ts";
 import { WaiterTurnController } from "./turnController.ts";
-import { InMemoryTurnIdempotencyStore } from "./turnIdempotencyStore.ts";
-import { InMemorySessionTurnCoordinator } from "./sessionTurnCoordinator.ts";
+import { createDurableTurnIdempotencyStore } from "./turnIdempotencyStore.ts";
+import { createDurableSessionTurnCoordinator } from "./sessionTurnCoordinator.ts";
+import { configuredAiWaiterBackendKind } from "./aiWaiterDb.ts";
 
-export const runtimeStorageKind = "process-local-memory" as const;
+// Which backend this process actually talks to for the six AI-waiter session
+// stores: "postgres" (Neon, durable across deploys/instances — what Vercel
+// production uses once DATABASE_URL is set) or "sqlite" (data/vaise.db, a
+// single file on local disk — fine for local dev, not safe to treat as
+// durable production storage: Vercel's filesystem is ephemeral and may not
+// even be writable, and a second instance would never see writes from the
+// first). Read once at module load; env is not expected to change mid-process.
+export const runtimeStorageKind = configuredAiWaiterBackendKind();
 
 export interface RuntimeAvailability {
   available: boolean;
@@ -22,14 +30,25 @@ export interface RuntimeAvailability {
   message?: string;
 }
 
+/**
+ * Session state used to be plain in-process Maps, wiped by every deploy or
+ * fresh serverless instance — this guard existed to stop production from
+ * silently running on that. The six stores are now DB-backed (Postgres in
+ * production, SQLite locally), so the guard now only fires for the one case
+ * that is still unsafe: NODE_ENV=production without DATABASE_URL/POSTGRES_URL
+ * configured, which would otherwise fall back to a non-durable SQLite file.
+ * AI_WAITER_DEMO_ALLOW_IN_MEMORY is kept as the same escape hatch for running
+ * a stateless demo in that situation (session data just won't survive a
+ * redeploy) rather than hard-failing — same knob, narrower trigger.
+ */
 export function getAiWaiterRuntimeAvailability(
   nodeEnvironment = process.env.NODE_ENV,
-  storageKind: string = runtimeStorageKind,
+  storageKind: string = configuredAiWaiterBackendKind(),
   demoAllowInMemory = process.env.AI_WAITER_DEMO_ALLOW_IN_MEMORY
 ): RuntimeAvailability {
   if (
     nodeEnvironment === "production" &&
-    storageKind === runtimeStorageKind &&
+    storageKind === "sqlite" &&
     demoAllowInMemory !== "true"
   ) {
     return {
@@ -45,31 +64,24 @@ export function getAiWaiterRuntimeAvailability(
 export function isProductionInMemoryDemoOverride(
   nodeEnvironment = process.env.NODE_ENV,
   demoAllowInMemory = process.env.AI_WAITER_DEMO_ALLOW_IN_MEMORY,
-  storageKind: string = runtimeStorageKind
+  storageKind: string = configuredAiWaiterBackendKind()
 ): boolean {
   return (
     nodeEnvironment === "production" &&
-    storageKind === runtimeStorageKind &&
+    storageKind === "sqlite" &&
     demoAllowInMemory === "true"
   );
 }
 
-export const conversationStateStore =
-  new InMemoryConversationStateStore();
 export const menuRepository = new StaticMenuRepository();
 export const rateLimitPort = new InMemoryRateLimitAdapter();
-export const cartPort = new StandaloneVaiseCartAdapter(
-  menuRepository,
-  conversationStateStore
-);
-export const staffTaskPort = new InMemoryStaffTaskAdapter(
-  conversationStateStore
-);
-export const turnIdempotencyStore =
-  new InMemoryTurnIdempotencyStore();
-export const actionLedger = new InMemoryActionLedger();
-export const sessionTurnCoordinator =
-  new InMemorySessionTurnCoordinator();
+
+export const conversationStateStore = await createDurableConversationStateStore();
+export const cartPort = await createDurableCartAdapter(menuRepository, conversationStateStore);
+export const staffTaskPort = await createDurableStaffTaskAdapter(conversationStateStore);
+export const turnIdempotencyStore = await createDurableTurnIdempotencyStore();
+export const actionLedger = await createDurableActionLedger();
+export const sessionTurnCoordinator = await createDurableSessionTurnCoordinator();
 
 conversationStateStore.registerSessionCleanup((sessionId) =>
   cartPort.cleanupSession(sessionId)
