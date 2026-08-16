@@ -1,9 +1,48 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChefHat, ClipboardList, BarChart3 } from "lucide-react";
+import { ChefHat, ClipboardList, BarChart3, Sun, Moon } from "lucide-react";
 import StaffLogoutButton from "@/components/StaffLogoutButton";
+
+// ── Theme (same pattern as /kitchen's own toggle — a per-page preference) ────
+
+const THEME_KEY = "dzukai-staff-hub-theme";
+type HubTheme = "light" | "dark";
+
+function applyTheme(theme: HubTheme): void {
+  if (theme === "dark") document.documentElement.classList.add("dark");
+  else document.documentElement.classList.remove("dark");
+}
+
+function useHubTheme(): [HubTheme, () => void] {
+  const [theme, setTheme] = useState<HubTheme>("light");
+  const prevHtmlClass = useRef<string>("");
+
+  useEffect(() => {
+    const applySaved = () => {
+      const saved = (localStorage.getItem(THEME_KEY) ?? "light") as HubTheme;
+      setTheme(saved);
+      prevHtmlClass.current = document.documentElement.className;
+      applyTheme(saved);
+    };
+    applySaved();
+    return () => {
+      document.documentElement.className = prevHtmlClass.current;
+    };
+  }, []);
+
+  const toggle = () => {
+    setTheme((prev) => {
+      const next: HubTheme = prev === "light" ? "dark" : "light";
+      localStorage.setItem(THEME_KEY, next);
+      applyTheme(next);
+      return next;
+    });
+  };
+
+  return [theme, toggle];
+}
 
 /**
  * Staff hub — the PWA entry point. Staff install this page to the home
@@ -40,6 +79,7 @@ const ROLES = [
 
 export default function StaffHubPage() {
   const [loggedIn, setLoggedIn] = useState(false);
+  const [theme, toggleTheme] = useHubTheme();
 
   useEffect(() => {
     fetch("/api/staff/session")
@@ -58,7 +98,16 @@ export default function StaffHubPage() {
             Pasirinkite darbo vietą
           </h1>
         </div>
-        {loggedIn && <StaffLogoutButton lang="lt" variant="light" />}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Šviesi tema" : "Tamsi tema"}
+            className="w-9 h-9 rounded-xl flex items-center justify-center bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          {loggedIn && <StaffLogoutButton lang="lt" variant="light" />}
+        </div>
       </header>
 
       <div className="flex flex-col gap-4">
