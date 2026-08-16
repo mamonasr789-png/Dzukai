@@ -3,6 +3,7 @@ import "server-only";
 import { StandaloneVaiseCartAdapter } from "./cartPort.ts";
 import { InMemoryActionLedger } from "./actionLedger.ts";
 import { AnthropicAIProvider } from "./anthropicProvider.ts";
+import { GeminiAIProvider } from "./geminiProvider.ts";
 import { InMemoryConversationStateStore } from "./conversationStateStore.ts";
 import { DeterministicFallbackProvider } from "./deterministicFallbackProvider.ts";
 import { StaticMenuRepository } from "./menuRepository.ts";
@@ -94,6 +95,7 @@ export const safeToolRegistry = new SafeToolRegistry(
   rateLimitPort
 );
 export const anthropicProvider = new AnthropicAIProvider();
+export const geminiProvider = new GeminiAIProvider();
 export const deterministicFallbackProvider =
   new DeterministicFallbackProvider();
 export const waiterTurnController = new WaiterTurnController({
@@ -101,7 +103,7 @@ export const waiterTurnController = new WaiterTurnController({
   menuRepository,
   cartPort,
   toolRegistry: safeToolRegistry,
-  provider: anthropicProvider,
+  provider: geminiProvider,
   fallbackProvider: deterministicFallbackProvider,
   turnIdempotency: turnIdempotencyStore,
   actionLedger,

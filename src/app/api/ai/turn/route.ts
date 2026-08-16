@@ -11,7 +11,7 @@ import {
 } from "../../../../lib/ai-waiter/server/http.ts";
 import { requestFingerprint } from "../../../../lib/ai-waiter/server/rateLimitPort.ts";
 import {
-  anthropicProvider,
+  geminiProvider,
   conversationStateStore,
   deterministicWaiterTurnController,
   getAiWaiterRuntimeAvailability,
@@ -63,8 +63,13 @@ export function resolveWaiterControllerSelection(
       : explicitMode.success
         ? explicitMode.data
         : "auto";
+  // The "anthropic" dev-mode label predates this provider swap and is kept
+  // as-is (see /lib/ai-waiter/server/geminiProvider.ts) rather than renamed
+  // throughout schemas/tests/UI copy — it now means "the configured real-API
+  // provider", which is Gemini. What matters is that this check reflects
+  // whichever provider actually backs waiterTurnController.
   const anthropicAvailable =
-    options.anthropicAvailable ?? anthropicProvider.isAvailable();
+    options.anthropicAvailable ?? geminiProvider.isAvailable();
 
   if (requestedMode === "deterministic") {
     return {

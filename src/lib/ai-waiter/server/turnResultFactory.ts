@@ -64,7 +64,8 @@ export class TurnResultFactory {
       ...(process.env.NODE_ENV === "development"
         ? {
             developmentProviderPath: runtime
-              ? runtime.providerLoop.providerId === "anthropic"
+              ? runtime.providerLoop.providerId === "anthropic" ||
+                runtime.providerLoop.providerId === "gemini"
                 ? ("anthropic" as const)
                 : ("deterministic" as const)
               : ("not_used" as const),
