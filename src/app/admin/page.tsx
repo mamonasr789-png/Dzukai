@@ -141,10 +141,10 @@ export default function AdminPage() {
   const isEmpty = orders.length === 0;
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white">
+    <div className="min-h-screen bg-[#0a0a0f] text-white overflow-x-hidden">
       {/* Header */}
       <div className="border-b border-white/8 px-4 sm:px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
               <BarChart3 size={18} className="text-primary" />
@@ -156,7 +156,7 @@ export default function AdminPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <StaffLangSwitch lang={lang} onChange={setLang} />
             <StaffLogoutButton lang={lang} />
 
