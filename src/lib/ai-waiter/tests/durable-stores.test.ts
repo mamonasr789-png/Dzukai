@@ -204,14 +204,8 @@ test("a completed turn replays its persisted result on a fresh idempotency store
   const first = await writer.execute(sessionId, "turn_1", "Labas", async () => {
     calls += 1;
     return WaiterTurnResultSchema.parse({
-      ok: true,
-      data: {
-        reply: "Labas!",
-        language: "lt",
-        state: null,
-        actions: [],
-        actionLedger: [],
-      },
+      ok: false,
+      error: { code: "internal_error", message: "deliberate test result" },
     });
   });
   assert.equal(first.ok, true);
@@ -232,8 +226,8 @@ test("a completed turn replays its persisted result on a fresh idempotency store
 
   const conflict = await reader.execute(sessionId, "turn_1", "Something else", async () =>
     WaiterTurnResultSchema.parse({
-      ok: true,
-      data: { reply: "x", language: "lt", state: null, actions: [], actionLedger: [] },
+      ok: false,
+      error: { code: "internal_error", message: "should not run" },
     })
   );
   assert.equal(conflict.ok, false);
@@ -249,7 +243,24 @@ test("action ledger entries are queryable by turn from a fresh instance", async 
     sessionId,
     turnId: "turn_a",
     ordinal: 0,
-    intent: "add_item",
+    intent: {
+      actionType: "add_to_cart",
+      affirmation: "affirmative",
+      negated: false,
+      hypothetical: false,
+      ambiguous: false,
+      informationalOnly: false,
+      comparisonOnly: false,
+      futureIntent: false,
+      thirdPartyIntent: false,
+      targetType: "product",
+      targetIds: ["u1"],
+      quantity: 1,
+      customerNote: null,
+      evidence: "test",
+      confidence: "high",
+      clarificationReason: null,
+    },
     toolName: "add_to_cart",
     canonicalInput: { productId: "u1" },
     cartRevision: 0,
