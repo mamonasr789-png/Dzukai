@@ -40,6 +40,8 @@ export interface SyncStore {
     collection: SyncCollection,
     since: number
   ): Promise<{ records: PulledRecord[]; watermark: number }>;
+  /** Wipes every order/session/task for every device — the admin "clear test data" reset. */
+  purgeAll(): Promise<void>;
 }
 
 /** Initial pulls only receive rows younger than this — old history stays out. */
@@ -131,6 +133,11 @@ class PostgresSyncStore implements SyncStore {
     }));
     return { records, watermark: watermarkFrom(records, since) };
   }
+
+  async purgeAll(): Promise<void> {
+    await this.ensureSchema();
+    await this.sql`DELETE FROM sync_records`;
+  }
 }
 
 // ── SQLite (local development) ────────────────────────────────────────────────
@@ -153,14 +160,30 @@ export class SqliteSyncStore implements SyncStore {
         PRIMARY KEY (collection, id)
       );
       CREATE INDEX IF NOT EXISTS records_by_seq ON records (collection, seq);
+      -- A standalone counter, not MAX(seq) over records: a client's watermark
+      -- is a seq number it has already seen. If records are ever deleted
+      -- (purgeAll, or hand-editing the dev DB) and nextSeq() falls back to
+      -- deriving from what's left, a reused seq becomes invisible forever to
+      -- any client whose watermark already passed it. This mirrors Postgres's
+      -- SEQUENCE, which keeps counting regardless of DELETEs.
+      CREATE TABLE IF NOT EXISTS records_seq_counter (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        value INTEGER NOT NULL
+      );
     `);
+    this.db.exec(
+      `INSERT INTO records_seq_counter (id, value)
+       SELECT 1, COALESCE(MAX(seq), 0) FROM records
+       WHERE NOT EXISTS (SELECT 1 FROM records_seq_counter WHERE id = 1)`
+    );
   }
 
   private nextSeq(): number {
+    this.db.exec("UPDATE records_seq_counter SET value = value + 1 WHERE id = 1");
     const row = this.db
-      .prepare("SELECT COALESCE(MAX(seq), 0) AS m FROM records")
-      .get() as { m: number };
-    return row.m + 1;
+      .prepare("SELECT value FROM records_seq_counter WHERE id = 1")
+      .get() as { value: number };
+    return row.value;
   }
 
   async push(collection: SyncCollection, records: SyncRecord[]): Promise<number> {
@@ -218,6 +241,10 @@ export class SqliteSyncStore implements SyncStore {
       seq: row.seq,
     }));
     return { records, watermark: watermarkFrom(records, since) };
+  }
+
+  async purgeAll(): Promise<void> {
+    this.db.exec("DELETE FROM records");
   }
 }
 

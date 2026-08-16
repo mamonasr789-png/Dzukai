@@ -81,8 +81,8 @@ export default function AdminPage() {
   const t = staffT(lang);
   useCurrentStaff(); // side effect only here: keeps this admin's last-seen ping alive
 
-  const handleReset = () => {
-    resetDemoData();
+  const handleReset = async () => {
+    await resetDemoData();
     refreshAll();
     setConfirmReset(false);
   };

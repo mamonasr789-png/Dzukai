@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requireStaffRole } from "../../../../lib/server/auth/requireSession";
 import {
   SYNC_COLLECTIONS,
   getSyncStore,
@@ -90,4 +91,18 @@ export async function POST(request: Request): Promise<Response> {
     { ok: true, collections: result },
     { headers: { "cache-control": "no-store" } }
   );
+}
+
+/** Admin "clear test data" — wipes orders/sessions/tasks for every device, not just this browser. */
+export async function DELETE(): Promise<Response> {
+  const session = await requireStaffRole("admin");
+  if (!session) {
+    return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+  const store = await getSyncStore();
+  if (!store) {
+    return Response.json({ ok: false, error: "sync_not_configured" }, { status: 503 });
+  }
+  await store.purgeAll();
+  return Response.json({ ok: true });
 }

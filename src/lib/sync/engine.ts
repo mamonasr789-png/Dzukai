@@ -9,9 +9,12 @@
  * (kitchen, waiter, admin, customer tracking) updates without a single UI
  * change. localStorage stays the local cache; the server is the shared truth.
  *
- * Self-disabling: where the API answers 503 (no writable disk, e.g. the
- * current Vercel demo), the engine shuts down after a few attempts and the
- * app behaves exactly as it did before the backend existed.
+ * Never permanently gives up: a deploy hiccup, a Neon blip, or a phone
+ * backgrounding the tab mid-request must not silently stop that one device
+ * from syncing until someone thinks to reload the page — the whole point is
+ * that every staff device shows the same thing. Every tick is bounded by a
+ * timeout so a stuck request can never wedge the engine, and failures just
+ * mean "try again next tick" rather than "stop trying".
  */
 
 import { applyRemote, diffLocal } from "./merge";
@@ -29,7 +32,7 @@ const COLLECTIONS: Record<string, CollectionBinding> = {
 
 const STATE_KEY = "dzukai-sync-state";
 const TICK_MS = 2_500;
-const MAX_CONSECUTIVE_FAILURES = 3;
+const FETCH_TIMEOUT_MS = 8_000;
 
 interface SyncState {
   watermarks: Record<string, number>;
@@ -54,12 +57,15 @@ function writeState(state: SyncState): void {
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let ticking = false;
-let failures = 0;
-let disabled = false;
 
 async function tick(): Promise<void> {
-  if (ticking || disabled) return;
+  if (ticking) return;
   ticking = true;
+  // Bounds every tick, including a fetch a suspended mobile tab never got to
+  // finish — without this, `ticking` could stay true forever and silently
+  // stop this one device from syncing again until the page is reloaded.
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     const state = readState();
     const request: Record<string, { since: number; push: unknown[] }> = {};
@@ -74,18 +80,14 @@ async function tick(): Promise<void> {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ collections: request }),
+      signal: controller.signal,
     });
     if (!response.ok) {
-      failures += 1;
-      if (response.status === 503 || response.status === 404) {
-        if (failures >= MAX_CONSECUTIVE_FAILURES) {
-          disabled = true;
-          stopSync();
-        }
-      }
+      // Whatever this was — a deploy cutting over, a Neon blip, sync not
+      // configured locally — the next tick tries again on its own. No
+      // permanent give-up: every device should end up showing the same data.
       return;
     }
-    failures = 0;
     const body = (await response.json()) as {
       ok: boolean;
       collections?: Record<
@@ -111,8 +113,9 @@ async function tick(): Promise<void> {
     }
     writeState(nextState);
   } catch {
-    failures += 1;
+    // Network error, aborted timeout, or a malformed response — next tick retries.
   } finally {
+    clearTimeout(abortTimer);
     ticking = false;
   }
 }

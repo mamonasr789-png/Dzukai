@@ -81,4 +81,45 @@ describe("last-write-wins", () => {
   });
 });
 
+describe("purgeAll", () => {
+  it("wipes every collection, not just the one most recently touched", async () => {
+    const s = store();
+    await s.push("orders", [record("o1", "2026-01-01T00:00:00Z")]);
+    await s.push("sessions", [record("s1", "2026-01-01T00:00:00Z")]);
+    await s.push("tasks", [record("t1", "2026-01-01T00:00:00Z")]);
+
+    await s.purgeAll();
+
+    expect((await s.pull("orders", 0)).records).toEqual([]);
+    expect((await s.pull("sessions", 0)).records).toEqual([]);
+    expect((await s.pull("tasks", 0)).records).toEqual([]);
+  });
+
+  it("lets a record with the same id be pushed again after a purge", async () => {
+    const s = store();
+    await s.push("orders", [record("o1", "2026-01-01T00:00:00Z")]);
+    await s.purgeAll();
+    await s.push("orders", [record("o1", "2026-01-02T00:00:00Z")]);
+    const { records } = await s.pull("orders", 0);
+    expect(records.map((r) => r.id)).toEqual(["o1"]);
+  });
+
+  it("keeps handing new records to a device whose watermark predates the purge", async () => {
+    // Regression: seq must never be derived from MAX(seq) over the table.
+    // A device that already pulled up to watermark N must still see a
+    // post-purge record even though the table was empty (and MAX(seq) would
+    // have been 0) right before that record was pushed.
+    const s = store();
+    await s.push("orders", [record("o1", "2026-01-01T00:00:00Z")]);
+    const before = await s.pull("orders", 0);
+    const staleWatermark = before.watermark;
+
+    await s.purgeAll();
+    await s.push("orders", [record("o2", "2026-01-02T00:00:00Z")]);
+
+    const after = await s.pull("orders", staleWatermark);
+    expect(after.records.map((r) => r.id)).toEqual(["o2"]);
+  });
+});
+
 printResults();
