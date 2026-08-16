@@ -931,6 +931,11 @@ function SessionView({
   const copy = useT(lang);
   // Remaining amount: only unpaid orders. Paid orders are kept in history.
   const unpaidTotal = orders.filter((o) => !o.isPaid).reduce((s, o) => s + o.total, 0);
+  // Nothing left to track once food is delivered and paid, or the order was
+  // cancelled — keeping those in the list is just clutter on a repeat visit.
+  const visibleOrders = orders.filter(
+    (o) => o.status !== "CANCELLED" && !(o.status === "COMPLETED" && o.isPaid)
+  );
   const isPaid = session.paymentStatus === "PAID";
   // Paid and bill-requested are both "success"; only a live open session is accent.
   const successChip = isPaid || isBillRequested;
@@ -970,10 +975,12 @@ function SessionView({
         />
       )}
 
-      {/* Orders list */}
+      {/* Orders list — delivered-and-paid or cancelled orders are hidden, not
+          just here for history; the customer has nothing left to track. */}
+      {visibleOrders.length > 0 && (
       <div className="px-4 mt-5 space-y-3">
         <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">{copy.your_orders}</p>
-        {[...orders].reverse().map((o) => (
+        {[...visibleOrders].reverse().map((o) => (
           <Link key={o.id} href={`/order?id=${o.id}`}>
             <div className="bg-card border border-border/40 rounded-2xl p-4 shadow-sm flex items-center gap-3 hover:border-border transition-colors">
               <div className="shrink-0">{STATUS_ICON[o.status]}</div>
@@ -1002,6 +1009,7 @@ function SessionView({
           </Link>
         ))}
       </div>
+      )}
 
       {/* Actions */}
       <div className="px-4 mt-6 flex flex-col gap-2.5">
