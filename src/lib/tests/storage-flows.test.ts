@@ -605,4 +605,30 @@ describe("getStaffActivityToday", () => {
   });
 });
 
+describe("admin calendar filter", () => {
+  it("dateKey formats a local date as YYYY-MM-DD", () => {
+    expect(analytics.dateKey(new Date(2026, 2, 5))).toBe("2026-03-05");
+  });
+
+  it("getOrdersForDate returns only orders created on that local day", () => {
+    reset();
+    const yesterday = makeOrder(10);
+    ageOrder(yesterday.id, 60 * 24 + 5); // ~1 day + 5 min ago — a different calendar day
+    const today = makeOrder(8);
+
+    const todayKey = analytics.dateKey(new Date());
+    const result = orders.listOrders().filter((o) => analytics.dateKey(new Date(o.createdAt)) === todayKey);
+    expect(result.map((o) => o.id)).toEqual([today.id]);
+
+    const forToday = analytics.getOrdersForDate(orders.listOrders(), todayKey);
+    expect(forToday.map((o) => o.id)).toEqual([today.id]);
+  });
+
+  it("returns nothing for a day with no orders", () => {
+    reset();
+    makeOrder(10);
+    expect(analytics.getOrdersForDate(orders.listOrders(), "1999-01-01")).toEqual([]);
+  });
+});
+
 printResults();

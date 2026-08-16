@@ -205,6 +205,10 @@ const lt = {
     adminEmptyTitle: "Užsakymų nėra",
     adminEmptyToday: "Šiandien dar nebuvo užsakymų.",
     adminEmptyAll: "Lokaliai nėra išsaugotų užsakymų.",
+    adminEmptyDate: "Šią dieną užsakymų nebuvo.",
+    adminPickDate: "Pasirinkti dieną",
+    adminSummaryDatePrefix: " — ",
+    adminToday: "Šiandien",
 };
 
 export type StaffDict = { [K in keyof typeof lt]: string };
@@ -297,6 +301,10 @@ const en: StaffDict = {
     adminEmptyTitle: "No orders",
     adminEmptyToday: "No orders yet today.",
     adminEmptyAll: "No orders stored locally.",
+    adminEmptyDate: "No orders on this day.",
+    adminPickDate: "Pick a date",
+    adminSummaryDatePrefix: " — ",
+    adminToday: "Today",
 };
 
 const dict: Record<StaffLang, StaffDict> = { lt, en };

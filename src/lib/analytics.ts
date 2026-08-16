@@ -20,6 +20,16 @@ export function getTodayOrders(orders: Order[]): Order[] {
   return orders.filter((o) => new Date(o.createdAt).getTime() >= midnight);
 }
 
+/** Local YYYY-MM-DD for a date — the calendar filter's day key. */
+export function dateKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Orders created on one specific local calendar day (admin's date-picker filter). */
+export function getOrdersForDate(orders: Order[], day: string): Order[] {
+  return orders.filter((o) => dateKey(new Date(o.createdAt)) === day);
+}
+
 function isToday(iso: string | undefined): boolean {
   if (!iso) return false;
   return new Date(iso).getTime() >= startOfToday().getTime();

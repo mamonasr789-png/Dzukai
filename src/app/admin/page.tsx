@@ -11,6 +11,8 @@ import {
   type KitchenStats,
   type PopularItem,
   getTodayOrders,
+  getOrdersForDate,
+  dateKey,
   calculateRevenue,
   averageOrderValue,
   getKitchenStats,
@@ -20,6 +22,7 @@ import {
 import {
   ShoppingBag, TrendingUp, Clock, ChefHat, Bell,
   CheckCircle2, XCircle, BarChart3, RefreshCw, Calendar, Layers, Table2, Receipt, Truck, CreditCard,
+  ChevronLeft, ChevronRight, CalendarDays,
 } from "lucide-react";
 import { getSessionStats, getPaymentStats, subscribeSession } from "@/lib/tableSession";
 import { resetDemoData } from "@/lib/devReset";
@@ -39,7 +42,7 @@ import { tProduct } from "@/lib/product-translations";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type DateFilter = "today" | "all";
+type DateFilter = "today" | "all" | "date";
 
 // ── Status display (colors only — labels come from staff-i18n) ────────────────
 
@@ -71,6 +74,8 @@ function formatDate(iso: string, lang: StaffLang): string {
 export default function AdminPage() {
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState<DateFilter>("today");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [sessionStats, setSessionStats] = useState({ active: 0, billRequested: 0, total: 0 });
   const [paymentStats, setPaymentStats] = useState({ paidInApp: 0, paidByWaiter: 0, total: 0 });
@@ -119,7 +124,12 @@ export default function AdminPage() {
     return () => { unsubOrders(); unsubSessions(); };
   }, [refreshAll]);
 
-  const orders = filter === "today" ? getTodayOrders(allOrders) : allOrders;
+  const orders =
+    filter === "today"
+      ? getTodayOrders(allOrders)
+      : filter === "date" && selectedDate
+        ? getOrdersForDate(allOrders, selectedDate)
+        : allOrders;
   const activeOrders = orders.filter((o) => ["NEW", "PREPARING", "READY"].includes(o.status));
   const cancelledOrders = orders.filter((o) => o.status === "CANCELLED");
   const revenue = calculateRevenue(orders);
@@ -151,15 +161,55 @@ export default function AdminPage() {
             <StaffLogoutButton lang={lang} />
 
             {/* Filter */}
-            <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 gap-1">
-              <FilterBtn active={filter === "today"} onClick={() => setFilter("today")}>
-                <Calendar size={12} />
-                {t.today}
-              </FilterBtn>
-              <FilterBtn active={filter === "all"} onClick={() => setFilter("all")}>
-                <Layers size={12} />
-                {t.all}
-              </FilterBtn>
+            <div className="relative">
+              <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 gap-1">
+                <FilterBtn
+                  active={filter === "today"}
+                  onClick={() => {
+                    setFilter("today");
+                    setCalendarOpen(false);
+                  }}
+                >
+                  <Calendar size={12} />
+                  {t.today}
+                </FilterBtn>
+                <FilterBtn
+                  active={filter === "all"}
+                  onClick={() => {
+                    setFilter("all");
+                    setCalendarOpen(false);
+                  }}
+                >
+                  <Layers size={12} />
+                  {t.all}
+                </FilterBtn>
+                <FilterBtn
+                  active={filter === "date"}
+                  onClick={() => setCalendarOpen((v) => !v)}
+                  title={t.adminPickDate}
+                >
+                  <CalendarDays size={12} />
+                  {filter === "date" && selectedDate
+                    ? new Date(selectedDate).toLocaleDateString(lang === "en" ? "en-GB" : "lt-LT", {
+                        day: "numeric",
+                        month: "short",
+                      })
+                    : null}
+                </FilterBtn>
+              </div>
+              {calendarOpen && (
+                <OrderDatePicker
+                  lang={lang}
+                  t={t}
+                  selectedDate={selectedDate}
+                  onSelect={(day) => {
+                    setSelectedDate(day);
+                    setFilter("date");
+                    setCalendarOpen(false);
+                  }}
+                  onClose={() => setCalendarOpen(false)}
+                />
+              )}
             </div>
 
             {/* Manual refresh */}
@@ -211,7 +261,18 @@ export default function AdminPage() {
           <>
             {/* ── Summary cards ── */}
             <section>
-              <SectionLabel>{t.adminSummary}{filter === "today" ? t.adminSummaryToday : ""}</SectionLabel>
+              <SectionLabel>
+                {t.adminSummary}
+                {filter === "today"
+                  ? t.adminSummaryToday
+                  : filter === "date" && selectedDate
+                    ? t.adminSummaryDatePrefix +
+                      new Date(selectedDate).toLocaleDateString(lang === "en" ? "en-GB" : "lt-LT", {
+                        day: "numeric",
+                        month: "long",
+                      })
+                    : ""}
+              </SectionLabel>
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 <StatCard
                   label={t.adminOrders}
@@ -339,7 +400,7 @@ function EmptyState({ filter, t }: { filter: DateFilter; t: StaffDict }) {
       </div>
       <p className="font-bold text-lg text-white/70 mb-1">{t.adminEmptyTitle}</p>
       <p className="text-sm text-white/30">
-        {filter === "today" ? t.adminEmptyToday : t.adminEmptyAll}
+        {filter === "today" ? t.adminEmptyToday : filter === "date" ? t.adminEmptyDate : t.adminEmptyAll}
       </p>
     </div>
   );
@@ -519,18 +580,118 @@ function FilterBtn({
   active,
   onClick,
   children,
+  title,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  title?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      title={title}
       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors
         ${active ? "bg-white/10 text-white" : "text-white/40 hover:text-white/70"}`}
     >
       {children}
     </button>
+  );
+}
+
+// ── Order date picker (calendar filter) ─────────────────────────────────────
+
+function OrderDatePicker({
+  lang,
+  t,
+  selectedDate,
+  onSelect,
+  onClose,
+}: {
+  lang: StaffLang;
+  t: StaffDict;
+  selectedDate: string | null;
+  onSelect: (day: string) => void;
+  onClose: () => void;
+}) {
+  const [viewDate, setViewDate] = useState(() => (selectedDate ? new Date(selectedDate) : new Date()));
+  const locale = lang === "en" ? "en-GB" : "lt-LT";
+  const today = new Date();
+
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // Monday-first
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const cells: (number | null)[] = [
+    ...Array(firstWeekday).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const weekdayLabels = Array.from({ length: 7 }, (_, i) =>
+    new Intl.DateTimeFormat(locale, { weekday: "narrow" }).format(new Date(2024, 0, i + 1))
+  );
+  const monthLabel = new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(viewDate);
+
+  return (
+    <>
+      {/* Click-outside backdrop */}
+      <div className="fixed inset-0 z-10" onClick={onClose} />
+      <div className="absolute right-0 top-full mt-2 z-20 bg-[#15151b] border border-white/10 rounded-xl p-3 shadow-2xl w-64">
+        <div className="flex items-center justify-between mb-2">
+          <button
+            onClick={() => setViewDate(new Date(year, month - 1, 1))}
+            className="p-1 rounded-md hover:bg-white/10 text-white/50 hover:text-white/80"
+          >
+            <ChevronLeft size={14} />
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold capitalize">{monthLabel}</span>
+            <button
+              onClick={() => {
+                setViewDate(new Date());
+                onSelect(dateKey(new Date()));
+              }}
+              className="text-[10px] text-primary hover:underline"
+            >
+              {t.adminToday}
+            </button>
+          </div>
+          <button
+            onClick={() => setViewDate(new Date(year, month + 1, 1))}
+            className="p-1 rounded-md hover:bg-white/10 text-white/50 hover:text-white/80"
+          >
+            <ChevronRight size={14} />
+          </button>
+        </div>
+        <div className="grid grid-cols-7 gap-0.5 mb-1">
+          {weekdayLabels.map((w, i) => (
+            <div key={i} className="text-[10px] text-white/30 text-center py-1">
+              {w}
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-0.5">
+          {cells.map((day, i) => {
+            if (day === null) return <div key={i} />;
+            const cellDate = new Date(year, month, day);
+            const key = dateKey(cellDate);
+            const isToday = key === dateKey(today);
+            const isSelected = key === selectedDate;
+            return (
+              <button
+                key={i}
+                onClick={() => onSelect(key)}
+                className={`text-[11px] rounded-lg py-1.5 transition-colors
+                  ${isSelected ? "bg-primary text-black font-bold" : isToday ? "text-primary font-bold hover:bg-white/10" : "text-white/70 hover:bg-white/10"}`}
+              >
+                {day}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </>
   );
 }
