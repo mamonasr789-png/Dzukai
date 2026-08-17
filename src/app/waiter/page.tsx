@@ -8,6 +8,7 @@ import {
   startItemsDelivery,
   completeItemsDelivery,
   updateOrderStatus,
+  markOrderPaid,
 } from "@/lib/orders";
 import {
   type WaiterTask,
@@ -698,6 +699,10 @@ function TaskRow({
         updateTaskStatus(task.id, "completed", staff ?? undefined);
         const session = getActiveSession();
         if (session && session.orderIds.includes(task.orderId)) {
+          // Mirrors order/page.tsx's in-app payment path — mark every order
+          // in the session paid, not just the session itself, or the
+          // customer's own /order screen never shows "Apmokėta".
+          session.orderIds.forEach((orderId) => markOrderPaid(orderId));
           completeTasksForOrders(session.orderIds, staff ?? undefined);
           markSessionPaid("WAITER");
           clearCartStorage();

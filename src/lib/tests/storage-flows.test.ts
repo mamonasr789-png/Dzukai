@@ -315,6 +315,27 @@ describe("payment keeps the order trackable", () => {
     expect(sessions.getTrackableSession()).toBeFalsy(); // now, and only now, gone
   });
 
+  it("waiter marking a bill paid also marks every order in the session paid (not session-only)", () => {
+    reset();
+    const o1 = makeOrder(10);
+    const o2 = makeOrder(15);
+    sessions.addOrderToSession(o1.id, "7");
+    sessions.addOrderToSession(o2.id, "7");
+
+    // Mirrors waiter/page.tsx's bill_requested handler, not order/page.tsx's
+    // in-app payment — the bug was that only markSessionPaid ran, leaving
+    // order.isPaid false so the customer's own screen never showed "Paid".
+    // getActiveSession() (not the stale return value of addOrderToSession)
+    // is what the real handler reads, and reflects both orders.
+    const session = sessions.getActiveSession()!;
+    session.orderIds.forEach((id) => orders.markOrderPaid(id));
+    sessions.markSessionPaid("WAITER");
+
+    expect(orders.getOrder(o1.id)?.isPaid).toBeTruthy();
+    expect(orders.getOrder(o2.id)?.isPaid).toBeTruthy();
+    expect(sessions.getActiveSession()).toBeFalsy();
+  });
+
   it("paid order is not removed from tracking while a sibling is still cooking", () => {
     reset();
     const o1 = makeOrder(10);
