@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { Product } from "./data";
+import { readTableAccessCookie } from "./tableAccessCookie";
 
 export interface CartItem {
   product: Product;
@@ -53,10 +54,23 @@ export const useCartStore = create<CartStore>()(
       lang: "lt",
 
       addItem: (product, quantity = 1) => {
+        // Browsing (/, /product/:id) is open to anyone, but actually ordering
+        // requires having scanned a table's QR first — /menu and /cart already
+        // enforce this at the proxy layer; this is the same rule applied to
+        // the "+" button itself, since ProductCard renders on ungated pages too.
+        const gate = readTableAccessCookie();
+        if (!gate) {
+          window.location.href = "/table-required";
+          return;
+        }
         set((state) => {
+          // menu/page.tsx normally sets this, but a product can be added
+          // straight from / or /product/:id without ever visiting /menu first.
+          const tableNumber = state.tableNumber ?? gate.tableNumber;
           const existing = state.items.find((i) => i.product.id === product.id);
           if (existing) {
             return {
+              tableNumber,
               items: state.items.map((i) =>
                 i.product.id === product.id
                   ? { ...i, quantity: i.quantity + quantity }
@@ -64,7 +78,7 @@ export const useCartStore = create<CartStore>()(
               ),
             };
           }
-          return { items: [...state.items, { product, quantity }] };
+          return { tableNumber, items: [...state.items, { product, quantity }] };
         });
       },
 
