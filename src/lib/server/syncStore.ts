@@ -1,6 +1,7 @@
 import "server-only";
 
 import { neon } from "@neondatabase/serverless";
+import { getAiWaiterBackend } from "../ai-waiter/server/aiWaiterDb.ts";
 
 /**
  * Shared order/session/task store — the "one notebook on the bar".
@@ -171,10 +172,16 @@ export class SqliteSyncStore implements SyncStore {
         value INTEGER NOT NULL
       );
     `);
+    // INSERT OR IGNORE, not "WHERE NOT EXISTS": when records is empty, an
+    // aggregate SELECT with no GROUP BY still produces exactly one output
+    // row (COALESCE(MAX(seq),0) over zero rows is a row, not nothing), so
+    // the NOT EXISTS guard failed to suppress it and this threw a UNIQUE
+    // constraint violation on every process restart once records was ever
+    // emptied (e.g. by purgeAll). Conflict resolution on the primary key is
+    // the actual guard here, not a row-count check on an unrelated table.
     this.db.exec(
-      `INSERT INTO records_seq_counter (id, value)
-       SELECT 1, COALESCE(MAX(seq), 0) FROM records
-       WHERE NOT EXISTS (SELECT 1 FROM records_seq_counter WHERE id = 1)`
+      `INSERT OR IGNORE INTO records_seq_counter (id, value)
+       VALUES (1, (SELECT COALESCE(MAX(seq), 0) FROM records))`
     );
   }
 
@@ -259,14 +266,13 @@ async function createStore(): Promise<SyncStore | null> {
     return new PostgresSyncStore(connectionString);
   }
   try {
-    // Lazy: node:sqlite exists only on Node ≥23.4, and Vercel never gets here
-    // (it always has a connection string).
-    const { DatabaseSync } = await import("node:sqlite");
-    const { mkdirSync } = await import("node:fs");
-    const path = await import("node:path");
-    const dir = path.join(process.cwd(), "data");
-    mkdirSync(dir, { recursive: true });
-    return new SqliteSyncStore(new DatabaseSync(path.join(dir, "vaise.db")));
+    // Reuses the AI-waiter module's connection to data/vaise.db instead of
+    // opening a second one — two independent node:sqlite connections to the
+    // same file both work fine, but there's no reason to hold both when one
+    // module already opens and owns it.
+    const backend = await getAiWaiterBackend();
+    if (backend.kind !== "sqlite") return null;
+    return new SqliteSyncStore(backend.db);
   } catch {
     return null;
   }

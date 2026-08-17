@@ -16,6 +16,7 @@ import {
   type PostgresSql,
   type SqliteDatabase,
 } from "./aiWaiterDb.ts";
+import { getSyncStore } from "../../server/syncStore.ts";
 
 export type StaffRequestType = "waiter_called" | "bill_requested";
 
@@ -68,9 +69,43 @@ const DEFAULT_MAXIMUM_IDEMPOTENCY_RECORDS = 40_000;
 const DEFAULT_STAFF_TASK_TTL_MS = 4 * 60 * 60 * 1_000;
 
 /**
- * Development-only task adapter. It deliberately does not claim delivery to
- * the existing browser-local waiter UI.
+ * Bridges an AI-waiter staff request into the real cross-device task feed
+ * (src/lib/waiterTasks.ts's shape) so it actually reaches /waiter, /kitchen
+ * and /admin over the existing sync engine, instead of staying invisible
+ * inside the AI waiter's own internal bookkeeping.
  */
+async function publishWaiterTaskRecord(
+  request: StoredStaffRequest
+): Promise<void> {
+  try {
+    const store = await getSyncStore();
+    if (!store) return;
+    const task = {
+      id: request.requestId,
+      type: request.type,
+      status: "waiting" as const,
+      orderId: `ai:${request.sessionId}`,
+      tableNumber: request.tableNumber,
+      createdAt: request.createdAt,
+      updatedAt: request.createdAt,
+      triggeredBy: `ai:${request.sessionId}:${request.type}`,
+      items: [] as { productId: string; name: string; quantity: number }[],
+      ...(request.note ? { notes: request.note } : {}),
+    };
+    await store.push("tasks", [
+      {
+        id: task.id,
+        data: JSON.stringify(task),
+        updatedAt: task.updatedAt,
+      },
+    ]);
+  } catch {
+    // Best-effort: the AI conversation must not fail because the staff
+    // notification side channel is unavailable.
+  }
+}
+
+/** Development-only task adapter, used directly in tests. */
 export class InMemoryStaffTaskAdapter implements StaffTaskPort {
   private readonly requests = new Map<string, StoredStaffRequest>();
   private readonly idempotency = new Map<string, StaffIdempotencyRecord>();
@@ -438,6 +473,7 @@ abstract class DurableStaffTaskAdapter implements StaffTaskPort {
       expiresAt,
     };
     await this.insertRequest(requestKey, request);
+    await publishWaiterTaskRecord(request);
     await this.upsertIdempotency(idempotencyKey, sessionId, {
       fingerprint,
       requestKey,
