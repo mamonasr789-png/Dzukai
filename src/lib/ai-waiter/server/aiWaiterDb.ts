@@ -49,3 +49,35 @@ export function configuredAiWaiterBackendKind(): AiWaiterBackendKind {
 export function resetAiWaiterBackendForTests(db?: SqliteDatabase): void {
   backendPromise = db ? Promise.resolve({ kind: "sqlite", db }) : undefined;
 }
+
+const AI_WAITER_TABLES = [
+  "ai_waiter_sessions",
+  "ai_waiter_carts",
+  "ai_waiter_cart_idempotency",
+  "ai_waiter_staff_requests",
+  "ai_waiter_staff_idempotency",
+  "ai_waiter_turn_locks",
+  "ai_waiter_turn_idempotency",
+  "ai_waiter_action_ledger",
+] as const;
+
+/**
+ * Admin "clear test data" for the AI waiter: wipes every dining session,
+ * cart, staff request, idempotency record and lock — not the menu, not
+ * staff accounts. A table that was never created yet (fresh deploy, nobody
+ * has chatted with the AI waiter) is not an error, just nothing to purge.
+ */
+export async function purgeAllAiWaiterData(): Promise<void> {
+  const backend = await getAiWaiterBackend();
+  for (const table of AI_WAITER_TABLES) {
+    try {
+      if (backend.kind === "postgres") {
+        await backend.sql.query(`DELETE FROM ${table}`);
+      } else {
+        backend.db.exec(`DELETE FROM ${table}`);
+      }
+    } catch {
+      // Table doesn't exist yet — nothing to purge.
+    }
+  }
+}

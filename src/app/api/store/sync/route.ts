@@ -5,6 +5,7 @@ import {
   getSyncStore,
   type SyncCollection,
 } from "../../../../lib/server/syncStore";
+import { purgeAllAiWaiterData } from "../../../../lib/ai-waiter/server/aiWaiterDb";
 
 export const runtime = "nodejs";
 
@@ -93,7 +94,11 @@ export async function POST(request: Request): Promise<Response> {
   );
 }
 
-/** Admin "clear test data" — wipes orders/sessions/tasks for every device, not just this browser. */
+/**
+ * Admin "clear test data" — wipes orders/sessions/tasks for every device,
+ * plus every AI-waiter dining session, cart and staff request. Not the menu,
+ * not staff accounts.
+ */
 export async function DELETE(): Promise<Response> {
   const session = await requireStaffRole("admin");
   if (!session) {
@@ -104,5 +109,6 @@ export async function DELETE(): Promise<Response> {
     return Response.json({ ok: false, error: "sync_not_configured" }, { status: 503 });
   }
   await store.purgeAll();
+  await purgeAllAiWaiterData();
   return Response.json({ ok: true });
 }
