@@ -369,7 +369,7 @@ export class DeterministicFallbackProvider implements AIProvider {
         ],
       } satisfies ProviderStep);
     }
-    if (/\b(pasalink|remove)\b|удал|убер/u.test(message)) {
+    if (/\b(pasalink|isimk|remove)\b|удал|убер/u.test(message)) {
       const secondLine = /\b(antr\w*|second)\b|втор/u.test(message);
       const line = secondLine ? context.cart.lines[1] : context.cart.lines[0];
       if (!line) {
