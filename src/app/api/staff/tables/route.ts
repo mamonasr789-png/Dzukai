@@ -17,13 +17,24 @@ const CreateTableRequestSchema = z
   })
   .strict();
 
-/** Table numbers only ever need re-signing, never storing — the link is
- *  deterministic from tableNumber + secret. */
+/**
+ * Table numbers only ever need re-signing, never storing — the link is
+ * deterministic from tableNumber + secret. Deliberately never throws: this
+ * runs after the table row is already written, so a signing hiccup must
+ * degrade to a missing link, not fail a creation/list request that already
+ * succeeded at the database level (that used to report "try again" to the
+ * admin while silently leaving the row in place, so a retry then hit 409
+ * "already exists" for a table the panel had never actually shown).
+ */
 function linkFor(tableNumber: string): string | null {
-  const secret = getTableAccessTokenSecret();
-  if (!secret) return null;
-  const token = signTableAccessToken(tableNumber, secret);
-  return `/menu?tableToken=${token}`;
+  try {
+    const secret = getTableAccessTokenSecret();
+    if (!secret) return null;
+    const token = signTableAccessToken(tableNumber, secret);
+    return `/menu?tableToken=${token}`;
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(): Promise<Response> {

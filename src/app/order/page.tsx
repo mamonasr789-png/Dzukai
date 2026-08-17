@@ -18,6 +18,8 @@ import {
   allOrdersPaid,
   subscribeOrders,
   STATUS_ORDER,
+  orderPreparedBy,
+  orderDeliveredBy,
 } from "@/lib/orders";
 import {
   type TableSession,
@@ -408,6 +410,35 @@ function OrderContent() {
                 <p className="text-sm font-semibold text-foreground">{info.short}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">{info.long}</p>
               </div>
+            </div>
+          );
+        })()}
+
+        {/* Who's handling this order — only shown once someone actually has */}
+        {(() => {
+          const preparedBy = orderPreparedBy(order);
+          const deliveredBy = orderDeliveredBy(order);
+          if (!preparedBy && !deliveredBy) return null;
+          return (
+            <div className="mx-4 mt-3 bg-card border border-border/40 rounded-2xl px-4 py-3 shadow-sm flex items-center gap-4">
+              {preparedBy && (
+                <div className="flex items-center gap-2">
+                  <ChefHat size={16} className="text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide leading-none mb-0.5">{copy.prepared_by}</p>
+                    <p className="text-sm font-semibold text-foreground leading-none">{preparedBy.username}</p>
+                  </div>
+                </div>
+              )}
+              {deliveredBy && (
+                <div className="flex items-center gap-2">
+                  <UtensilsCrossed size={16} className="text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide leading-none mb-0.5">{copy.served_by}</p>
+                    <p className="text-sm font-semibold text-foreground leading-none">{deliveredBy.username}</p>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}

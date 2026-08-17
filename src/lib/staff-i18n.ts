@@ -176,6 +176,8 @@ const lt = {
     waiterRejectTable: "Atmesti",
     waiterCancelOrder: "Atšaukti užsakymą",
     waiterCancelOrderConfirm: "Ar tikrai atšaukti šį užsakymą?",
+    prepared_by: "Ruošė",
+    served_by: "Aptarnavo",
 
     // Admin
     adminSubtitle: "Direktoriaus valdymo skydelis",
@@ -276,6 +278,8 @@ const en: StaffDict = {
     waiterRejectTable: "Reject",
     waiterCancelOrder: "Cancel order",
     waiterCancelOrderConfirm: "Cancel this order?",
+    prepared_by: "Prepared by",
+    served_by: "Served by",
 
     // Admin
     adminSubtitle: "Director's dashboard",

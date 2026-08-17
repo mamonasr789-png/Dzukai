@@ -440,3 +440,17 @@ export function subscribeOrders(callback: () => void): () => void {
 // ── Status helpers ────────────────────────────────────────────────────────────
 
 export const STATUS_ORDER: OrderStatus[] = ["NEW", "PREPARING", "READY", "DELIVERING", "COMPLETED"];
+
+/**
+ * Who prepared/delivered this order, for display to the customer and in
+ * admin. Items are stamped individually (a busy kitchen/waiter shift can
+ * split one order across staff), so this picks the first stamp found as the
+ * representative name rather than trying to show every contributor.
+ */
+export function orderPreparedBy(order: Order): StaffStamp | null {
+  return order.items.find((i) => i.preparedBy)?.preparedBy ?? null;
+}
+
+export function orderDeliveredBy(order: Order): StaffStamp | null {
+  return order.items.find((i) => i.deliveredBy)?.deliveredBy ?? null;
+}

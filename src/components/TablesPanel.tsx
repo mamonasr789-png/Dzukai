@@ -103,6 +103,11 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableNumber }),
       });
+      // Refresh regardless of outcome — a 409 ("already exists") can mean an
+      // earlier attempt actually succeeded server-side even though its own
+      // response looked like a failure, so the list must always be re-synced
+      // rather than only on the happy path.
+      await refresh();
       if (res.status === 409) {
         setError(t.tableTaken);
         return;
@@ -112,7 +117,6 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
         return;
       }
       setTableNumber("");
-      await refresh();
     } catch {
       setError(t.genericError);
     } finally {

@@ -6,6 +6,8 @@ import {
   type OrderStatus,
   listOrders,
   subscribeOrders,
+  orderPreparedBy,
+  orderDeliveredBy,
 } from "@/lib/orders";
 import {
   type KitchenStats,
@@ -460,6 +462,8 @@ function RecentRow({ order, lang, t }: { order: Order; lang: StaffLang; t: Staff
   const pref = order.servingPreference ?? "together";
   const prefShort = SERVING_SHORT[lang][pref];
   const isToday = new Date(order.createdAt).toDateString() === new Date().toDateString();
+  const preparedBy = orderPreparedBy(order);
+  const deliveredBy = orderDeliveredBy(order);
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
@@ -482,6 +486,17 @@ function RecentRow({ order, lang, t }: { order: Order; lang: StaffLang; t: Staff
             </>
           )}
         </div>
+        {(preparedBy || deliveredBy) && (
+          <div className="flex items-center gap-2 mt-0.5">
+            {preparedBy && (
+              <span className="text-[11px] text-white/25 truncate">{t.prepared_by} {preparedBy.username}</span>
+            )}
+            {preparedBy && deliveredBy && <span className="text-[11px] text-white/20">·</span>}
+            {deliveredBy && (
+              <span className="text-[11px] text-white/25 truncate">{t.served_by} {deliveredBy.username}</span>
+            )}
+          </div>
+        )}
       </div>
       <span className="text-sm font-bold text-white/80 shrink-0">{order.total.toFixed(2)} €</span>
     </div>
