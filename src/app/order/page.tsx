@@ -47,6 +47,7 @@ import {
 // ── Status display maps ───────────────────────────────────────────────────────
 
 const STATUS_ICON: Record<OrderStatus, React.ReactNode> = {
+  PENDING_CONFIRMATION: <Clock size={28} className="text-slate-400" />,
   NEW: <Clock size={28} className="text-amber-400" />,
   PREPARING: <ChefHat size={28} className="text-blue-400" />,
   READY: <Bell size={28} className="text-green-400" />,
@@ -56,6 +57,7 @@ const STATUS_ICON: Record<OrderStatus, React.ReactNode> = {
 };
 
 const STATUS_ICON_SM: Record<OrderStatus, React.ReactNode> = {
+  PENDING_CONFIRMATION: <Clock size={12} className="text-slate-400" />,
   NEW: <Clock size={12} className="text-amber-400" />,
   PREPARING: <ChefHat size={12} className="text-blue-400" />,
   READY: <Bell size={12} className="text-green-400" />,
@@ -65,6 +67,7 @@ const STATUS_ICON_SM: Record<OrderStatus, React.ReactNode> = {
 };
 
 const STATUS_COLOR: Record<OrderStatus, string> = {
+  PENDING_CONFIRMATION: "text-slate-400",
   NEW: "text-amber-400",
   PREPARING: "text-blue-400",
   READY: "text-green-400",
@@ -74,6 +77,7 @@ const STATUS_COLOR: Record<OrderStatus, string> = {
 };
 
 const ITEM_BADGE: Record<OrderStatus, string> = {
+  PENDING_CONFIRMATION: "bg-slate-500/10 text-slate-400",
   NEW: "bg-amber-500/10 text-amber-400",
   PREPARING: "bg-blue-500/10 text-blue-400",
   READY: "bg-green-500/10 text-green-400",
@@ -204,10 +208,15 @@ function OrderContent() {
 
   // Payment scope: single-order when ?id= is set, full session otherwise.
   // Single-order scope only counts unpaid orders for the remaining total.
-  const unpaidOrders = allOrders.filter((o) => !o.isPaid);
+  // An order the waiter hasn't confirmed yet isn't payable — it might still be rejected.
+  const unpaidOrders = allOrders.filter((o) => !o.isPaid && o.status !== "PENDING_CONFIRMATION");
   const isSessionScope = !id;
   // Amount the customer will actually pay now.
-  const payableOrders = isSessionScope ? unpaidOrders : (order && !order.isPaid ? [order] : []);
+  const payableOrders = isSessionScope
+    ? unpaidOrders
+    : order && !order.isPaid && order.status !== "PENDING_CONFIRMATION"
+      ? [order]
+      : [];
   const payableTotal = payableOrders.reduce((s, o) => s + o.total, 0);
   // Split-the-bill is informational only, so line ids just need to be stable
   // for this render — they never persist beyond the open modal.
@@ -232,7 +241,7 @@ function OrderContent() {
 
   // Status used for the payment card hint text (most advanced payable order wins).
   const STATUS_RANK: Record<OrderStatus, number> = {
-    NEW: 0, PREPARING: 1, READY: 2, DELIVERING: 3, COMPLETED: 4, CANCELLED: -1,
+    PENDING_CONFIRMATION: -1, NEW: 0, PREPARING: 1, READY: 2, DELIVERING: 3, COMPLETED: 4, CANCELLED: -1,
   };
   const paymentHintStatus: OrderStatus = payableOrders.reduce<OrderStatus>((best, o) => {
     return STATUS_RANK[o.status] > STATUS_RANK[best] ? o.status : best;
@@ -403,8 +412,9 @@ function OrderContent() {
           );
         })()}
 
-        {/* Progress timeline */}
-        {order.status !== "CANCELLED" && (
+        {/* Progress timeline — hidden while awaiting confirmation; the status
+            card above already says so, and a 0%-progress bar would look broken. */}
+        {order.status !== "CANCELLED" && order.status !== "PENDING_CONFIRMATION" && (
           <div className="mx-4 mt-4 bg-card border border-border/40 rounded-2xl p-4 shadow-sm">
             <div className="flex items-end justify-between gap-1">
               {STATUS_ORDER.map((s, i) => {

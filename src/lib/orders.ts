@@ -15,7 +15,14 @@ const SYNC_EVENT = "dzukai:order";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type OrderStatus = "NEW" | "PREPARING" | "READY" | "DELIVERING" | "COMPLETED" | "CANCELLED";
+export type OrderStatus =
+  | "PENDING_CONFIRMATION"
+  | "NEW"
+  | "PREPARING"
+  | "READY"
+  | "DELIVERING"
+  | "COMPLETED"
+  | "CANCELLED";
 
 /**
  * "together"  — Bring all dishes at once. Order becomes READY only when
@@ -307,7 +314,7 @@ export function completeItemsDelivery(
   return orders[idx];
 }
 
-const ACTIVE_STATUSES: OrderStatus[] = ["NEW", "PREPARING", "READY", "DELIVERING"];
+const ACTIVE_STATUSES: OrderStatus[] = ["PENDING_CONFIRMATION", "NEW", "PREPARING", "READY", "DELIVERING"];
 
 export function getLatestActiveOrder(): Order | undefined {
   const active = readAll()

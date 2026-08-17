@@ -122,6 +122,14 @@ describe("analytics vs cancelled orders", () => {
     const popular = analytics.getPopularItems(orders.listOrders());
     expect(popular.some((p) => p.productId === "ghost")).toBeFalsy();
   });
+
+  it("revenue excludes orders still awaiting waiter confirmation", () => {
+    reset();
+    makeOrder(20);
+    const pending = makeOrder(50);
+    orders.updateOrderStatus(pending.id, "PENDING_CONFIRMATION");
+    expect(analytics.calculateRevenue(orders.listOrders())).toBe(20);
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -196,6 +204,50 @@ describe("table session invariants", () => {
     expect(orders.allOrdersPaid([o1.id, o2.id])).toBeFalsy();
     orders.markOrderPaid(o2.id);
     expect(orders.allOrdersPaid([o1.id, o2.id])).toBeTruthy();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GROUP 4a — first order of a visit needs waiter confirmation, later ones don't
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Mirrors cart/page.tsx's handleSubmit sequence. */
+function submitOrder(total: number, table = "5") {
+  const order = makeOrder(total, table);
+  const session = sessions.addOrderToSession(order.id, table);
+  if (session.orderIds.length === 1) {
+    orders.updateOrderStatus(order.id, "PENDING_CONFIRMATION");
+  }
+  return { order, session };
+}
+
+describe("first-order confirmation gate", () => {
+  it("seeds the first order of a visit as PENDING_CONFIRMATION", () => {
+    reset();
+    const { order } = submitOrder(20);
+    expect(orders.getOrder(order.id)?.status).toBe("PENDING_CONFIRMATION");
+  });
+
+  it("seeds a second order in the same session as NEW", () => {
+    reset();
+    submitOrder(20);
+    const { order: second } = submitOrder(15);
+    expect(orders.getOrder(second.id)?.status).toBe("NEW");
+  });
+
+  it("confirming (updateOrderStatus → NEW) makes it visible like a normal order", () => {
+    reset();
+    const { order } = submitOrder(20);
+    orders.updateOrderStatus(order.id, "NEW");
+    expect(orders.getOrder(order.id)?.status).toBe("NEW");
+    expect(orders.getOrder(order.id)?.items.every((i) => i.itemStatus === "NEW")).toBeTruthy();
+  });
+
+  it("rejecting (updateOrderStatus → CANCELLED) removes it from active tracking", () => {
+    reset();
+    const { order } = submitOrder(20);
+    orders.updateOrderStatus(order.id, "CANCELLED");
+    expect(orders.hasActiveOrders()).toBeFalsy();
   });
 });
 
@@ -482,6 +534,7 @@ describe("order status derivation", () => {
 describe("customer order tracking translations", () => {
   it("provides English labels for every order status", () => {
     expect(i18n.orderStatusLabels.en).toEqual({
+      PENDING_CONFIRMATION: "Awaiting confirmation",
       NEW: "New",
       PREPARING: "Preparing",
       READY: "Ready",

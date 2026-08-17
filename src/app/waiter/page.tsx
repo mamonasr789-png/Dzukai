@@ -7,6 +7,7 @@ import {
   subscribeOrders,
   startItemsDelivery,
   completeItemsDelivery,
+  updateOrderStatus,
 } from "@/lib/orders";
 import {
   type WaiterTask,
@@ -57,7 +58,7 @@ import type { StaffStamp } from "@/lib/orders";
 import {
   UtensilsCrossed, Receipt, Bell, ShoppingBag,
   Clock, CheckCircle2, ChevronDown, ChevronUp,
-  Table2, List, CreditCard,
+  Table2, List, CreditCard, ShieldCheck, QrCode, XCircle,
 } from "lucide-react";
 
 // ── Payment status derivation ─────────────────────────────────────────────────
@@ -110,6 +111,8 @@ const TASK_ICON: Record<WaiterTaskType, React.ReactNode> = {
   bill_requested: <Receipt size={22} />,
   waiter_called: <Bell size={22} />,
   additional_order: <ShoppingBag size={22} />,
+  order_confirmation: <ShieldCheck size={22} />,
+  table_scanned: <QrCode size={22} />,
 };
 
 const TASK_ICON_SM: Record<WaiterTaskType, React.ReactNode> = {
@@ -117,6 +120,8 @@ const TASK_ICON_SM: Record<WaiterTaskType, React.ReactNode> = {
   bill_requested: <Receipt size={14} />,
   waiter_called: <Bell size={14} />,
   additional_order: <ShoppingBag size={14} />,
+  order_confirmation: <ShieldCheck size={14} />,
+  table_scanned: <QrCode size={14} />,
 };
 
 // ── Color maps ────────────────────────────────────────────────────────────────
@@ -137,6 +142,8 @@ const TYPE_ACCENT: Record<WaiterTaskType, string> = {
   bill_requested: "border-l-blue-400",
   waiter_called: "border-l-red-400",
   additional_order: "border-l-purple-400",
+  order_confirmation: "border-l-rose-400",
+  table_scanned: "border-l-cyan-400",
 };
 
 // ── Grouping ──────────────────────────────────────────────────────────────────
@@ -559,9 +566,11 @@ function GroupCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-black text-[22px] leading-tight tracking-tight">
-                #{group.orderId}
+                {group.tasks[0]?.type === "table_scanned"
+                  ? `${t.table} ${group.tableNumber ?? "—"}`
+                  : `#${group.orderId}`}
               </span>
-              {group.tableNumber && (
+              {group.tasks[0]?.type !== "table_scanned" && group.tableNumber && (
                 <span className="text-sm font-bold text-white/60 bg-white/10 px-2.5 py-0.5 rounded-full">
                   {t.table} {group.tableNumber}
                 </span>
@@ -622,6 +631,23 @@ function GroupCard({
                 <span className="text-white/25 text-xs uppercase tracking-wide">{t.total} · </span>
                 <span className="text-white/70 font-bold">{order.total.toFixed(2)} €</span>
               </div>
+            </div>
+          )}
+
+          {/* Cancel order — for suspected abuse; not offered once already done or cancelled */}
+          {order && order.status !== "COMPLETED" && order.status !== "CANCELLED" && (
+            <div className="px-5 py-3 border-b border-white/5">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(t.waiterCancelOrderConfirm)) {
+                    updateOrderStatus(group.orderId, "CANCELLED");
+                  }
+                }}
+                className="w-full h-10 rounded-xl text-xs font-bold transition-colors bg-red-500/10 text-red-300 hover:bg-red-500/20 border border-red-500/25 flex items-center justify-center gap-1.5"
+              >
+                <XCircle size={14} /> {t.waiterCancelOrder}
+              </button>
             </div>
           )}
 
@@ -689,6 +715,19 @@ function TaskRow({
         ? t.waiterAcceptTask
         : TASK_ACTION_LABEL_I18N[lang][task.type];
 
+  // First order of a visit — a fork (confirm/reject), not the usual linear
+  // waiting→accepted→completed progression every other task type uses.
+  const handleConfirmOrder = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateOrderStatus(task.orderId, "NEW");
+    updateTaskStatus(task.id, "completed", staff ?? undefined);
+  };
+  const handleRejectOrder = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateOrderStatus(task.orderId, "CANCELLED");
+    updateTaskStatus(task.id, "completed", staff ?? undefined);
+  };
+
   return (
     <div className={`px-5 py-4 ${!isLast ? "border-b border-white/5" : ""} ${isCompleted ? "opacity-45" : ""}`}>
       {/* Row header: type icon + label + items summary + status dot */}
@@ -729,8 +768,23 @@ function TaskRow({
         </div>
       )}
 
-      {/* Action button */}
-      {!isCompleted && (
+      {/* Action button(s) */}
+      {!isCompleted && task.type === "order_confirmation" ? (
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            onClick={handleRejectOrder}
+            className="h-12 rounded-xl text-sm font-bold transition-colors bg-red-500/15 text-red-300 hover:bg-red-500/25 border border-red-500/30"
+          >
+            {t.waiterRejectTable}
+          </button>
+          <button
+            onClick={handleConfirmOrder}
+            className="h-12 rounded-xl text-sm font-bold transition-colors bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 border border-emerald-500/30"
+          >
+            {t.waiterConfirmTable}
+          </button>
+        </div>
+      ) : !isCompleted ? (
         <button
           onClick={handleAction}
           className={`mt-3 w-full h-12 rounded-xl text-sm font-bold transition-colors
@@ -742,7 +796,7 @@ function TaskRow({
         >
           {actionLabel}
         </button>
-      )}
+      ) : null}
     </div>
   );
 }

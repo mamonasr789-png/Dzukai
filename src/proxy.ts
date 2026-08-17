@@ -7,6 +7,20 @@ import {
   verifyStaffSession,
   type StaffRole,
 } from "./lib/server/auth/session";
+import {
+  getTableAccessTokenSecret,
+  verifyTableAccessToken,
+} from "./lib/server/tableAccessToken";
+import { TABLE_ACCESS_COOKIE } from "./lib/tableAccessCookie";
+
+const TABLE_ACCESS_COOKIE_MAX_AGE_SECONDS = 24 * 60 * 60;
+const TABLE_GATED_PREFIXES = ["/menu", "/cart", "/ai"];
+
+function isTableGatedPath(pathname: string): boolean {
+  return TABLE_GATED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+}
 
 /**
  * Optimistic gate for the staff areas: reads and verifies the signed cookie
@@ -29,8 +43,48 @@ function roleForPath(pathname: string): StaffRole | null {
   return null;
 }
 
+/**
+ * Only a printed table QR (or a browser that already scanned one this visit)
+ * may reach /menu, /cart, /ai — a bare ?table=N URL no longer works. The
+ * signed token is transported once, as a query param on the QR link itself;
+ * on success it's exchanged for a same-site cookie so it doesn't need to
+ * stay in the URL for every subsequent page. No secret configured in
+ * production ⇒ refuse (same policy as the staff-session gate), which here
+ * means every gated path redirects to /table-required.
+ */
+function tableGate(request: NextRequest): NextResponse | null {
+  const { pathname } = request.nextUrl;
+  if (!isTableGatedPath(pathname)) return null;
+
+  const secret = getTableAccessTokenSecret();
+  const cookieToken = request.cookies.get(TABLE_ACCESS_COOKIE)?.value;
+  if (secret && verifyTableAccessToken(cookieToken, secret).ok) {
+    return NextResponse.next();
+  }
+
+  const queryToken = request.nextUrl.searchParams.get("tableToken") ?? undefined;
+  const queryVerification = secret ? verifyTableAccessToken(queryToken, secret) : { ok: false as const };
+  if (queryVerification.ok) {
+    const cleanUrl = new URL(pathname, request.url);
+    const response = NextResponse.redirect(cleanUrl);
+    response.cookies.set(TABLE_ACCESS_COOKIE, queryToken!, {
+      httpOnly: false, // menu/page.tsx reads the table number out of this client-side
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: TABLE_ACCESS_COOKIE_MAX_AGE_SECONDS,
+      path: "/",
+    });
+    return response;
+  }
+
+  return NextResponse.redirect(new URL("/table-required", request.url));
+}
+
 export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
+
+  const tableGateResponse = tableGate(request);
+  if (tableGateResponse) return tableGateResponse;
 
   const secret = getStaffSessionSecret();
   const token = request.cookies.get(STAFF_SESSION_COOKIE)?.value;
@@ -65,5 +119,13 @@ export function proxy(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/waiter/:path*", "/kitchen/:path*", "/staff-login"],
+  matcher: [
+    "/admin/:path*",
+    "/waiter/:path*",
+    "/kitchen/:path*",
+    "/staff-login",
+    "/menu/:path*",
+    "/cart/:path*",
+    "/ai/:path*",
+  ],
 };

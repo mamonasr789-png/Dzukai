@@ -84,9 +84,14 @@ export function getStaffActivityToday(orders: Order[], tasks: WaiterTask[]): Map
 
 // ── Revenue ───────────────────────────────────────────────────────────────────
 
-/** Orders that count toward money metrics — cancelled orders bring no revenue. */
+/**
+ * Orders that count toward money metrics — cancelled orders bring no revenue,
+ * and an order still awaiting waiter confirmation isn't real yet either.
+ */
 function revenueOrders(orders: Order[]): Order[] {
-  return orders.filter((o) => o.status !== "CANCELLED");
+  return orders.filter(
+    (o) => o.status !== "CANCELLED" && o.status !== "PENDING_CONFIRMATION"
+  );
 }
 
 export function calculateRevenue(orders: Order[]): number {

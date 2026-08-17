@@ -22,7 +22,7 @@ const FINISHED_ORDER_STATUSES = new Set(["COMPLETED", "CANCELLED"]);
 // An order is "active" for the customer until the waiter has delivered it.
 // This — NOT payment status and NOT cart contents — is the source of truth for
 // whether the customer still has something to track.
-const ACTIVE_ORDER_STATUSES = new Set(["NEW", "PREPARING", "READY", "DELIVERING"]);
+const ACTIVE_ORDER_STATUSES = new Set(["PENDING_CONFIRMATION", "NEW", "PREPARING", "READY", "DELIVERING"]);
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

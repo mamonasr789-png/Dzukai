@@ -68,6 +68,7 @@ function applyTheme(theme: KitchenTheme): void {
 // ── Status style maps (colors only — labels come from staff-i18n) ─────────────
 
 const STATUS_BADGE_LIGHT: Record<OrderStatus, string> = {
+  PENDING_CONFIRMATION: "bg-slate-100 text-slate-600 border border-slate-300",
   NEW: "bg-amber-100 text-amber-700 border border-amber-300",
   PREPARING: "bg-blue-100 text-blue-700 border border-blue-300",
   READY: "bg-green-100 text-green-700 border border-green-300",
@@ -77,6 +78,7 @@ const STATUS_BADGE_LIGHT: Record<OrderStatus, string> = {
 };
 
 const STATUS_BADGE_DARK: Record<OrderStatus, string> = {
+  PENDING_CONFIRMATION: "bg-slate-500/20 text-slate-300 border border-slate-500/30",
   NEW: "bg-amber-500/20 text-amber-300 border border-amber-500/30",
   PREPARING: "bg-blue-500/20 text-blue-300 border border-blue-500/30",
   READY: "bg-green-500/20 text-green-300 border border-green-500/30",
@@ -86,6 +88,7 @@ const STATUS_BADGE_DARK: Record<OrderStatus, string> = {
 };
 
 const CARD_BORDER_LIGHT: Record<OrderStatus, string> = {
+  PENDING_CONFIRMATION: "border-slate-300 bg-slate-50",
   NEW: "border-amber-300 bg-amber-50",
   PREPARING: "border-blue-300 bg-blue-50",
   READY: "border-green-400 bg-green-50",
@@ -95,6 +98,7 @@ const CARD_BORDER_LIGHT: Record<OrderStatus, string> = {
 };
 
 const CARD_BORDER_DARK: Record<OrderStatus, string> = {
+  PENDING_CONFIRMATION: "border-slate-500/30 bg-slate-500/5",
   NEW: "border-amber-500/40 bg-amber-500/5",
   PREPARING: "border-blue-500/40 bg-blue-500/5",
   READY: "border-green-500/40 bg-green-500/10",
@@ -104,6 +108,7 @@ const CARD_BORDER_DARK: Record<OrderStatus, string> = {
 };
 
 const STATUS_ICON_SM: Record<OrderStatus, React.ReactNode> = {
+  PENDING_CONFIRMATION: <Clock size={13} />,
   NEW: <Clock size={13} />,
   PREPARING: <ChefHat size={13} />,
   READY: <Bell size={13} />,

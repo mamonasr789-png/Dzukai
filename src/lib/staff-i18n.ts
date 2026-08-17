@@ -46,10 +46,12 @@ export const TASK_TYPE_LABEL: Record<StaffLang, Record<WaiterTaskType, string>> 
   lt: {
     ready_to_serve: "Nešti maistą", bill_requested: "Sąskaita",
     waiter_called: "Padavėjas kviestas", additional_order: "Papildomas užsakymas",
+    order_confirmation: "Naujas stalas — patvirtinti", table_scanned: "Stalas aktyvavo QR",
   },
   en: {
     ready_to_serve: "Serve food", bill_requested: "Bill",
     waiter_called: "Waiter called", additional_order: "Additional order",
+    order_confirmation: "New table — confirm", table_scanned: "Table scanned QR",
   },
 };
 
@@ -57,10 +59,12 @@ export const TASK_ACTION_LABEL_I18N: Record<StaffLang, Record<WaiterTaskType, st
   lt: {
     ready_to_serve: "Atnešta", bill_requested: "Sąskaita įteikta",
     waiter_called: "Atlikta", additional_order: "Peržiūrėti",
+    order_confirmation: "Patvirtinti", table_scanned: "Peržiūrėta",
   },
   en: {
     ready_to_serve: "Delivered", bill_requested: "Bill handed over",
     waiter_called: "Done", additional_order: "Review",
+    order_confirmation: "Confirm", table_scanned: "Acknowledge",
   },
 };
 
@@ -168,6 +172,10 @@ const lt = {
     waiterEmptyDone: "Dar nėra atliktų užduočių.",
     waiterEmptyHint: "Užduotys atsiras automatiškai.",
     waiterActiveShort: "aktyvūs",
+    waiterConfirmTable: "Patvirtinti",
+    waiterRejectTable: "Atmesti",
+    waiterCancelOrder: "Atšaukti užsakymą",
+    waiterCancelOrderConfirm: "Ar tikrai atšaukti šį užsakymą?",
 
     // Admin
     adminSubtitle: "Direktoriaus valdymo skydelis",
@@ -264,6 +272,10 @@ const en: StaffDict = {
     waiterEmptyDone: "No completed tasks yet.",
     waiterEmptyHint: "Tasks will appear automatically.",
     waiterActiveShort: "active",
+    waiterConfirmTable: "Confirm",
+    waiterRejectTable: "Reject",
+    waiterCancelOrder: "Cancel order",
+    waiterCancelOrderConfirm: "Cancel this order?",
 
     // Admin
     adminSubtitle: "Director's dashboard",

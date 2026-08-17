@@ -11,7 +11,7 @@ import QuantitySelector from "@/components/QuantitySelector";
 import { useCartStore } from "@/lib/store";
 import { useT } from "@/lib/i18n";
 import { tProduct } from "@/lib/product-translations";
-import { createOrder, subscribeOrders, hasActiveOrders, type ServingPreference } from "@/lib/orders";
+import { createOrder, updateOrderStatus, subscribeOrders, hasActiveOrders, type ServingPreference } from "@/lib/orders";
 import { type TableSession, getTrackableSession, addOrderToSession, updateSessionStatus, subscribeSession } from "@/lib/tableSession";
 import { createUniqueTask } from "@/lib/waiterTasks";
 
@@ -115,9 +115,19 @@ export default function CartPage() {
       servingPreference: serving,
     });
     const session = addOrderToSession(order.id, tableNumber);
-    // Second+ order in the same session — tell the waiter, otherwise the
-    // additional order arrives silently.
-    if (session.orderIds.length > 1) {
+    if (session.orderIds.length === 1) {
+      // First order of this visit — hold it for a waiter to confirm someone is
+      // actually at the table before the kitchen ever sees it.
+      updateOrderStatus(order.id, "PENDING_CONFIRMATION");
+      createUniqueTask(`order:${order.id}:order_confirmation`, {
+        type: "order_confirmation",
+        orderId: order.id,
+        tableNumber: session.tableNumber ?? tableNumber,
+        items: order.items.map((i) => ({ productId: i.productId, name: i.name, quantity: i.quantity })),
+      });
+    } else {
+      // Second+ order in the same session — tell the waiter, otherwise the
+      // additional order arrives silently.
       createUniqueTask(`order:${order.id}:additional_order`, {
         type: "additional_order",
         orderId: order.id,

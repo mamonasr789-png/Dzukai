@@ -20,7 +20,9 @@ export type WaiterTaskType =
   | "ready_to_serve"   // kitchen ready → bring food
   | "bill_requested"   // customer wants the bill
   | "waiter_called"    // customer pressed Call Waiter
-  | "additional_order"; // customer ordered more after initial order
+  | "additional_order" // customer ordered more after initial order
+  | "order_confirmation" // first order of a visit — needs waiter confirm/reject
+  | "table_scanned";   // customer's browser passed the QR gate for this table
 
 export type WaiterTaskStatus = "waiting" | "accepted" | "completed";
 
@@ -31,6 +33,8 @@ export const TASK_PRIORITY: Record<WaiterTaskType, WaiterTaskPriority> = {
   waiter_called: "high",
   bill_requested: "normal",
   additional_order: "normal",
+  order_confirmation: "high",
+  table_scanned: "normal",
 };
 
 export const TASK_LABEL: Record<WaiterTaskType, string> = {
@@ -38,6 +42,8 @@ export const TASK_LABEL: Record<WaiterTaskType, string> = {
   bill_requested: "Sąskaita",
   waiter_called: "Padavėjas kviestas",
   additional_order: "Papildomas užsakymas",
+  order_confirmation: "Naujas stalas — patvirtinti",
+  table_scanned: "Stalas aktyvavo QR",
 };
 
 export const TASK_ACTION_LABEL: Record<WaiterTaskType, string> = {
@@ -45,6 +51,8 @@ export const TASK_ACTION_LABEL: Record<WaiterTaskType, string> = {
   bill_requested: "Sąskaita įteikta",
   waiter_called: "Atlikta",
   additional_order: "Peržiūrėti",
+  order_confirmation: "Patvirtinti",
+  table_scanned: "Peržiūrėta",
 };
 
 export const TASK_STATUS_LABEL: Record<WaiterTaskStatus, string> = {

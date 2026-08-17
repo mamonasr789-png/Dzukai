@@ -37,6 +37,7 @@ import {
 import StaffLangSwitch from "@/components/StaffLangSwitch";
 import StaffLogoutButton from "@/components/StaffLogoutButton";
 import StaffAccountsPanel from "@/components/StaffAccountsPanel";
+import TablesPanel from "@/components/TablesPanel";
 import { useCurrentStaff } from "@/lib/useCurrentStaff";
 import { tProduct } from "@/lib/product-translations";
 
@@ -47,6 +48,7 @@ type DateFilter = "today" | "all" | "date";
 // ── Status display (colors only — labels come from staff-i18n) ────────────────
 
 const STATUS_DOT: Record<OrderStatus, string> = {
+  PENDING_CONFIRMATION: "bg-slate-400",
   NEW: "bg-amber-400",
   PREPARING: "bg-blue-400",
   READY: "bg-green-400",
@@ -384,6 +386,7 @@ export default function AdminPage() {
           </>
         )}
 
+        <TablesPanel lang={lang} />
         <StaffAccountsPanel lang={lang} />
       </div>
     </div>

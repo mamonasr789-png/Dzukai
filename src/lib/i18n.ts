@@ -68,14 +68,17 @@ export const categoryLabels: Record<Lang, Partial<Record<Category, string>>> = {
 
 export const orderStatusLabels: Record<Lang, Record<OrderStatus, string>> = {
   lt: {
+    PENDING_CONFIRMATION: "Laukia patvirtinimo",
     NEW: "Naujas", PREPARING: "Gaminamas", READY: "Paruoštas",
     DELIVERING: "Neša padavėjas", COMPLETED: "Įvykdytas", CANCELLED: "Atšauktas",
   },
   en: {
+    PENDING_CONFIRMATION: "Awaiting confirmation",
     NEW: "New", PREPARING: "Preparing", READY: "Ready",
     DELIVERING: "Being served", COMPLETED: "Completed", CANCELLED: "Cancelled",
   },
   ru: {
+    PENDING_CONFIRMATION: "Ожидает подтверждения",
     NEW: "Новый", PREPARING: "Готовится", READY: "Готов",
     DELIVERING: "Официант несёт", COMPLETED: "Выполнен", CANCELLED: "Отменён",
   },
@@ -83,6 +86,7 @@ export const orderStatusLabels: Record<Lang, Record<OrderStatus, string>> = {
 
 export const orderStatusMessages: Record<Lang, Record<OrderStatus, string>> = {
   lt: {
+    PENDING_CONFIRMATION: "Laukiama padavėjo patvirtinimo.",
     NEW: "Užsakymas priimtas. Laukimo laikas apie 15 min.",
     PREPARING: "Užsakymas gaminamas. Laukimo laikas apie 10 min.",
     READY: "Užsakymas paruoštas! Padavėjas jau neša.",
@@ -91,6 +95,7 @@ export const orderStatusMessages: Record<Lang, Record<OrderStatus, string>> = {
     CANCELLED: "Užsakymas atšauktas.",
   },
   en: {
+    PENDING_CONFIRMATION: "Waiting for staff to confirm your order.",
     NEW: "Order received. Estimated wait: about 15 minutes.",
     PREPARING: "Your order is being prepared. Estimated wait: about 10 minutes.",
     READY: "Your order is ready! The waiter will bring it shortly.",
@@ -99,6 +104,7 @@ export const orderStatusMessages: Record<Lang, Record<OrderStatus, string>> = {
     CANCELLED: "Your order has been cancelled.",
   },
   ru: {
+    PENDING_CONFIRMATION: "Ожидаем подтверждения от официанта.",
     NEW: "Заказ принят. Ожидание около 15 минут.",
     PREPARING: "Заказ готовится. Ожидание около 10 минут.",
     READY: "Заказ готов! Официант скоро принесёт его.",

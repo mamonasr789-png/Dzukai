@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { categories, products, Product, Category } from "@/lib/data";
 import { useCartStore } from "@/lib/store";
+import { readTableAccessCookie } from "@/lib/tableAccessCookie";
 import { useT, categoryLabels } from "@/lib/i18n";
 import { badgeTranslations, tProduct } from "@/lib/product-translations";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -187,6 +188,22 @@ function CartBar() {
   );
 }
 
+const TABLE_SCANNED_SESSION_KEY = "dzukai-table-scanned-notified";
+
+/** Fire-and-forget, once per browser tab per dining visit — lets /waiter show
+ *  a live "table X scanned" heads-up well before any order exists. */
+function notifyTableScannedOnce(tableNumber: string): void {
+  if (sessionStorage.getItem(TABLE_SCANNED_SESSION_KEY) === tableNumber) return;
+  sessionStorage.setItem(TABLE_SCANNED_SESSION_KEY, tableNumber);
+  fetch("/api/table/scanned", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tableNumber }),
+  }).catch(() => {
+    // Best-effort heads-up only — never blocks the customer's own flow.
+  });
+}
+
 function MenuScreen() {
   const searchParams = useSearchParams();
   const { setTableNumber, tableNumber, lang } = useCartStore();
@@ -203,8 +220,14 @@ function MenuScreen() {
   const dragState = useRef({ dragging: false, startX: 0, scrollLeft: 0 });
 
   useEffect(() => {
-    const t = searchParams.get("table") || searchParams.get("t");
-    if (t) setTableNumber(t);
+    // Table number comes from the signed table-access cookie proxy.ts already
+    // verified before this page was ever allowed to load — not the URL, which
+    // anyone could type. See src/lib/tableAccessCookie.ts.
+    const gate = readTableAccessCookie();
+    if (gate) {
+      setTableNumber(gate.tableNumber);
+      notifyTableScannedOnce(gate.tableNumber);
+    }
     const cat = searchParams.get("cat") as Category | null;
     if (cat && categories.find((c) => c.id === cat)) setActiveCategory(cat);
   }, [searchParams, setTableNumber]);
