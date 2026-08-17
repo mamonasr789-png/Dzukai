@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { Copy, Plus, QrCode as QrCodeIcon, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Plus, QrCode as QrCodeIcon, Trash2 } from "lucide-react";
 import type { StaffLang } from "@/lib/staff-i18n";
 
 interface RestaurantTable {
@@ -28,6 +28,8 @@ const TEXT: Record<StaffLang, Record<string, string>> = {
     notConfigured: "QR raktas nesukonfigūruotas serveryje.",
     copy: "Kopijuoti nuorodą",
     copied: "Nukopijuota!",
+    showQr: "Rodyti QR",
+    hideQr: "Slėpti QR",
   },
   en: {
     title: "Tables",
@@ -44,6 +46,8 @@ const TEXT: Record<StaffLang, Record<string, string>> = {
     notConfigured: "The QR secret isn't configured on the server.",
     copy: "Copy link",
     copied: "Copied!",
+    showQr: "Show QR",
+    hideQr: "Hide QR",
   },
 };
 
@@ -57,6 +61,16 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [qrByTable, setQrByTable] = useState<Record<string, string>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  function toggleExpanded(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const refresh = useCallback(async () => {
     const res = await fetch("/api/staff/tables");
@@ -70,13 +84,15 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
     refresh();
   }, [refresh]);
 
-  // Render each table's QR as a data URL once its link is known.
+  // Render a table's QR as a data URL only once it's actually expanded —
+  // generating all of them up front doesn't cost much per-table, but there's
+  // no reason to pay it for tables nobody has opened yet.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const entries = await Promise.all(
         tables
-          .filter((table) => table.link && !qrByTable[table.id])
+          .filter((table) => expandedIds.has(table.id) && table.link && !qrByTable[table.id])
           .map(async (table) => {
             const url = `${window.location.origin}${table.link}`;
             const dataUrl = await QRCode.toDataURL(url, { width: 176, margin: 1 });
@@ -91,7 +107,7 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tables]);
+  }, [tables, expandedIds]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -174,59 +190,74 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
           <p className="text-white/40 text-sm">{t.empty}</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {tables.map((table) => (
-            <div key={table.id} className="border border-white/8 rounded-xl bg-white/3 p-4 flex flex-col items-center gap-3">
-              <div className="flex items-center gap-1.5 self-start">
-                <QrCodeIcon size={14} className="text-white/40" />
-                <p className="text-sm font-semibold">{table.tableNumber}</p>
-              </div>
-              {table.link ? (
-                qrByTable[table.id] ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={qrByTable[table.id]} alt={table.tableNumber} width={176} height={176} className="rounded-lg bg-white p-2" />
-                ) : (
-                  <div className="w-[176px] h-[176px] rounded-lg bg-white/5 animate-pulse" />
-                )
-              ) : (
-                <p className="text-[11px] text-red-400 text-center">{t.notConfigured}</p>
-              )}
-              <div className="flex items-center gap-1 w-full">
-                {table.link && (
+        <div className="border border-white/8 rounded-xl bg-white/3 divide-y divide-white/5">
+          {tables.map((table) => {
+            const expanded = expandedIds.has(table.id);
+            return (
+              <div key={table.id}>
+                {/* Collapsed row — always visible */}
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <QrCodeIcon size={14} className="text-white/40 shrink-0" />
+                  <p className="text-sm font-semibold flex-1 min-w-0 truncate">{table.tableNumber}</p>
                   <button
-                    onClick={() => handleCopy(table.id, table.link!)}
-                    className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[11px] text-white/50 hover:text-primary hover:bg-primary/10 transition-colors border border-white/10"
+                    onClick={() => toggleExpanded(table.id)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-white/50 hover:text-primary hover:bg-primary/10 transition-colors border border-white/10 shrink-0"
                   >
-                    <Copy size={12} />
-                    {copiedId === table.id ? t.copied : t.copy}
+                    {expanded ? t.hideQr : t.showQr}
+                    {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                   </button>
-                )}
-                {confirmingDelete === table.id ? (
-                  <div className="flex items-center gap-1">
+                  {confirmingDelete === table.id ? (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => handleDelete(table.id)}
+                        className="px-2 py-1 rounded-md text-[11px] font-bold bg-red-500/20 text-red-400 hover:bg-red-500/35 border border-red-500/40"
+                      >
+                        {t.yes}
+                      </button>
+                      <button
+                        onClick={() => setConfirmingDelete(null)}
+                        className="px-2 py-1 rounded-md text-[11px] text-white/40 hover:text-white/70"
+                      >
+                        {t.no}
+                      </button>
+                    </div>
+                  ) : (
                     <button
-                      onClick={() => handleDelete(table.id)}
-                      className="px-2 py-1 rounded-md text-[11px] font-bold bg-red-500/20 text-red-400 hover:bg-red-500/35 border border-red-500/40"
+                      onClick={() => setConfirmingDelete(table.id)}
+                      className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0"
                     >
-                      {t.yes}
+                      <Trash2 size={12} />
                     </button>
-                    <button
-                      onClick={() => setConfirmingDelete(null)}
-                      className="px-2 py-1 rounded-md text-[11px] text-white/40 hover:text-white/70"
-                    >
-                      {t.no}
-                    </button>
+                  )}
+                </div>
+
+                {/* Expanded — QR image + copy link */}
+                {expanded && (
+                  <div className="px-4 pb-4 flex flex-col items-center gap-3 border-t border-white/5 pt-4">
+                    {table.link ? (
+                      qrByTable[table.id] ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={qrByTable[table.id]} alt={table.tableNumber} width={176} height={176} className="rounded-lg bg-white p-2" />
+                      ) : (
+                        <div className="w-[176px] h-[176px] rounded-lg bg-white/5 animate-pulse" />
+                      )
+                    ) : (
+                      <p className="text-[11px] text-red-400 text-center">{t.notConfigured}</p>
+                    )}
+                    {table.link && (
+                      <button
+                        onClick={() => handleCopy(table.id, table.link!)}
+                        className="w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[11px] text-white/50 hover:text-primary hover:bg-primary/10 transition-colors border border-white/10"
+                      >
+                        <Copy size={12} />
+                        {copiedId === table.id ? t.copied : t.copy}
+                      </button>
+                    )}
                   </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmingDelete(table.id)}
-                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                  >
-                    <Trash2 size={12} />
-                  </button>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
