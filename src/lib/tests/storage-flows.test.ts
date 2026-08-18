@@ -72,7 +72,7 @@ describe("purgeOldHistory session guard", () => {
     sessions.addOrderToSession(o.id, "5");
     orders.updateOrderStatus(o.id, "COMPLETED");
     ageOrder(o.id, 40);
-    sessions.markSessionPaid("WAITER");
+    sessions.markSessionPaid("WAITER", "5");
 
     const removed = orders.purgeOldHistory();
     expect(removed).toBe(1);
@@ -178,17 +178,17 @@ describe("table session invariants", () => {
     reset();
     const o = makeOrder(10);
     sessions.addOrderToSession(o.id, "5");
-    const paid = sessions.markSessionPaid("APP");
+    const paid = sessions.markSessionPaid("APP", "5");
     expect(paid?.status).toBe("PAID");
     expect(paid?.paymentMethod).toBe("APP");
-    expect(sessions.getActiveSession()).toBeFalsy();
+    expect(sessions.getActiveSession("5")).toBeFalsy();
   });
 
   it("adding an order after payment starts a NEW session", () => {
     reset();
     const o1 = makeOrder(10);
     const s1 = sessions.addOrderToSession(o1.id, "5");
-    sessions.markSessionPaid("APP");
+    sessions.markSessionPaid("APP", "5");
     const o2 = makeOrder(12);
     const s2 = sessions.addOrderToSession(o2.id, "5");
     expect(s2.id).not.toBe(s1.id);
@@ -266,10 +266,10 @@ function clearCartStorage() {
 }
 
 /** Replicates the customer in-app payment flow from order/page.tsx. */
-function payFullSession(session: { orderIds: string[] }) {
+function payFullSession(session: { orderIds: string[]; tableNumber: string | null }) {
   session.orderIds.forEach((oid) => orders.markOrderPaid(oid));
   if (orders.allOrdersPaid(session.orderIds)) {
-    sessions.markSessionPaid("APP");
+    sessions.markSessionPaid("APP", session.tableNumber);
     clearCartStorage();
   }
 }
@@ -293,7 +293,7 @@ describe("payment keeps the order trackable", () => {
     expect(cart.state.items).toHaveLength(0);
 
     // 4. active order still visible despite being paid
-    const tracked = sessions.getTrackableSession();
+    const tracked = sessions.getTrackableSession("7");
     expect(tracked?.id).toBe(session.id);
     expect(tracked?.paymentStatus).toBe("PAID");
     expect(orders.getOrder(o.id)?.isPaid).toBeTruthy();
@@ -303,16 +303,16 @@ describe("payment keeps the order trackable", () => {
     // 5. tracking still updates through READY / DELIVERING / COMPLETED
     orders.updateOrderStatus(o.id, "READY");
     expect(orders.getOrder(o.id)?.status).toBe("READY");
-    expect(sessions.getTrackableSession()?.id).toBe(session.id); // still tracked
+    expect(sessions.getTrackableSession("7")?.id).toBe(session.id); // still tracked
 
     orders.updateOrderStatus(o.id, "DELIVERING");
     expect(orders.getOrder(o.id)?.status).toBe("DELIVERING");
-    expect(sessions.getTrackableSession()?.id).toBe(session.id); // still tracked
+    expect(sessions.getTrackableSession("7")?.id).toBe(session.id); // still tracked
 
     // 6. session leaves tracking ONLY after final completion
     orders.updateOrderStatus(o.id, "COMPLETED");
     expect(orders.getOrder(o.id)?.status).toBe("COMPLETED");
-    expect(sessions.getTrackableSession()).toBeFalsy(); // now, and only now, gone
+    expect(sessions.getTrackableSession("7")).toBeFalsy(); // now, and only now, gone
   });
 
   it("waiter marking a bill paid also marks every order in the session paid (not session-only)", () => {
@@ -327,13 +327,13 @@ describe("payment keeps the order trackable", () => {
     // order.isPaid false so the customer's own screen never showed "Paid".
     // getActiveSession() (not the stale return value of addOrderToSession)
     // is what the real handler reads, and reflects both orders.
-    const session = sessions.getActiveSession()!;
+    const session = sessions.getActiveSession("7")!;
     session.orderIds.forEach((id) => orders.markOrderPaid(id));
-    sessions.markSessionPaid("WAITER");
+    sessions.markSessionPaid("WAITER", "7");
 
     expect(orders.getOrder(o1.id)?.isPaid).toBeTruthy();
     expect(orders.getOrder(o2.id)?.isPaid).toBeTruthy();
-    expect(sessions.getActiveSession()).toBeFalsy();
+    expect(sessions.getActiveSession("7")).toBeFalsy();
   });
 
   it("paid order is not removed from tracking while a sibling is still cooking", () => {
@@ -345,15 +345,15 @@ describe("payment keeps the order trackable", () => {
 
     // Pay the whole session up front.
     payFullSession(session);
-    expect(sessions.getTrackableSession()?.orderIds).toHaveLength(2);
+    expect(sessions.getTrackableSession("7")?.orderIds).toHaveLength(2);
 
     // First order delivered, second still on its way → still trackable.
     orders.updateOrderStatus(o1.id, "COMPLETED");
-    expect(sessions.getTrackableSession()?.id).toBe(session.id);
+    expect(sessions.getTrackableSession("7")?.id).toBe(session.id);
 
     // Both delivered → tracking ends.
     orders.updateOrderStatus(o2.id, "COMPLETED");
-    expect(sessions.getTrackableSession()).toBeFalsy();
+    expect(sessions.getTrackableSession("7")).toBeFalsy();
   });
 
   it("purge keeps a paid session's completed order while a sibling is undelivered", () => {
@@ -379,8 +379,8 @@ describe("payment keeps the order trackable", () => {
     const s1 = sessions.addOrderToSession(o.id, "7");
     payFullSession(s1);
     // Paid → no longer 'open' for new orders, though still trackable.
-    expect(sessions.getActiveSession()).toBeFalsy();
-    expect(sessions.getTrackableSession()?.id).toBe(s1.id);
+    expect(sessions.getActiveSession("7")).toBeFalsy();
+    expect(sessions.getTrackableSession("7")?.id).toBe(s1.id);
     // Ordering again opens a brand-new session.
     const o2 = makeOrder(5);
     const s2 = sessions.addOrderToSession(o2.id, "7");
@@ -397,14 +397,14 @@ const ACTIVE = ["NEW", "PREPARING", "READY", "DELIVERING"];
 /** Mirrors the cart page's screen decision (post client storage-read). */
 function cartScreen(cartItemCount: number): "cart" | "tracking" | "empty" {
   if (cartItemCount > 0) return "cart";
-  return sessions.getTrackableSession() ? "tracking" : "empty";
+  return sessions.getTrackableSession("5") ? "tracking" : "empty";
 }
 
 /** What the customer's /order page would resolve to on a fresh mount / refresh. */
 function refreshCustomerTracking() {
   // getTrackableSession re-reads storage every call — a fresh page mount is
   // exactly this. No React state is carried across a refresh.
-  return sessions.getTrackableSession();
+  return sessions.getTrackableSession("5");
 }
 
 describe("tracking survives payment, cart clear and refresh (shared active order)", () => {
@@ -426,7 +426,7 @@ describe("tracking survives payment, cart clear and refresh (shared active order
 
     // 4. customer still sees tracking (cart empty must NOT hide it)
     expect(cartScreen(0)).toBe("tracking");
-    expect(sessions.getTrackableSession()?.id).toBe(session.id);
+    expect(sessions.getTrackableSession("5")?.id).toBe(session.id);
 
     // 5. waiter references the SAME order id (ready task flows off it)
     orders.updateOrderStatus(o.id, "READY");
@@ -479,21 +479,21 @@ describe("tracking survives payment, cart clear and refresh (shared active order
 
     // Even if the session gets CLOSED (e.g. waiter action / legacy state),
     // an undelivered order MUST keep the session trackable.
-    sessions.updateSessionStatus("BILL_REQUESTED"); // no-op: no open session
-    sessions.closeSession(); // no-op: no open session either
+    sessions.updateSessionStatus("BILL_REQUESTED", "5"); // no-op: no open session
+    sessions.closeSession("5"); // no-op: no open session either
     // Force a terminal CLOSED status directly to simulate legacy/edge data.
     const raw = JSON.parse(mem.get("dzukai-table-sessions")!);
     raw[0].status = "CLOSED";
     mem.set("dzukai-table-sessions", JSON.stringify(raw));
 
     expect(orders.hasActiveOrders()).toBeTruthy();
-    expect(sessions.getTrackableSession()?.id).toBe(session.id); // still tracked
+    expect(sessions.getTrackableSession("5")?.id).toBe(session.id); // still tracked
     expect(cartScreen(0)).toBe("tracking");
 
     // Only delivery ends it.
     orders.updateOrderStatus(o.id, "COMPLETED");
     expect(orders.hasActiveOrders()).toBeFalsy();
-    expect(sessions.getTrackableSession()).toBeFalsy();
+    expect(sessions.getTrackableSession("5")).toBeFalsy();
     expect(cartScreen(0)).toBe("empty");
   });
 });

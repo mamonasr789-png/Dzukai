@@ -30,6 +30,7 @@ import {
 } from "@/lib/tableSession";
 import { createUniqueTask, completeTasksForOrders, subscribeWaiterTasks } from "@/lib/waiterTasks";
 import { clearCartStorage, useLanguage, type Lang } from "@/lib/store";
+import { readTableAccessCookie } from "@/lib/tableAccessCookie";
 import {
   useT,
   orderStatusLabels,
@@ -124,9 +125,16 @@ function OrderContent() {
   const doRefresh = () => {
     const currentId = idRef.current;
 
+    // Which table's session this device should see. The pinned order (when
+    // present) is the reliable source — the sync engine mirrors every table's
+    // sessions into every device's storage, so an unscoped lookup could just
+    // as easily surface a different table's session (see tableSession.ts).
+    const pinnedTableNumber = currentId ? getOrder(currentId)?.tableNumber ?? null : null;
+    const tableNumber = pinnedTableNumber ?? readTableAccessCookie()?.tableNumber ?? null;
+
     // Trackable session survives payment — it only disappears once the visit is
     // fully settled AND every order is delivered/cancelled.
-    const s = getTrackableSession();
+    const s = getTrackableSession(tableNumber);
     if (hadSessionRef.current && !s) {
       // No specific order pinned → the whole visit is over: show the thank-you
       // screen. With ?id= we keep rendering that order (it may be COMPLETED).
@@ -252,7 +260,7 @@ function OrderContent() {
   const handleCallWaiter = () => {
     if (!session || billCalledFeedback) return;
     const anchorOrderId = session.orderIds[session.orderIds.length - 1];
-    updateSessionStatus("BILL_REQUESTED");
+    updateSessionStatus("BILL_REQUESTED", session.tableNumber);
     createUniqueTask(`session:${session.id}:bill_requested`, {
       type: "bill_requested",
       orderId: anchorOrderId,
@@ -273,7 +281,7 @@ function OrderContent() {
       payableOrders.forEach((o) => markOrderPaid(o.id));
       if (allOrdersPaid(session.orderIds)) {
         completeTasksForOrders(session.orderIds); // clears bill tasks, keeps food tasks
-        markSessionPaid("APP");
+        markSessionPaid("APP", session.tableNumber);
         clearCartStorage();
       }
       setShowPaymentModal(false);

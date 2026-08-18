@@ -64,9 +64,11 @@ export const useCartStore = create<CartStore>()(
           return;
         }
         set((state) => {
-          // menu/page.tsx normally sets this, but a product can be added
-          // straight from / or /product/:id without ever visiting /menu first.
-          const tableNumber = state.tableNumber ?? gate.tableNumber;
+          // Always trust the current cookie over whatever table was stamped
+          // last time: a re-scanned QR updates the cookie (proxy.ts), and a
+          // stale cached tableNumber here would silently keep orders on the
+          // old table even after the customer scanned a different one.
+          const tableNumber = gate.tableNumber;
           const existing = state.items.find((i) => i.product.id === product.id);
           if (existing) {
             return {

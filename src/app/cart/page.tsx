@@ -39,7 +39,7 @@ export default function CartPage() {
       // Source of truth = active ORDERS (not the cart, not payment). The session
       // is resolved from those orders for the tracking card.
       setHasActive(hasActiveOrders());
-      setActiveSession(getTrackableSession());
+      setActiveSession(getTrackableSession(tableNumber));
       setSessionChecked(true);
     };
     refresh();
@@ -51,7 +51,7 @@ export default function CartPage() {
       unsubSession();
       unsubOrders();
     };
-  }, []);
+  }, [tableNumber]);
 
   if (items.length === 0) {
     // Active order/session? Track it — independent of the empty cart.
@@ -272,7 +272,7 @@ function ActiveSessionState({ session }: { session: TableSession }) {
   };
 
   const handleRequestBill = () => {
-    updateSessionStatus("BILL_REQUESTED");
+    updateSessionStatus("BILL_REQUESTED", session.tableNumber);
     createUniqueTask(`session:${session.id}:bill_requested`, {
       type: "bill_requested",
       orderId: anchorOrderId,

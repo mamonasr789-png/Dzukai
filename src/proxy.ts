@@ -57,24 +57,36 @@ function tableGate(request: NextRequest): NextResponse | null {
   if (!isTableGatedPath(pathname)) return null;
 
   const secret = getTableAccessTokenSecret();
+
+  // A tableToken in the URL is a fresh, explicit scan — it must win over
+  // whatever table cookie the device already carries, otherwise a phone that
+  // scanned table 1 earlier today silently keeps ordering under table 1 even
+  // after scanning table 2's code (the cookie check below would short-circuit
+  // first and the new token would never be looked at).
+  const queryToken = request.nextUrl.searchParams.get("tableToken") ?? undefined;
+  if (queryToken) {
+    const queryVerification = secret ? verifyTableAccessToken(queryToken, secret) : { ok: false as const };
+    if (queryVerification.ok) {
+      const cleanUrl = new URL(pathname, request.url);
+      const response = NextResponse.redirect(cleanUrl);
+      response.cookies.set(TABLE_ACCESS_COOKIE, queryToken, {
+        httpOnly: false, // menu/page.tsx reads the table number out of this client-side
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: TABLE_ACCESS_COOKIE_MAX_AGE_SECONDS,
+        path: "/",
+      });
+      return response;
+    }
+    // An invalid token in the URL must not fall through to an old cookie —
+    // a tampered/expired link should fail visibly, not silently keep working
+    // under whatever table the device happened to be on before.
+    return NextResponse.redirect(new URL("/table-required", request.url));
+  }
+
   const cookieToken = request.cookies.get(TABLE_ACCESS_COOKIE)?.value;
   if (secret && verifyTableAccessToken(cookieToken, secret).ok) {
     return NextResponse.next();
-  }
-
-  const queryToken = request.nextUrl.searchParams.get("tableToken") ?? undefined;
-  const queryVerification = secret ? verifyTableAccessToken(queryToken, secret) : { ok: false as const };
-  if (queryVerification.ok) {
-    const cleanUrl = new URL(pathname, request.url);
-    const response = NextResponse.redirect(cleanUrl);
-    response.cookies.set(TABLE_ACCESS_COOKIE, queryToken!, {
-      httpOnly: false, // menu/page.tsx reads the table number out of this client-side
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: TABLE_ACCESS_COOKIE_MAX_AGE_SECONDS,
-      path: "/",
-    });
-    return response;
   }
 
   return NextResponse.redirect(new URL("/table-required", request.url));

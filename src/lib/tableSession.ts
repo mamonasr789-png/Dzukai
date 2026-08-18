@@ -76,9 +76,17 @@ function writeAll(sessions: TableSession[]): void {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/** Return the one open (ACTIVE or BILL_REQUESTED) session, if any. */
-export function getActiveSession(): TableSession | null {
-  return readAll().find((s) => OPEN_STATUSES.includes(s.status)) ?? null;
+/**
+ * Return the one open (ACTIVE or BILL_REQUESTED) session for a table, if any.
+ *
+ * Must be scoped by tableNumber: the sync engine pulls every table's orders
+ * and sessions into every device's localStorage (kitchen/waiter/admin need
+ * that global view), so once two tables are open at once, an unscoped
+ * "first open session" lookup can attach a new order — or a payment — to a
+ * completely different table.
+ */
+export function getActiveSession(tableNumber: string | null): TableSession | null {
+  return readAll().find((s) => OPEN_STATUSES.includes(s.status) && s.tableNumber === tableNumber) ?? null;
 }
 
 /**
@@ -131,11 +139,11 @@ export function allSessionOrdersFinished(session: TableSession): boolean {
  *      whatever that session's lifecycle status is (PAID, CLOSED, …)
  *   3. nothing active anywhere → null (only now does tracking disappear)
  */
-export function getTrackableSession(): TableSession | null {
+export function getTrackableSession(tableNumber: string | null): TableSession | null {
   const all = readAll();
 
   // 1. An open session (still accepting orders) always wins.
-  const open = all.find((s) => OPEN_STATUSES.includes(s.status));
+  const open = all.find((s) => OPEN_STATUSES.includes(s.status) && s.tableNumber === tableNumber);
   if (open) return open;
 
   // 2. Follow the ORDERS: any order still in flight keeps its session trackable,
@@ -144,7 +152,7 @@ export function getTrackableSession(): TableSession | null {
     .filter((o) => ACTIVE_ORDER_STATUSES.has(o.status))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   for (const o of activeOrders) {
-    const owner = all.find((s) => s.orderIds.includes(o.id));
+    const owner = all.find((s) => s.orderIds.includes(o.id) && s.tableNumber === tableNumber);
     if (owner) return owner;
   }
 
@@ -157,9 +165,12 @@ export function listSessions(): TableSession[] {
 }
 
 export function createSession(tableNumber: string | null): TableSession {
-  // Close any stale open sessions before creating a new one
+  // Close any stale open sessions for THIS table before creating a new one —
+  // other tables' open sessions must be left untouched (see getActiveSession).
   const sessions = readAll().map((s) =>
-    OPEN_STATUSES.includes(s.status) ? { ...s, status: "CLOSED" as SessionStatus, updatedAt: now() } : s
+    OPEN_STATUSES.includes(s.status) && s.tableNumber === tableNumber
+      ? { ...s, status: "CLOSED" as SessionStatus, updatedAt: now() }
+      : s
   );
   const session: TableSession = {
     id: generateId(),
@@ -183,7 +194,7 @@ export function addOrderToSession(
   tableNumber: string | null = null
 ): TableSession {
   const sessions = readAll();
-  const openIdx = sessions.findIndex((s) => OPEN_STATUSES.includes(s.status));
+  const openIdx = sessions.findIndex((s) => OPEN_STATUSES.includes(s.status) && s.tableNumber === tableNumber);
 
   if (openIdx !== -1) {
     const updated = { ...sessions[openIdx] };
@@ -209,17 +220,17 @@ export function addOrderToSession(
   return session;
 }
 
-export function updateSessionStatus(status: SessionStatus): TableSession | null {
+export function updateSessionStatus(status: SessionStatus, tableNumber: string | null): TableSession | null {
   const sessions = readAll();
-  const idx = sessions.findIndex((s) => OPEN_STATUSES.includes(s.status));
+  const idx = sessions.findIndex((s) => OPEN_STATUSES.includes(s.status) && s.tableNumber === tableNumber);
   if (idx === -1) return null;
   sessions[idx] = { ...sessions[idx], status, updatedAt: now() };
   writeAll(sessions);
   return sessions[idx];
 }
 
-export function closeSession(): void {
-  updateSessionStatus("CLOSED");
+export function closeSession(tableNumber: string | null): void {
+  updateSessionStatus("CLOSED", tableNumber);
 }
 
 /**
@@ -230,9 +241,9 @@ export function closeSession(): void {
  * tracking the session via getTrackableSession() until all its orders are
  * delivered/cancelled — payment and food progress are separate concerns.
  */
-export function markSessionPaid(method: PaymentMethod): TableSession | null {
+export function markSessionPaid(method: PaymentMethod, tableNumber: string | null): TableSession | null {
   const sessions = readAll();
-  const idx = sessions.findIndex((s) => OPEN_STATUSES.includes(s.status));
+  const idx = sessions.findIndex((s) => OPEN_STATUSES.includes(s.status) && s.tableNumber === tableNumber);
   if (idx === -1) return null;
   sessions[idx] = {
     ...sessions[idx],
