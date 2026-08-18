@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { requireStaffRole } from "../../../../lib/server/auth/requireSession";
 import { getSyncStore, pullAllRecords } from "../../../../lib/server/syncStore";
+import type { Order, TableSession, WaiterTask } from "../../../../lib/orderTypes";
+import {
+  calculateRevenue,
+  getPopularItems,
+  getStaffActivityToday,
+  getTodayOrders,
+} from "../../../../lib/analytics";
 
 export const runtime = "nodejs";
 
@@ -10,73 +17,81 @@ const AskRequestSchema = z
   })
   .strict();
 
-interface OrderLike {
-  id: string;
-  tableNumber: string | null;
-  createdAt: string;
-  status: string;
-  items: { productId: string; name: string; price: number; quantity: number }[];
-  total: number;
-  isPaid?: boolean;
-}
-
-interface TaskLike {
-  id: string;
-  type: string;
-  status: string;
-  orderId: string;
-  tableNumber: string | null;
-  createdAt: string;
-  completedBy?: { username: string };
-}
-
 async function gatherSnapshot() {
   const store = await getSyncStore();
   if (!store) return null;
-  const [orderRecords, taskRecords] = await Promise.all([
+  const [orderRecords, sessionRecords, taskRecords] = await Promise.all([
     pullAllRecords(store, "orders"),
+    pullAllRecords(store, "sessions"),
     pullAllRecords(store, "tasks"),
   ]);
-  const orders: OrderLike[] = orderRecords.map((r) => JSON.parse(r.data));
-  const tasks: TaskLike[] = taskRecords.map((r) => JSON.parse(r.data));
-  return { orders, tasks };
+  const orders: Order[] = orderRecords.map((r) => JSON.parse(r.data));
+  const sessions: TableSession[] = sessionRecords.map((r) => JSON.parse(r.data));
+  const tasks: WaiterTask[] = taskRecords.map((r) => JSON.parse(r.data));
+  return { orders, sessions, tasks };
 }
 
-function buildSnapshotText(orders: OrderLike[], tasks: TaskLike[]): string {
-  const active = orders.filter((o) => o.status !== "CANCELLED");
-  const revenue = active
-    .filter((o) => o.status !== "PENDING_CONFIRMATION")
-    .reduce((sum, o) => sum + o.total, 0);
-  const itemCounts = new Map<string, number>();
-  for (const o of active) {
-    for (const item of o.items) {
-      itemCounts.set(item.name, (itemCounts.get(item.name) ?? 0) + item.quantity);
-    }
-  }
-  const topItems = [...itemCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([name, qty]) => `${name} x${qty}`)
+function startOfToday(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function buildSnapshotText(orders: Order[], sessions: TableSession[], tasks: WaiterTask[]): string {
+  const todayOrders = getTodayOrders(orders);
+  const active = todayOrders.filter((o) => o.status !== "CANCELLED");
+  const revenue = calculateRevenue(todayOrders);
+  const topItems = getPopularItems(todayOrders, 8)
+    .map((p) => `${p.name} x${p.quantitySold}`)
     .join(", ");
   const byStatus = new Map<string, number>();
-  for (const o of orders) byStatus.set(o.status, (byStatus.get(o.status) ?? 0) + 1);
+  for (const o of todayOrders) byStatus.set(o.status, (byStatus.get(o.status) ?? 0) + 1);
   const statusLine = [...byStatus.entries()].map(([s, n]) => `${s}: ${n}`).join(", ");
-  const staffCounts = new Map<string, number>();
-  for (const t of tasks) {
-    if (t.completedBy?.username) {
-      staffCounts.set(t.completedBy.username, (staffCounts.get(t.completedBy.username) ?? 0) + 1);
+  const cancelled = todayOrders.filter((o) => o.status === "CANCELLED").length;
+
+  // Customer visits — one dining session = one party seated at one table.
+  const todaySessions = sessions.filter((s) => new Date(s.createdAt).getTime() >= startOfToday());
+  const distinctTables = new Set(todaySessions.map((s) => s.tableNumber).filter(Boolean));
+
+  // Which tables were busiest — by order count, since a table can host
+  // several sessions (parties) across the day.
+  const ordersByTable = new Map<string, number>();
+  for (const o of todayOrders) {
+    if (!o.tableNumber) continue;
+    ordersByTable.set(o.tableNumber, (ordersByTable.get(o.tableNumber) ?? 0) + 1);
+  }
+  const busiestTables = [...ordersByTable.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([table, n]) => `${table}: ${n} užsakymų`)
+    .join(", ");
+
+  // Staff activity is stamped per role at different places: kitchen stamps
+  // preparedBy on order items, waiters stamp deliveredBy on items and
+  // completedBy on tasks — getStaffActivityToday already tallies all three
+  // per staff account, this just splits the report by which counts fired.
+  const activity = getStaffActivityToday(orders, tasks);
+  const kitchenLines: string[] = [];
+  const waiterLines: string[] = [];
+  for (const [, a] of activity) {
+    if (a.preparedCount > 0) kitchenLines.push(`${a.username}: ${a.preparedCount} patiekalų paruošta`);
+    if (a.deliveredCount > 0 || a.tasksCompletedCount > 0) {
+      waiterLines.push(
+        `${a.username}: ${a.deliveredCount} patiekalų pristatyta, ${a.tasksCompletedCount} užduočių atlikta`
+      );
     }
   }
-  const staffLine = [...staffCounts.entries()].map(([n, c]) => `${n}: ${c} užduočių`).join(", ") || "nėra";
-  const cancelled = orders.filter((o) => o.status === "CANCELLED").length;
 
   return [
-    `Iš viso užsakymų: ${orders.length}. Statusai: ${statusLine || "nėra"}.`,
-    `Pajamos (be atšauktų ir nepatvirtintų): ${revenue.toFixed(2)} EUR.`,
-    `Populiariausi patiekalai: ${topItems || "nėra duomenų"}.`,
-    `Atšaukta: ${cancelled}.`,
-    `Personalo aktyvumas (užbaigtos padavėjo/virtuvės užduotys): ${staffLine}.`,
-    `Iš viso padavėjo užduočių įvykių: ${tasks.length}.`,
+    `Iš viso užsakymų šiandien: ${todayOrders.length}. Statusai: ${statusLine || "nėra"}.`,
+    `Pajamos šiandien (be atšauktų ir nepatvirtintų): ${revenue.toFixed(2)} EUR.`,
+    `Populiariausi patiekalai šiandien: ${topItems || "nėra duomenų"}.`,
+    `Atšaukta šiandien: ${cancelled}.`,
+    `Klientų apsilankymų šiandien (naujų stalo sesijų): ${todaySessions.length}, iš ${distinctTables.size} skirtingų staliukų.`,
+    `Užimčiausi staliukai šiandien (pagal užsakymų skaičių): ${busiestTables || "nėra duomenų"}.`,
+    `Virtuvės personalo aktyvumas šiandien: ${kitchenLines.join("; ") || "nėra duomenų"}.`,
+    `Padavėjų aktyvumas šiandien: ${waiterLines.join("; ") || "nėra duomenų"}.`,
+    `Iš viso užduočių įvykių šiandien: ${tasks.filter((t) => new Date(t.updatedAt).getTime() >= startOfToday()).length}.`,
   ].join("\n");
 }
 
@@ -105,7 +120,7 @@ async function callGemini(prompt: string): Promise<string> {
 
 const SYSTEM_PREFIX =
   "Tu esi restorano 'Dzūkų Ainiai' administracijos analitikos asistentas. " +
-  "Tau pateikiami tikri, dabartiniai restorano duomenys (užsakymai, pajamos, personalas). " +
+  "Tau pateikiami tikri, dabartiniai restorano duomenys (užsakymai, klientų sesijos, personalas). " +
   "Atsakinėk lietuviškai, trumpai ir konkrečiai, remdamasis TIK pateiktais duomenimis. " +
   "Jei duomenų nepakanka atsakyti, taip ir pasakyk. Neišgalvok skaičių.";
 
@@ -118,7 +133,7 @@ export async function GET(): Promise<Response> {
   if (!snapshot) {
     return Response.json({ ok: false, error: "store_not_configured" }, { status: 503 });
   }
-  const snapshotText = buildSnapshotText(snapshot.orders, snapshot.tasks);
+  const snapshotText = buildSnapshotText(snapshot.orders, snapshot.sessions, snapshot.tasks);
   if (snapshot.orders.length === 0) {
     return Response.json({ ok: true, summary: "Kol kas nėra užsakymų analizei.", snapshot: snapshotText });
   }
@@ -151,7 +166,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!snapshot) {
     return Response.json({ ok: false, error: "store_not_configured" }, { status: 503 });
   }
-  const snapshotText = buildSnapshotText(snapshot.orders, snapshot.tasks);
+  const snapshotText = buildSnapshotText(snapshot.orders, snapshot.sessions, snapshot.tasks);
   try {
     const answer = await callGemini(
       `${SYSTEM_PREFIX}\n\nDuomenys:\n${snapshotText}\n\nAdministratoriaus klausimas: ${parsed.data.question}\n\nAtsakyk į klausimą remdamasis šiais duomenimis.`

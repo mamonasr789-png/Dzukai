@@ -140,7 +140,20 @@ function productTargets(
       .filter((term) => term.length >= 4);
     return terms.some((term) => value.includes(term));
   });
-  return [...new Set(matches.map((product) => product.productId))].slice(0, 10);
+  const matchIds = [...new Set(matches.map((product) => product.productId))].slice(0, 10);
+  if (matchIds.length > 0) return matchIds;
+
+  // No ordinal, pronoun, or name in the message pointed at anything — but if
+  // exactly one product was on the table (the just-recommended dish), a bare
+  // "add it" is unambiguous. Without this, every single-recommendation "add"
+  // follow-up (the most common phrasing) failed authorization here even
+  // though the provider itself correctly resolved the same reference,
+  // permanently stalling the add-to-cart flow with a "which dish?" loop.
+  if (state.latestReferencedProductIds.length === 1) {
+    const onlyId = state.latestReferencedProductIds[0];
+    if (permittedIds.has(onlyId)) return [onlyId];
+  }
+  return [];
 }
 
 function cartLineTargets(message: string, cart: Cart): string[] {

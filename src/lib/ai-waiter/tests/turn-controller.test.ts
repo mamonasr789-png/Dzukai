@@ -290,6 +290,30 @@ test("menu localization preserves authoritative identity, price, and missing-tra
   assert.equal(missingEnglish.officialUnitPrice, untranslatedProduct.price);
 });
 
+test("a bare \"add\" with a single prior reference adds that product (regression)", async () => {
+  // Found via a production load test: after a single recommendation, the
+  // most natural follow-up ("Pridėk" — just "add it") has no ordinal or dish
+  // name in it. The deterministic fallback provider itself defaults to the
+  // only candidate in that case, but actionAuthorizationPolicy's own,
+  // independent target-resolution (productTargets) did not — it returned no
+  // target, so the safety layer rejected the provider's correct add_to_cart
+  // call with "which dish?", permanently stalling the flow.
+  const harness = createHarness();
+  const session = await createSession(harness);
+  await harness.conversationStore.setLatestReferences(session.sessionId, ["u1"]);
+  const result = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "Pridėk", "turn_bare_add_01")
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.notEqual(result.data.status, "clarification_required");
+  assert.notEqual(result.data.status, "rejected_action");
+  assert.deepEqual(
+    result.data.cart.lines.map((line) => line.productId),
+    ["u1"]
+  );
+});
+
 test("multi-turn beef preference is persisted and grounds later recommendations", async () => {
   const harness = createHarness();
   const session = await createSession(harness);
