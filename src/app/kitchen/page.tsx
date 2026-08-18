@@ -6,10 +6,9 @@ import {
   type OrderItem,
   type OrderStatus,
   type ServingPreference,
-  listOrders,
-  updateItemStatus,
-  subscribeOrders,
-} from "@/lib/orders";
+  type StaffStamp,
+} from "@/lib/orderTypes";
+import { useStaffOrders } from "@/lib/hooks/useStaffOrders";
 import {
   type StaffLang,
   type StaffDict,
@@ -23,7 +22,6 @@ import StaffLangSwitch from "@/components/StaffLangSwitch";
 import StaffLogoutButton from "@/components/StaffLogoutButton";
 import { tProduct } from "@/lib/product-translations";
 import { useCurrentStaff } from "@/lib/useCurrentStaff";
-import type { StaffStamp } from "@/lib/orders";
 import {
   Clock, ChefHat, Bell, CheckCircle2, XCircle,
   UtensilsCrossed, Sun, Moon, Utensils, Zap, ChevronDown, ChevronUp,
@@ -138,27 +136,13 @@ type Tab = "active" | "history";
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function KitchenPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const { orders, updateItemStatus } = useStaffOrders();
   const [tab, setTab] = useState<Tab>("active");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [theme, toggleTheme] = useKitchenTheme();
   const [lang, setLang] = useStaffLang();
   const t = staffT(lang);
   const staff = useCurrentStaff();
-
-  useEffect(() => {
-    // Deliberately no local purging here anymore: this ran on every kitchen
-    // page view and deleted old completed orders from THIS device's local
-    // cache — but every page on the device shares that one cache, so it also
-    // quietly erased them from admin's own order history on that device. The
-    // sync watermark only moves forward, so a locally deleted record can
-    // never be re-fetched from the server either — the loss was permanent
-    // until a full localStorage clear. The server is the durable copy now
-    // (see /api/staff/ai-analytics), so there's no need to prune locally.
-    const refresh = () => setOrders(listOrders());
-    refresh();
-    return subscribeOrders(refresh);
-  }, []);
 
   const activeOrders = orders
     .filter(isActive)
@@ -229,7 +213,7 @@ export default function KitchenPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {activeOrders.map((order) => (
-                <OrderCard key={order.id} order={order} theme={theme} lang={lang} t={t} staff={staff} />
+                <OrderCard key={order.id} order={order} theme={theme} lang={lang} t={t} staff={staff} updateItemStatus={updateItemStatus} />
               ))}
             </div>
           )
@@ -277,12 +261,14 @@ function OrderCard({
   lang,
   t,
   staff,
+  updateItemStatus,
 }: {
   order: Order;
   theme: KitchenTheme;
   lang: StaffLang;
   t: StaffDict;
   staff: StaffStamp | null;
+  updateItemStatus: (orderId: string, productId: string, status: OrderStatus, staff?: StaffStamp) => Promise<void>;
 }) {
   const cardBorder = theme === "dark" ? CARD_BORDER_DARK[order.status] : CARD_BORDER_LIGHT[order.status];
 
@@ -314,7 +300,7 @@ function OrderCard({
 
       <div className="flex flex-col gap-2.5">
         {order.items.map((item) => (
-          <ItemRow key={item.productId} orderId={order.id} item={item} theme={theme} lang={lang} t={t} staff={staff} />
+          <ItemRow key={item.productId} orderId={order.id} item={item} theme={theme} lang={lang} t={t} staff={staff} updateItemStatus={updateItemStatus} />
         ))}
       </div>
 
@@ -449,6 +435,7 @@ function ItemRow({
   lang,
   t,
   staff,
+  updateItemStatus,
 }: {
   orderId: string;
   item: OrderItem;
@@ -456,6 +443,7 @@ function ItemRow({
   lang: StaffLang;
   t: StaffDict;
   staff: StaffStamp | null;
+  updateItemStatus: (orderId: string, productId: string, status: OrderStatus, staff?: StaffStamp) => Promise<void>;
 }) {
   const status = item.itemStatus ?? "NEW";
   const badge = theme === "dark" ? STATUS_BADGE_DARK[status] : STATUS_BADGE_LIGHT[status];
@@ -463,13 +451,13 @@ function ItemRow({
   const isDone = status === "COMPLETED" || status === "CANCELLED" || status === "DELIVERING";
 
   const advance = () => {
-    if (status === "NEW") updateItemStatus(orderId, item.productId, "PREPARING");
+    if (status === "NEW") void updateItemStatus(orderId, item.productId, "PREPARING");
     else if (status === "PREPARING")
-      updateItemStatus(orderId, item.productId, "READY", staff ?? undefined);
+      void updateItemStatus(orderId, item.productId, "READY", staff ?? undefined);
     // No action for READY — waiter takes over from here
   };
 
-  const cancel = () => updateItemStatus(orderId, item.productId, "CANCELLED");
+  const cancel = () => void updateItemStatus(orderId, item.productId, "CANCELLED");
 
   const actionLabel: Partial<Record<OrderStatus, string>> = {
     NEW: t.kitchenStart,

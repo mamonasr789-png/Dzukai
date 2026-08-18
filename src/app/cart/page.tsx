@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -11,9 +11,8 @@ import QuantitySelector from "@/components/QuantitySelector";
 import { useCartStore } from "@/lib/store";
 import { useT } from "@/lib/i18n";
 import { tProduct } from "@/lib/product-translations";
-import { createOrder, updateOrderStatus, subscribeOrders, hasActiveOrders, type ServingPreference } from "@/lib/orders";
-import { type TableSession, getTrackableSession, addOrderToSession, updateSessionStatus, subscribeSession } from "@/lib/tableSession";
-import { createUniqueTask } from "@/lib/waiterTasks";
+import type { ServingPreference, TableSession } from "@/lib/orderTypes";
+import { useTableSession } from "@/lib/hooks/useTableOrders";
 
 export default function CartPage() {
   const { items, removeItem, updateQuantity, totalPrice, totalItems, clearCart, tableNumber, lang } =
@@ -22,62 +21,21 @@ export default function CartPage() {
   const router = useRouter();
   const [serving, setServing] = useState<ServingPreference>("together");
   const [submitting, setSubmitting] = useState(false);
-  // Whether the customer has an active/trackable order or table session.
-  // Deliberately NOT seeded from a render-time read: on the server (and during
-  // static prerender of /cart) localStorage is unavailable, so a render-time
-  // read is always null and would wrongly commit the "empty cart" screen.
-  // The single source of truth is a client-side storage read in the effect
-  // below; `sessionChecked` guards against deciding before that read happens.
-  const [activeSession, setActiveSession] = useState<TableSession | null>(null);
-  const [hasActive, setHasActive] = useState(false);
-  const [sessionChecked, setSessionChecked] = useState(false);
+  // Trackable session now comes straight from the server (requireTableAccess
+  // resolves the table from the signed cookie) — no more client-side session
+  // resolution to get wrong. `loading` guards against deciding before the
+  // first poll response lands.
+  const { session: activeSession, loading: sessionLoading, createOrder } = useTableSession();
   const total = totalPrice();
   const count = totalItems();
-
-  useEffect(() => {
-    const refresh = () => {
-      // Source of truth = active ORDERS (not the cart, not payment). The session
-      // is resolved from those orders for the tracking card.
-      setHasActive(hasActiveOrders());
-      setActiveSession(getTrackableSession(tableNumber));
-      setSessionChecked(true);
-    };
-    refresh();
-    // Trackability depends on order delivery state and on session/payment state —
-    // watch both so the card appears/disappears at the right time.
-    const unsubSession = subscribeSession(refresh);
-    const unsubOrders = subscribeOrders(refresh);
-    return () => {
-      unsubSession();
-      unsubOrders();
-    };
-  }, [tableNumber]);
 
   if (items.length === 0) {
     // Active order/session? Track it — independent of the empty cart.
     if (activeSession) return <ActiveSessionState session={activeSession} />;
-    // Defensive: an active order exists but its session couldn't be resolved.
-    // Still never show "empty" — route the customer to live order tracking.
-    if (sessionChecked && hasActive) {
-      return (
-        <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
-          <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center mb-5">
-            <UtensilsCrossed size={36} className="text-primary" />
-          </div>
-          <h2 className="font-black text-xl">{tr.active_order_title}</h2>
-          <p className="text-muted-foreground text-sm mt-1 mb-6">
-            {tr.track_order_sub}
-          </p>
-          <Link href="/order">
-            <Button className="rounded-full px-8 h-12 font-bold">{tr.track_order}</Button>
-          </Link>
-        </div>
-      );
-    }
     // Cart is empty but we haven't confirmed there's no active order yet
-    // (e.g. right after payment, before the client storage read). Never flash
+    // (e.g. right after payment, before the first poll response). Never flash
     // the empty-cart screen on an unconfirmed state — show a neutral loader.
-    if (!sessionChecked) {
+    if (sessionLoading) {
       return (
         <div className="flex items-center justify-center min-h-screen">
           <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
@@ -99,44 +57,30 @@ export default function CartPage() {
     );
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (submitting || items.length === 0) return; // guard against double-tap
     setSubmitting(true);
-    const order = createOrder({
-      tableNumber,
-      items: items.map(({ product, quantity }) => ({
-        productId: product.id,
-        name: product.name,
-        price: product.price,
-        quantity,
-      })),
-      total,
-      language: lang,
-      servingPreference: serving,
-    });
-    const session = addOrderToSession(order.id, tableNumber);
-    if (session.orderIds.length === 1) {
-      // First order of this visit — hold it for a waiter to confirm someone is
-      // actually at the table before the kitchen ever sees it.
-      updateOrderStatus(order.id, "PENDING_CONFIRMATION");
-      createUniqueTask(`order:${order.id}:order_confirmation`, {
-        type: "order_confirmation",
-        orderId: order.id,
-        tableNumber: session.tableNumber ?? tableNumber,
-        items: order.items.map((i) => ({ productId: i.productId, name: i.name, quantity: i.quantity })),
+    try {
+      // submitOrder is atomic server-side now: it creates the order, attaches
+      // it to this table's session (creating one if needed), and — first
+      // order of the visit → PENDING_CONFIRMATION + order_confirmation task,
+      // else → additional_order task — all in one request (orderService.ts).
+      const order = await createOrder({
+        items: items.map(({ product, quantity }) => ({
+          productId: product.id,
+          name: product.name,
+          price: product.price,
+          quantity,
+        })),
+        total,
+        language: lang,
+        servingPreference: serving,
       });
-    } else {
-      // Second+ order in the same session — tell the waiter, otherwise the
-      // additional order arrives silently.
-      createUniqueTask(`order:${order.id}:additional_order`, {
-        type: "additional_order",
-        orderId: order.id,
-        tableNumber: session.tableNumber ?? tableNumber,
-        items: order.items.map((i) => ({ productId: i.productId, name: i.name, quantity: i.quantity })),
-      });
+      clearCart();
+      router.push(`/order?id=${order.id}`);
+    } finally {
+      setSubmitting(false);
     }
-    clearCart();
-    router.push(`/order?id=${order.id}`);
   };
 
   const dishLabel = count === 1 ? tr.dish1 : tr.dish234;
@@ -257,27 +201,17 @@ export default function CartPage() {
 function ActiveSessionState({ session }: { session: TableSession }) {
   const lang = useCartStore((s) => s.lang);
   const tr = useT(lang);
+  const { callWaiter, requestBill } = useTableSession();
   type ActionFeedback = "waiter_sent" | "bill_sent" | null;
   const [feedback, setFeedback] = useState<ActionFeedback>(null);
 
-  const anchorOrderId = session.orderIds[session.orderIds.length - 1] ?? "unknown";
-
-  const handleCallWaiter = () => {
-    createUniqueTask(`session:${session.id}:waiter_called`, {
-      type: "waiter_called",
-      orderId: anchorOrderId,
-      tableNumber: session.tableNumber,
-    });
+  const handleCallWaiter = async () => {
+    await callWaiter();
     setFeedback("waiter_sent");
   };
 
-  const handleRequestBill = () => {
-    updateSessionStatus("BILL_REQUESTED", session.tableNumber);
-    createUniqueTask(`session:${session.id}:bill_requested`, {
-      type: "bill_requested",
-      orderId: anchorOrderId,
-      tableNumber: session.tableNumber,
-    });
+  const handleRequestBill = async () => {
+    await requestBill();
     setFeedback("bill_sent");
   };
 

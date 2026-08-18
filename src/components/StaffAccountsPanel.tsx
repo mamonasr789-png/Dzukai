@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChefHat, ClipboardList, KeyRound, Trash2, UserPlus } from "lucide-react";
 import type { StaffLang } from "@/lib/staff-i18n";
-import { listOrders, subscribeOrders } from "@/lib/orders";
-import { listTasks, subscribeWaiterTasks } from "@/lib/waiterTasks";
+import { useStaffOrders } from "@/lib/hooks/useStaffOrders";
+import { useStaffTasks } from "@/lib/hooks/useStaffTasks";
 import { getStaffActivityToday } from "@/lib/analytics";
 
 type StaffRole = "waiter" | "kitchen";
@@ -97,8 +97,8 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
   const [newPassword, setNewPassword] = useState("");
   const [resetSubmitting, setResetSubmitting] = useState(false);
 
-  const [orders, setOrders] = useState<ReturnType<typeof listOrders>>([]);
-  const [tasks, setTasks] = useState<ReturnType<typeof listTasks>>([]);
+  const { orders } = useStaffOrders();
+  const { tasks } = useStaffTasks();
 
   const refresh = useCallback(async () => {
     const res = await fetch("/api/staff/accounts");
@@ -126,19 +126,6 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
         });
     }, ACCOUNTS_POLL_MS);
     return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const refreshOrders = () => setOrders(listOrders());
-    const refreshTasks = () => setTasks(listTasks());
-    refreshOrders();
-    refreshTasks();
-    const unsubOrders = subscribeOrders(refreshOrders);
-    const unsubTasks = subscribeWaiterTasks(refreshTasks);
-    return () => {
-      unsubOrders();
-      unsubTasks();
-    };
   }, []);
 
   const activityByStaffId = useMemo(() => getStaffActivityToday(orders, tasks), [orders, tasks]);

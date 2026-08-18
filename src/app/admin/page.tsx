@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   type Order,
   type OrderStatus,
-  listOrders,
-  subscribeOrders,
   orderPreparedBy,
   orderDeliveredBy,
-} from "@/lib/orders";
+  getSessionStats,
+  getPaymentStats,
+} from "@/lib/orderTypes";
+import { useStaffOrders } from "@/lib/hooks/useStaffOrders";
+import { useStaffSessions } from "@/lib/hooks/useStaffSessions";
 import {
   type KitchenStats,
   type PopularItem,
@@ -26,7 +28,6 @@ import {
   CheckCircle2, XCircle, BarChart3, RefreshCw, Calendar, Layers, Table2, Receipt, Truck, CreditCard,
   ChevronLeft, ChevronRight, CalendarDays,
 } from "lucide-react";
-import { getSessionStats, getPaymentStats, subscribeSession } from "@/lib/tableSession";
 import { resetDemoData } from "@/lib/devReset";
 import {
   type StaffLang,
@@ -77,13 +78,12 @@ function formatDate(iso: string, lang: StaffLang): string {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
-  const [allOrders, setAllOrders] = useState<Order[]>([]);
+  const { orders: allOrders, refresh: refreshOrders } = useStaffOrders();
+  const { sessions, refresh: refreshSessions } = useStaffSessions();
   const [filter, setFilter] = useState<DateFilter>("today");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
-  const [sessionStats, setSessionStats] = useState({ active: 0, billRequested: 0, total: 0 });
-  const [paymentStats, setPaymentStats] = useState({ paidInApp: 0, paidByWaiter: 0, total: 0 });
   const [spinning, setSpinning] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,9 +91,18 @@ export default function AdminPage() {
   const t = staffT(lang);
   useCurrentStaff(); // side effect only here: keeps this admin's last-seen ping alive
 
+  const sessionStats = getSessionStats(sessions);
+  const paymentStats = getPaymentStats(sessions, true);
+
+  // Reflect the moment the poll actually delivered new data, not just manual taps.
+  useEffect(() => {
+    setLastRefresh(new Date());
+  }, [allOrders]);
+
   const handleReset = async () => {
     await resetDemoData();
-    refreshAll();
+    refreshOrders();
+    refreshSessions();
     setConfirmReset(false);
   };
 
@@ -109,25 +118,12 @@ export default function AdminPage() {
     if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
   };
 
-  const refreshAll = useCallback(() => {
-    setAllOrders(listOrders());
-    setSessionStats(getSessionStats());
-    setPaymentStats(getPaymentStats(true));
-    setLastRefresh(new Date());
-  }, []);
-
   const handleManualRefresh = () => {
-    refreshAll();
+    refreshOrders();
+    refreshSessions();
     setSpinning(true);
     setTimeout(() => setSpinning(false), 600);
   };
-
-  useEffect(() => {
-    refreshAll();
-    const unsubOrders = subscribeOrders(refreshAll);
-    const unsubSessions = subscribeSession(refreshAll);
-    return () => { unsubOrders(); unsubSessions(); };
-  }, [refreshAll]);
 
   const orders =
     filter === "today"

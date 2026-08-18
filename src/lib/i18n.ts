@@ -1,6 +1,6 @@
 import type { Lang } from "./store";
 import type { Category } from "./data";
-import type { OrderStatus, ServingPreference } from "./orders";
+import type { OrderStatus, ServingPreference } from "./orderTypes";
 
 export const categoryLabels: Record<Lang, Partial<Record<Category, string>>> = {
   lt: {},

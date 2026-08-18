@@ -11,8 +11,7 @@
  * (translations, where they exist, come from product-translations.ts).
  */
 
-import type { OrderStatus, ServingPreference } from "./orders";
-import type { WaiterTaskType, WaiterTaskStatus } from "./waiterTasks";
+import type { OrderStatus, ServingPreference, WaiterTaskType, WaiterTaskStatus } from "./orderTypes";
 import { orderStatusLabels, servingPreferenceLabels } from "./i18n";
 import { useLanguage } from "./store";
 

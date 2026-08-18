@@ -4,8 +4,7 @@
  * Designed so every function can be swapped for a backend call later.
  */
 
-import type { Order, OrderStatus } from "./orders";
-import type { WaiterTask } from "./waiterTasks";
+import type { Order, OrderStatus, WaiterTask } from "./orderTypes";
 
 // ── Time helpers ──────────────────────────────────────────────────────────────
 

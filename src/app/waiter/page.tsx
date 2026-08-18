@@ -1,38 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   type Order,
-  listOrders,
-  subscribeOrders,
-  startItemsDelivery,
-  completeItemsDelivery,
-  updateOrderStatus,
-  markOrderPaid,
-} from "@/lib/orders";
-import {
   type WaiterTask,
   type WaiterTaskType,
   type WaiterTaskStatus,
   type WaiterTaskPriority,
+  type TableSession,
+  type StaffStamp,
   TASK_PRIORITY,
-  listTasks,
-  updateTaskStatus,
-  subscribeWaiterTasks,
-  syncReadyToServeTasks,
   getActiveTasks,
   countActiveTables,
-  completeTasksForOrders,
-} from "@/lib/waiterTasks";
-import {
-  type TableSession,
-  getActiveSession,
-  listSessions,
-  markSessionPaid,
-  subscribeSession,
   getPaymentStats,
-} from "@/lib/tableSession";
-import { clearCartStorage } from "@/lib/store";
+} from "@/lib/orderTypes";
+import { useStaffOrders } from "@/lib/hooks/useStaffOrders";
+import { useStaffTasks } from "@/lib/hooks/useStaffTasks";
+import { useStaffSessions } from "@/lib/hooks/useStaffSessions";
 import {
   type StaffLang,
   type StaffDict,
@@ -55,12 +39,21 @@ import StaffLangSwitch from "@/components/StaffLangSwitch";
 import StaffLogoutButton from "@/components/StaffLogoutButton";
 import { tProduct } from "@/lib/product-translations";
 import { useCurrentStaff } from "@/lib/useCurrentStaff";
-import type { StaffStamp } from "@/lib/orders";
 import {
   UtensilsCrossed, Receipt, Bell, ShoppingBag,
   Clock, CheckCircle2, ChevronDown, ChevronUp,
   Table2, List, CreditCard, ShieldCheck, QrCode, XCircle,
 } from "lucide-react";
+
+// ── Server-backed action bundle, threaded down to GroupCard/TaskRow ───────────
+
+interface WaiterActions {
+  updateOrderStatus: (orderId: string, status: "NEW" | "CANCELLED") => Promise<void>;
+  startItemsDelivery: (orderId: string, productIds: string[]) => Promise<void>;
+  completeItemsDelivery: (orderId: string, productIds: string[]) => Promise<void>;
+  updateTaskStatus: (id: string, status: WaiterTaskStatus, staff?: StaffStamp) => Promise<void>;
+  settleSession: (tableNumber: string) => Promise<void>;
+}
 
 // ── Payment status derivation ─────────────────────────────────────────────────
 
@@ -214,9 +207,12 @@ function filterTasks(tasks: WaiterTask[], filter: TaskFilter): WaiterTask[] {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function WaiterPage() {
-  const [tasks, setTasks] = useState<WaiterTask[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [sessions, setSessions] = useState<TableSession[]>([]);
+  // ready_to_serve task generation used to be scanned client-side on every
+  // refresh (syncReadyToServeTasks) — that now happens server-side, exactly
+  // once, at the moment an item transitions to READY (orderService.ts).
+  const { orders, updateOrderStatus, startItemsDelivery, completeItemsDelivery } = useStaffOrders();
+  const { tasks, updateTaskStatus } = useStaffTasks();
+  const { sessions, settleSession } = useStaffSessions();
   const [filter, setFilter] = useState<TaskFilter>("all");
   const [view, setView] = useState<ViewMode>("tasks");
   // Tracks which group (orderId) is expanded — one at a time
@@ -225,24 +221,7 @@ export default function WaiterPage() {
   const t = staffT(lang);
   const staff = useCurrentStaff();
 
-  useEffect(() => {
-    const refreshOrders = () => {
-      const fresh = listOrders();
-      setOrders(fresh);
-      syncReadyToServeTasks(fresh);
-    };
-    const refreshTasks = () => setTasks(listTasks());
-    const refreshSessions = () => setSessions(listSessions());
-
-    refreshOrders();
-    refreshTasks();
-    refreshSessions();
-
-    const unsubOrders = subscribeOrders(() => { refreshOrders(); });
-    const unsubTasks = subscribeWaiterTasks(refreshTasks);
-    const unsubSessions = subscribeSession(refreshSessions);
-    return () => { unsubOrders(); unsubTasks(); unsubSessions(); };
-  }, []);
+  const actions: WaiterActions = { updateOrderStatus, startItemsDelivery, completeItemsDelivery, updateTaskStatus, settleSession };
 
   const activeTasks = getActiveTasks(tasks);
   const displayedTasks = filterTasks(tasks, filter);
@@ -252,7 +231,7 @@ export default function WaiterPage() {
   const readyCount = activeTasks.filter((tk) => tk.type === "ready_to_serve").length;
   const billCount  = activeTasks.filter((tk) => tk.type === "bill_requested").length;
   const callCount  = activeTasks.filter((tk) => tk.type === "waiter_called").length;
-  const { paidInApp } = getPaymentStats(true);
+  const { paidInApp } = getPaymentStats(sessions, true);
 
   const toggle = (key: string) => setExpandedKey((p) => (p === key ? null : key));
   const FILTER_LABELS = filterLabels(t);
@@ -324,9 +303,9 @@ export default function WaiterPage() {
         {displayedGroups.length === 0 ? (
           <EmptyState filter={filter} t={t} />
         ) : view === "tables" ? (
-          <TableView groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} lang={lang} t={t} staff={staff} />
+          <TableView groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} lang={lang} t={t} staff={staff} actions={actions} />
         ) : (
-          <GroupList groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} lang={lang} t={t} staff={staff} />
+          <GroupList groups={displayedGroups} orders={orders} sessions={sessions} expandedKey={expandedKey} onToggle={toggle} lang={lang} t={t} staff={staff} actions={actions} />
         )}
       </div>
     </div>
@@ -442,7 +421,7 @@ function ActiveSessionCard({
 // ── Group list ────────────────────────────────────────────────────────────────
 
 function GroupList({
-  groups, orders, sessions, expandedKey, onToggle, lang, t, staff,
+  groups, orders, sessions, expandedKey, onToggle, lang, t, staff, actions,
 }: {
   groups: TaskGroup[];
   orders: Order[];
@@ -452,6 +431,7 @@ function GroupList({
   lang: StaffLang;
   t: StaffDict;
   staff: StaffStamp | null;
+  actions: WaiterActions;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -466,6 +446,7 @@ function GroupList({
           lang={lang}
           t={t}
           staff={staff}
+          actions={actions}
         />
       ))}
     </div>
@@ -475,7 +456,7 @@ function GroupList({
 // ── Table view ────────────────────────────────────────────────────────────────
 
 function TableView({
-  groups, orders, sessions, expandedKey, onToggle, lang, t, staff,
+  groups, orders, sessions, expandedKey, onToggle, lang, t, staff, actions,
 }: {
   groups: TaskGroup[];
   orders: Order[];
@@ -485,6 +466,7 @@ function TableView({
   lang: StaffLang;
   t: StaffDict;
   staff: StaffStamp | null;
+  actions: WaiterActions;
 }) {
   // Re-group by table, preserving the already-grouped structure
   const byTable = new Map<string, TaskGroup[]>();
@@ -520,6 +502,7 @@ function TableView({
                   lang={lang}
                   t={t}
                   staff={staff}
+                  actions={actions}
                 />
               ))}
             </div>
@@ -533,7 +516,7 @@ function TableView({
 // ── Group card ────────────────────────────────────────────────────────────────
 
 function GroupCard({
-  group, orders, sessions, expanded, onToggle, lang, t, staff,
+  group, orders, sessions, expanded, onToggle, lang, t, staff, actions,
 }: {
   group: TaskGroup;
   orders: Order[];
@@ -543,6 +526,7 @@ function GroupCard({
   lang: StaffLang;
   t: StaffDict;
   staff: StaffStamp | null;
+  actions: WaiterActions;
 }) {
   const isAllCompleted = group.activeTasks.length === 0;
   const order = orders.find((o) => o.id === group.orderId);
@@ -642,7 +626,7 @@ function GroupCard({
                 onClick={(e) => {
                   e.stopPropagation();
                   if (window.confirm(t.waiterCancelOrderConfirm)) {
-                    updateOrderStatus(group.orderId, "CANCELLED");
+                    void actions.updateOrderStatus(group.orderId, "CANCELLED");
                   }
                 }}
                 className="w-full h-10 rounded-xl text-xs font-bold transition-colors bg-red-500/10 text-red-300 hover:bg-red-500/20 border border-red-500/25 flex items-center justify-center gap-1.5"
@@ -662,6 +646,7 @@ function GroupCard({
               lang={lang}
               t={t}
               staff={staff}
+              actions={actions}
             />
           ))}
         </div>
@@ -673,7 +658,7 @@ function GroupCard({
 // ── Task row (inside expanded group) ─────────────────────────────────────────
 
 function TaskRow({
-  task, order, isLast, lang, t, staff,
+  task, order, isLast, lang, t, staff, actions,
 }: {
   task: WaiterTask;
   order: Order | undefined;
@@ -681,34 +666,29 @@ function TaskRow({
   lang: StaffLang;
   t: StaffDict;
   staff: StaffStamp | null;
+  actions: WaiterActions;
 }) {
   const isCompleted = task.status === "completed";
 
-  const handleAction = (e: React.MouseEvent) => {
+  const handleAction = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (task.status === "waiting") {
-      updateTaskStatus(task.id, "accepted");
+      await actions.updateTaskStatus(task.id, "accepted");
       if (task.type === "ready_to_serve") {
-        startItemsDelivery(task.orderId, task.items.map((i) => i.productId));
+        await actions.startItemsDelivery(task.orderId, task.items.map((i) => i.productId));
       }
     } else if (task.status === "accepted") {
       if (task.type === "ready_to_serve") {
-        completeItemsDelivery(task.orderId, task.items.map((i) => i.productId), staff ?? undefined);
-        updateTaskStatus(task.id, "completed", staff ?? undefined);
+        await actions.completeItemsDelivery(task.orderId, task.items.map((i) => i.productId));
+        await actions.updateTaskStatus(task.id, "completed", staff ?? undefined);
       } else if (task.type === "bill_requested") {
-        updateTaskStatus(task.id, "completed", staff ?? undefined);
-        const session = getActiveSession(task.tableNumber);
-        if (session && session.orderIds.includes(task.orderId)) {
-          // Mirrors order/page.tsx's in-app payment path — mark every order
-          // in the session paid, not just the session itself, or the
-          // customer's own /order screen never shows "Apmokėta".
-          session.orderIds.forEach((orderId) => markOrderPaid(orderId));
-          completeTasksForOrders(session.orderIds, staff ?? undefined);
-          markSessionPaid("WAITER", task.tableNumber);
-          clearCartStorage();
-        }
+        // settleSession atomically marks every order in the session paid,
+        // completes non-ready_to_serve tasks, and marks the session PAID —
+        // the server-side twin of what used to be four separate local writes.
+        if (task.tableNumber) await actions.settleSession(task.tableNumber);
+        await actions.updateTaskStatus(task.id, "completed", staff ?? undefined);
       } else {
-        updateTaskStatus(task.id, "completed", staff ?? undefined);
+        await actions.updateTaskStatus(task.id, "completed", staff ?? undefined);
       }
     }
   };
@@ -722,15 +702,15 @@ function TaskRow({
 
   // First order of a visit — a fork (confirm/reject), not the usual linear
   // waiting→accepted→completed progression every other task type uses.
-  const handleConfirmOrder = (e: React.MouseEvent) => {
+  const handleConfirmOrder = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    updateOrderStatus(task.orderId, "NEW");
-    updateTaskStatus(task.id, "completed", staff ?? undefined);
+    await actions.updateOrderStatus(task.orderId, "NEW");
+    await actions.updateTaskStatus(task.id, "completed", staff ?? undefined);
   };
-  const handleRejectOrder = (e: React.MouseEvent) => {
+  const handleRejectOrder = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    updateOrderStatus(task.orderId, "CANCELLED");
-    updateTaskStatus(task.id, "completed", staff ?? undefined);
+    await actions.updateOrderStatus(task.orderId, "CANCELLED");
+    await actions.updateTaskStatus(task.id, "completed", staff ?? undefined);
   };
 
   return (

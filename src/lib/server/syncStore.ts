@@ -287,3 +287,8 @@ export function getSyncStore(): Promise<SyncStore | null> {
   storePromise ??= createStore();
   return storePromise;
 }
+
+/** Test-only seam: inject an in-memory store instead of the real Postgres/SQLite one. */
+export function __setSyncStoreForTests(store: SyncStore | null): void {
+  storePromise = Promise.resolve(store);
+}

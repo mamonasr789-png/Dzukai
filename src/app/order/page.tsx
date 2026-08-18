@@ -12,25 +12,13 @@ import { Separator } from "@/components/ui/separator";
 import {
   type Order,
   type OrderStatus,
-  getOrder,
-  getLatestActiveOrder,
-  markOrderPaid,
-  allOrdersPaid,
-  subscribeOrders,
+  type TableSession,
   STATUS_ORDER,
   orderPreparedBy,
   orderDeliveredBy,
-} from "@/lib/orders";
-import {
-  type TableSession,
-  getTrackableSession,
-  subscribeSession,
-  updateSessionStatus,
-  markSessionPaid,
-} from "@/lib/tableSession";
-import { createUniqueTask, completeTasksForOrders, subscribeWaiterTasks } from "@/lib/waiterTasks";
-import { clearCartStorage, useLanguage, type Lang } from "@/lib/store";
-import { readTableAccessCookie } from "@/lib/tableAccessCookie";
+} from "@/lib/orderTypes";
+import { useTableSession, useTableOrder } from "@/lib/hooks/useTableOrders";
+import { useLanguage, type Lang } from "@/lib/store";
 import {
   useT,
   orderStatusLabels,
@@ -102,11 +90,19 @@ function OrderContent() {
   const [lang] = useLanguage();
   const copy = useT(lang);
 
-  const [order, setOrder] = useState<Order | null | undefined>(undefined);
-  const [session, setSession] = useState<TableSession | null>(null);
-  const [sessionOrders, setSessionOrders] = useState<Order[]>([]);
-  const [sessionEnded, setSessionEnded] = useState(false);
-  const hadSessionRef = useRef(false);
+  // Trackable session for THIS device's table, resolved server-side from the
+  // signed cookie (requireTableAccess.ts) — no more client-side table-scoping.
+  const {
+    session,
+    orders: sessionOrders,
+    loading: sessionLoading,
+    requestBill: requestBillApi,
+    payOrders,
+    refresh: refreshSession,
+  } = useTableSession();
+  // The specific pinned order when viewing /order?id=... — independent poll,
+  // since it may belong to a different (past) table visit than the session.
+  const { order: pinnedOrder, loading: orderLoading, refresh: refreshOrder } = useTableOrder(id);
 
   // Payment state
   const [justPaid, setJustPaid] = useState(false);
@@ -115,106 +111,36 @@ function OrderContent() {
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [billCalledFeedback, setBillCalledFeedback] = useState(false);
 
-  // Keep a ref to the latest id so subscription callbacks never capture
-  // a stale value from the initial render closure.
-  const idRef = useRef(id);
-  idRef.current = id;
+  // Once a session has been seen, its disappearance (no id pinned) means the
+  // whole visit is over — show the thank-you screen instead of "no order".
+  const hadSessionRef = useRef(false);
+  if (session) hadSessionRef.current = true;
+  const sessionEnded = hadSessionRef.current && !session && !id && !sessionLoading;
 
-  // Defined in the render body so it always closes over the latest setState
-  // functions (stable) and reads idRef.current at call time (fresh).
-  const doRefresh = () => {
-    const currentId = idRef.current;
-
-    // Which table's session this device should see. The pinned order (when
-    // present) is the reliable source — the sync engine mirrors every table's
-    // sessions into every device's storage, so an unscoped lookup could just
-    // as easily surface a different table's session (see tableSession.ts).
-    const pinnedTableNumber = currentId ? getOrder(currentId)?.tableNumber ?? null : null;
-    const tableNumber = pinnedTableNumber ?? readTableAccessCookie()?.tableNumber ?? null;
-
-    // Trackable session survives payment — it only disappears once the visit is
-    // fully settled AND every order is delivered/cancelled.
-    const s = getTrackableSession(tableNumber);
-    if (hadSessionRef.current && !s) {
-      // No specific order pinned → the whole visit is over: show the thank-you
-      // screen. With ?id= we keep rendering that order (it may be COMPLETED).
-      if (!currentId) {
-        setSessionEnded(true);
-        return;
-      }
-    }
-    if (s) hadSessionRef.current = true;
-    setSession(s);
-
-    if (currentId) {
-      setOrder(getOrder(currentId) ?? null);
-      // When the session contains multiple orders (customer ordered again),
-      // populate sessionOrders so the action card total covers the full session.
-      if (s && s.orderIds.length > 1) {
-        const orders = s.orderIds.map((oid) => getOrder(oid)).filter(Boolean) as Order[];
-        setSessionOrders(orders);
-      } else {
-        setSessionOrders([]);
-      }
-      return;
-    }
-
-    if (s && s.orderIds.length > 1) {
-      const orders = s.orderIds.map((oid) => getOrder(oid)).filter(Boolean) as Order[];
-      setSessionOrders(orders);
-      setOrder(null);
-    } else if (s && s.orderIds.length === 1) {
-      setSessionOrders([]);
-      setOrder(getOrder(s.orderIds[0]) ?? null);
-    } else {
-      setSessionOrders([]);
-      setOrder(getLatestActiveOrder() ?? null);
-    }
-  };
-
-  // refreshRef always points to the latest doRefresh — subscription callbacks
-  // call through this ref so they never hold a stale version.
-  const refreshRef = useRef(doRefresh);
-  refreshRef.current = doRefresh;
-
-  // Re-read data when id changes (session → specific order view and vice-versa).
-  // Subscriptions are NOT torn down — only the initial data fetch repeats.
+  // Re-fetch the pinned order immediately on id change (session → specific
+  // order view and back) instead of waiting for the next poll tick.
   useEffect(() => {
-    doRefresh();
+    refreshOrder();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Stable subscriptions — registered once on mount, never re-registered.
-  // Covers orders + session + waiter-tasks (all three can signal a state change
-  // the customer cares about). visibilitychange / focus are fallback catches
-  // for the case where a cross-tab storage event was missed while the tab was
-  // backgrounded or the browser throttled the listener.
-  useEffect(() => {
-    const reload = () => refreshRef.current();
-    reload(); // initial read on mount
+  const doRefresh = () => {
+    refreshSession();
+    if (id) refreshOrder();
+  };
 
-    const unsubOrders = subscribeOrders(reload);
-    const unsubSession = subscribeSession(reload);
-    const unsubTasks = subscribeWaiterTasks(reload);
-
-    const onVisible = () => { if (document.visibilityState === "visible") reload(); };
-    const onFocus = () => reload();
-
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onFocus);
-
-    return () => {
-      unsubOrders();
-      unsubSession();
-      unsubTasks();
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onFocus);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // order = the pinned order when ?id= is set; otherwise the session's single
+  // order when there's exactly one, else null (session view handles >1 itself).
+  const order: Order | null | undefined = id
+    ? (orderLoading ? undefined : pinnedOrder)
+    : sessionLoading
+      ? undefined
+      : session && sessionOrders.length === 1
+        ? sessionOrders[0]
+        : null;
 
   // Derived payment helpers (safe to compute before early returns)
-  const allOrders = sessionOrders.length > 0 ? sessionOrders : (order ? [order] : []);
+  const allOrders = !id && sessionOrders.length > 0 ? sessionOrders : (order ? [order] : []);
 
   // Payment scope: single-order when ?id= is set, full session otherwise.
   // Single-order scope only counts unpaid orders for the remaining total.
@@ -257,15 +183,9 @@ function OrderContent() {
     return STATUS_RANK[o.status] > STATUS_RANK[best] ? o.status : best;
   }, "NEW");
 
-  const handleCallWaiter = () => {
+  const handleCallWaiter = async () => {
     if (!session || billCalledFeedback) return;
-    const anchorOrderId = session.orderIds[session.orderIds.length - 1];
-    updateSessionStatus("BILL_REQUESTED", session.tableNumber);
-    createUniqueTask(`session:${session.id}:bill_requested`, {
-      type: "bill_requested",
-      orderId: anchorOrderId,
-      tableNumber: session.tableNumber,
-    });
+    await requestBillApi();
     setBillCalledFeedback(true);
   };
 
@@ -274,16 +194,12 @@ function OrderContent() {
     setPaymentProcessing(true);
     const result = await processPayment(payableTotal);
     if (result.success) {
-      // Record payment only — this is a financial event. Each paid order is
-      // flagged isPaid; the session's bill is settled once every order is paid.
+      // Record payment only — this is a financial event. payOrders marks each
+      // order paid server-side and, once every order in the session is paid,
+      // atomically settles the session too (orderService.payOrdersByCustomer).
       // Crucially we do NOT navigate away: the customer keeps tracking food
       // preparation and delivery on this page until it's all delivered.
-      payableOrders.forEach((o) => markOrderPaid(o.id));
-      if (allOrdersPaid(session.orderIds)) {
-        completeTasksForOrders(session.orderIds); // clears bill tasks, keeps food tasks
-        markSessionPaid("APP", session.tableNumber);
-        clearCartStorage();
-      }
+      await payOrders(payableOrders.map((o) => o.id));
       setShowPaymentModal(false);
       setJustPaid(true);
       doRefresh();

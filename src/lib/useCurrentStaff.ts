@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { StaffStamp } from "./orders";
+import type { StaffStamp } from "./orderTypes";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
