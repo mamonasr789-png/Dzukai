@@ -9,7 +9,6 @@ import {
   listOrders,
   updateItemStatus,
   subscribeOrders,
-  purgeOldHistory,
 } from "@/lib/orders";
 import {
   type StaffLang,
@@ -148,13 +147,17 @@ export default function KitchenPage() {
   const staff = useCurrentStaff();
 
   useEffect(() => {
-    purgeOldHistory(); // clean on mount
+    // Deliberately no local purging here anymore: this ran on every kitchen
+    // page view and deleted old completed orders from THIS device's local
+    // cache — but every page on the device shares that one cache, so it also
+    // quietly erased them from admin's own order history on that device. The
+    // sync watermark only moves forward, so a locally deleted record can
+    // never be re-fetched from the server either — the loss was permanent
+    // until a full localStorage clear. The server is the durable copy now
+    // (see /api/staff/ai-analytics), so there's no need to prune locally.
     const refresh = () => setOrders(listOrders());
     refresh();
-    return subscribeOrders(() => {
-      purgeOldHistory();
-      refresh();
-    });
+    return subscribeOrders(refresh);
   }, []);
 
   const activeOrders = orders
