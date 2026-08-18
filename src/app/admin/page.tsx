@@ -40,6 +40,7 @@ import StaffLangSwitch from "@/components/StaffLangSwitch";
 import StaffLogoutButton from "@/components/StaffLogoutButton";
 import StaffAccountsPanel from "@/components/StaffAccountsPanel";
 import TablesPanel from "@/components/TablesPanel";
+import AdminAiPanel from "@/components/AdminAiPanel";
 import { useCurrentStaff } from "@/lib/useCurrentStaff";
 import { tProduct } from "@/lib/product-translations";
 
@@ -388,6 +389,7 @@ export default function AdminPage() {
           </>
         )}
 
+        <AdminAiPanel lang={lang} />
         <TablesPanel lang={lang} />
         <StaffAccountsPanel lang={lang} />
       </div>
