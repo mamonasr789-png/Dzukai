@@ -8,6 +8,7 @@ import {
   getStaffActivityToday,
   getTodayOrders,
 } from "../../../../lib/analytics";
+import { categories, products } from "../../../../lib/data";
 
 export const runtime = "nodejs";
 
@@ -39,10 +40,62 @@ function startOfToday(): number {
 
 function buildSnapshotText(orders: Order[], sessions: TableSession[], tasks: WaiterTask[]): string {
   const todayOrders = getTodayOrders(orders);
-  const active = todayOrders.filter((o) => o.status !== "CANCELLED");
   const revenue = calculateRevenue(todayOrders);
   const topItems = getPopularItems(todayOrders, 8)
     .map((p) => `${p.name} x${p.quantitySold}`)
+    .join(", ");
+
+  // The top-8 overall list can hide a category entirely (e.g. drinks) behind
+  // higher-volume food — a "which drink sold best" question needs its own
+  // per-category ranking, not just a slice of the global one.
+  const categoryLabel = new Map<string, string>(categories.map((c) => [c.id, c.label]));
+  const productCategory = new Map<string, string>(products.map((p) => [p.id, p.category]));
+  const categoryItemCounts = new Map<string, Map<string, number>>();
+  for (const order of todayOrders) {
+    if (order.status === "CANCELLED" || order.status === "PENDING_CONFIRMATION") continue;
+    for (const item of order.items) {
+      if (item.itemStatus === "CANCELLED") continue;
+      const category = productCategory.get(item.productId);
+      if (!category) continue;
+      const perItem = categoryItemCounts.get(category) ?? new Map<string, number>();
+      perItem.set(item.name, (perItem.get(item.name) ?? 0) + item.quantity);
+      categoryItemCounts.set(category, perItem);
+    }
+  }
+  const categoryLines = [...categoryItemCounts.entries()]
+    .map(([category, items]) => {
+      const [topName, topQty] = [...items.entries()].sort((a, b) => b[1] - a[1])[0];
+      return `${categoryLabel.get(category) ?? category}: populiariausia ${topName} (x${topQty})`;
+    })
+    .join("; ");
+
+  // The per-category lines above split gėrimai across ~11 separate menu
+  // categories (kava, alus, vynas, kokteiliai, ...) — a plain "kokis
+  // gėrimas populiariausias?" question has no single line to anchor on
+  // there, and testing showed the model guessing from the food list
+  // instead. Merge them into one ranked drinks-only answer.
+  const DRINK_CATEGORY_IDS = new Set([
+    "gerimai",
+    "kava",
+    "limonadai",
+    "nealko-alus",
+    "alus",
+    "sidras",
+    "alus-kokteiliai",
+    "kokteiliai",
+    "stiprieji",
+    "sampanas",
+    "vynas",
+  ]);
+  const drinkCounts = new Map<string, number>();
+  for (const [category, items] of categoryItemCounts) {
+    if (!DRINK_CATEGORY_IDS.has(category)) continue;
+    for (const [name, qty] of items) drinkCounts.set(name, (drinkCounts.get(name) ?? 0) + qty);
+  }
+  const topDrinks = [...drinkCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name, qty]) => `${name} x${qty}`)
     .join(", ");
   const byStatus = new Map<string, number>();
   for (const o of todayOrders) byStatus.set(o.status, (byStatus.get(o.status) ?? 0) + 1);
@@ -85,7 +138,9 @@ function buildSnapshotText(orders: Order[], sessions: TableSession[], tasks: Wai
   return [
     `Iš viso užsakymų šiandien: ${todayOrders.length}. Statusai: ${statusLine || "nėra"}.`,
     `Pajamos šiandien (be atšauktų ir nepatvirtintų): ${revenue.toFixed(2)} EUR.`,
-    `Populiariausi patiekalai šiandien: ${topItems || "nėra duomenų"}.`,
+    `Populiariausi patiekalai šiandien (bendras TOP 8): ${topItems || "nėra duomenų"}.`,
+    `Populiariausias patiekalas pagal kiekvieną meniu kategoriją šiandien: ${categoryLines || "nėra duomenų"}.`,
+    `Populiariausi GĖRIMAI šiandien (apjungus visas gėrimų kategorijas — kava, alus, vynas, kokteiliai, limonadai ir t.t., NEĮSKAITANT patiekalų ar sriubų): ${topDrinks || "nėra duomenų"}.`,
     `Atšaukta šiandien: ${cancelled}.`,
     `Klientų apsilankymų šiandien (naujų stalo sesijų): ${todaySessions.length}, iš ${distinctTables.size} skirtingų staliukų.`,
     `Užimčiausi staliukai šiandien (pagal užsakymų skaičių): ${busiestTables || "nėra duomenų"}.`,
