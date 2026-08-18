@@ -19,10 +19,17 @@ const RecordSchema = z
   })
   .strict();
 
+// No cap here deliberately — see MAX_PUSH_RECORDS below. A hard schema-level
+// cap made an oversized push fail validation for the WHOLE request, which
+// silently killed the pull half too (same request, same response) — a device
+// that ever accumulated more unsynced local records than the cap (weeks of
+// pre-sync local testing, a missed deploy, whatever) would then never receive
+// updates again, from that point on, even across reloads, since localStorage
+// persists and the same oversized diff gets recomputed every tick.
 const CollectionRequestSchema = z
   .object({
     since: z.number().int().min(0),
-    push: z.array(RecordSchema).max(200).default([]),
+    push: z.array(RecordSchema).default([]),
   })
   .strict();
 
@@ -37,6 +44,11 @@ const SyncRequestSchema = z
       .strict(),
   })
   .strict();
+
+/** Applied per-collection, after parsing — an oversized push is trimmed
+ * (oldest-first, keeping the most recent local changes) rather than
+ * rejecting the whole request, so the pull half always still goes through. */
+const MAX_PUSH_RECORDS = 500;
 
 function unauthorized(request: Request): boolean {
   // Optional shared secret until real staff accounts exist. Unset = open,
@@ -80,7 +92,17 @@ export async function POST(request: Request): Promise<Response> {
   for (const collection of SYNC_COLLECTIONS) {
     const req = parsed.data.collections[collection as SyncCollection];
     if (!req) continue;
-    if (req.push.length > 0) await store.push(collection, req.push);
+    if (req.push.length > 0) {
+      // A push problem (one bad record, a DB hiccup) must never block the
+      // pull below — a device that can only ever push a broken diff would
+      // otherwise never receive anyone else's updates again either, since
+      // both directions used to live or die together in one response.
+      try {
+        await store.push(collection, req.push.slice(0, MAX_PUSH_RECORDS));
+      } catch {
+        // next tick retries the push; the pull still goes through this tick.
+      }
+    }
     const { records, watermark } = await store.pull(collection, req.since);
     result[collection] = {
       records: records.map(({ id, data, updatedAt }) => ({ id, data, updatedAt })),
