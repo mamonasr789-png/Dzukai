@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getSyncStore } from "./syncStore.ts";
+import { getSyncStore, pullAllRecords } from "./syncStore.ts";
 import type { StaffStamp, WaiterTask, WaiterTaskItem, WaiterTaskStatus, WaiterTaskType } from "../orderTypes.ts";
 
 /**
@@ -17,7 +17,7 @@ function generateTaskId(): string {
 async function pullTasks(): Promise<WaiterTask[]> {
   const store = await getSyncStore();
   if (!store) throw new Error("store_not_configured");
-  const { records } = await store.pull("tasks", 0);
+  const records = await pullAllRecords(store, "tasks");
   return records
     .map((r) => JSON.parse(r.data) as WaiterTask)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));

@@ -13,7 +13,7 @@ const require0 = (await import("node:module")).createRequire(import.meta.url);
 const serverOnly = require0.resolve("server-only");
 require0.cache[serverOnly] = { id: serverOnly, filename: serverOnly, loaded: true, exports: {} } as never;
 
-const { SqliteSyncStore } = await import("../server/syncStore.ts");
+const { SqliteSyncStore, pullAllRecords, PULL_PAGE_SIZE } = await import("../server/syncStore.ts");
 
 function store() {
   return new SqliteSyncStore(new DatabaseSync(":memory:"));
@@ -119,6 +119,37 @@ describe("purgeAll", () => {
 
     const after = await s.pull("orders", staleWatermark);
     expect(after.records.map((r) => r.id)).toEqual(["o2"]);
+  });
+});
+
+describe("pullAllRecords", () => {
+  it("walks every page instead of truncating at PULL_PAGE_SIZE", async () => {
+    // Regression: orderService/taskService used to call store.pull(collection, 0)
+    // directly and only ever look at the first page — once a collection passed
+    // PULL_PAGE_SIZE records, every screen (kitchen/waiter/admin/customer) lost
+    // visibility into anything created after the 500th, with no error surfaced
+    // anywhere except "not_found" on individual item/order lookups. Found via a
+    // 1000-order production load test.
+    const s = store();
+    const total = PULL_PAGE_SIZE + 137;
+    for (let i = 0; i < total; i++) {
+      await s.push("orders", [record(`o${i}`, "2026-01-01T00:00:00Z")]);
+    }
+
+    const singlePull = await s.pull("orders", 0);
+    expect(singlePull.records.length).toBe(PULL_PAGE_SIZE); // the bug, still true of the raw primitive
+
+    const all = await pullAllRecords(s, "orders");
+    expect(all.length).toBe(total);
+    expect(new Set(all.map((r) => r.id)).size).toBe(total); // no duplicates across pages
+  });
+
+  it("returns everything in one page when the collection is small", async () => {
+    const s = store();
+    await s.push("orders", [record("o1", "2026-01-01T00:00:00Z")]);
+    await s.push("orders", [record("o2", "2026-01-01T00:00:00Z")]);
+    const all = await pullAllRecords(s, "orders");
+    expect(all.map((r) => r.id).sort()).toEqual(["o1", "o2"]);
   });
 });
 

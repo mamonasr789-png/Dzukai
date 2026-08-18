@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getSyncStore } from "./syncStore.ts";
+import { getSyncStore, pullAllRecords } from "./syncStore.ts";
 import {
   deriveOrderStatus,
   normalizeOrder,
@@ -46,14 +46,14 @@ function generateSessionId(): string {
 async function pullOrders(): Promise<Order[]> {
   const store = await getSyncStore();
   if (!store) throw new Error("store_not_configured");
-  const { records } = await store.pull("orders", 0);
+  const records = await pullAllRecords(store, "orders");
   return records.map((r) => normalizeOrder(JSON.parse(r.data) as Order));
 }
 
 async function pullSessions(): Promise<TableSession[]> {
   const store = await getSyncStore();
   if (!store) throw new Error("store_not_configured");
-  const { records } = await store.pull("sessions", 0);
+  const records = await pullAllRecords(store, "sessions");
   return records.map((r) => JSON.parse(r.data) as TableSession);
 }
 

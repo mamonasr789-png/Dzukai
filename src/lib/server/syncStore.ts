@@ -49,7 +49,7 @@ export interface SyncStore {
 const INITIAL_PULL_WINDOW_MS = 48 * 60 * 60 * 1_000;
 
 /** Caps one pull; the watermark advances per page, so the rest follows next tick. */
-const PULL_PAGE_SIZE = 500;
+export const PULL_PAGE_SIZE = 500;
 
 /**
  * The watermark must come from the rows actually handed to the client, never
@@ -59,6 +59,29 @@ const PULL_PAGE_SIZE = 500;
  */
 function watermarkFrom(records: PulledRecord[], since: number): number {
   return records.reduce((max, record) => Math.max(max, record.seq), since);
+}
+
+/**
+ * Every current caller wants the WHOLE collection, not an incremental diff
+ * since some persisted watermark (nothing here persists one between calls) —
+ * so a single pull() silently truncating at PULL_PAGE_SIZE meant any
+ * collection past 500 records had its newest rows invisible to every screen
+ * (kitchen/waiter/admin/customer alike). Walk pages by watermark until one
+ * comes back empty.
+ */
+export async function pullAllRecords(
+  store: SyncStore,
+  collection: SyncCollection
+): Promise<PulledRecord[]> {
+  const all: PulledRecord[] = [];
+  let since = 0;
+  for (;;) {
+    const { records, watermark } = await store.pull(collection, since);
+    all.push(...records);
+    if (records.length === 0 || watermark === since) break;
+    since = watermark;
+  }
+  return all;
 }
 
 // ── Postgres (production) ─────────────────────────────────────────────────────

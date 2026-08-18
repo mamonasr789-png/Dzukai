@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireStaffRole } from "../../../../lib/server/auth/requireSession";
-import { getSyncStore } from "../../../../lib/server/syncStore";
+import { getSyncStore, pullAllRecords } from "../../../../lib/server/syncStore";
 
 export const runtime = "nodejs";
 
@@ -33,12 +33,12 @@ interface TaskLike {
 async function gatherSnapshot() {
   const store = await getSyncStore();
   if (!store) return null;
-  const [ordersPull, tasksPull] = await Promise.all([
-    store.pull("orders", 0),
-    store.pull("tasks", 0),
+  const [orderRecords, taskRecords] = await Promise.all([
+    pullAllRecords(store, "orders"),
+    pullAllRecords(store, "tasks"),
   ]);
-  const orders: OrderLike[] = ordersPull.records.map((r) => JSON.parse(r.data));
-  const tasks: TaskLike[] = tasksPull.records.map((r) => JSON.parse(r.data));
+  const orders: OrderLike[] = orderRecords.map((r) => JSON.parse(r.data));
+  const tasks: TaskLike[] = taskRecords.map((r) => JSON.parse(r.data));
   return { orders, tasks };
 }
 
