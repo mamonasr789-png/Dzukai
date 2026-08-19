@@ -585,7 +585,7 @@ function PaymentStats({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-[11px] font-semibold uppercase tracking-widest text-white/60 mb-3">
+    <p className="text-[11px] font-semibold uppercase tracking-widest text-white mb-3">
       {children}
     </p>
   );
