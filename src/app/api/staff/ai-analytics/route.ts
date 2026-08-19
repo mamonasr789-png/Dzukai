@@ -18,8 +18,14 @@ export const runtime = "nodejs";
 const AskRequestSchema = z
   .object({
     question: z.string().trim().min(1).max(1000),
+    lang: z.enum(["lt", "en"]).optional(),
   })
   .strict();
+
+/** Query-string lang param is untrusted free text — anything but "en" falls back to lt. */
+function parseLang(value: string | null | undefined): "lt" | "en" {
+  return value === "en" ? "en" : "lt";
+}
 
 // Same "still working" window StaffAccountsPanel uses for its online dot —
 // keeps "kas dabar dirba?" answers consistent with what the admin sees visually.
@@ -202,35 +208,56 @@ function buildSnapshotText(
   ].join("\n");
 }
 
-function systemPrefix(): string {
+function systemPrefix(lang: "lt" | "en", username: string): string {
   const today = dateKey(new Date());
   const yesterday = dateKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  if (lang === "en") {
+    return (
+      "You are the analytics assistant for the restaurant 'Dzūkų Ainiai'. " +
+      "You are given real, current restaurant data (orders, customer sessions, staff). " +
+      `Today's date: ${today}. Yesterday's date: ${yesterday}. ` +
+      `You are speaking with the admin logged in as '${username}' — address them by that name (e.g. "Hi ${username},") instead of a generic term like "owner".` +
+      "For questions about a specific past day or 'yesterday', use the 'Revenue and order count by day' list in the data — it covers up to the last 60 days. " +
+      "Respond in ENGLISH ONLY, briefly and specifically, based ONLY on the data given. " +
+      "If a specific day isn't in the list (too long ago or hasn't happened yet), say so. Never invent numbers."
+    );
+  }
   return (
     "Tu esi restorano 'Dzūkų Ainiai' administracijos analitikos asistentas. " +
     "Tau pateikiami tikri, dabartiniai restorano duomenys (užsakymai, klientų sesijos, personalas). " +
     `Šiandienos data: ${today}. Vakarykštė data: ${yesterday}. ` +
+    `Kalbiesi su administratoriumi, prisijungusiu kaip '${username}' — kreipkis į jį šiuo vardu (pvz. kreipiamuoju linksniu, jei tai lietuviškas vardas), o ne bendrai „savininke“.` +
     "Klausimuose apie konkrečią praeitą dieną ar 'vakar' naudok 'Pajamos ir užsakymų skaičius pagal dieną' sąrašą duomenyse — jame yra iki 60 praėjusių dienų. " +
-    "Atsakinėk lietuviškai, trumpai ir konkrečiai, remdamasis TIK pateiktais duomenimis. " +
+    "Atsakinėk LIETUVIŠKAI, trumpai ir konkrečiai, remdamasis TIK pateiktais duomenimis. " +
     "Jei konkrečios dienos duomenų sąraše nėra (pvz. per senai arba dar neįvyko), taip ir pasakyk. Neišgalvok skaičių."
   );
 }
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   const session = await requireStaffRole("admin");
   if (!session) {
     return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
+  const lang = parseLang(new URL(request.url).searchParams.get("lang"));
   const snapshot = await gatherSnapshot();
   if (!snapshot) {
     return Response.json({ ok: false, error: "store_not_configured" }, { status: 503 });
   }
   const snapshotText = buildSnapshotText(snapshot.orders, snapshot.sessions, snapshot.tasks, snapshot.accounts);
   if (snapshot.orders.length === 0) {
-    return Response.json({ ok: true, summary: "Kol kas nėra užsakymų analizei.", snapshot: snapshotText });
+    return Response.json({
+      ok: true,
+      summary: lang === "en" ? "No orders to analyze yet." : "Kol kas nėra užsakymų analizei.",
+      snapshot: snapshotText,
+    });
   }
   try {
+    const instruction =
+      lang === "en"
+        ? "Give a short (4-6 sentence) overview of today's activity for the admin: how things are going, what stands out, what deserves attention."
+        : "Pateik trumpą (4-6 sakinių) šios dienos veiklos apžvalgą administratoriui: kaip sekasi, kas išsiskiria, ką verta atkreipti dėmesį.";
     const summary = await callGemini(
-      `${systemPrefix()}\n\nDuomenys:\n${snapshotText}\n\nPateik trumpą (4-6 sakinių) šios dienos veiklos apžvalgą administratoriui: kaip sekasi, kas išsiskiria, ką verta atkreipti dėmesį.`
+      `${systemPrefix(lang, session.username)}\n\nDuomenys:\n${snapshotText}\n\n${instruction}`
     );
     return Response.json({ ok: true, summary, snapshot: snapshotText });
   } catch {
@@ -258,9 +285,12 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ ok: false, error: "store_not_configured" }, { status: 503 });
   }
   const snapshotText = buildSnapshotText(snapshot.orders, snapshot.sessions, snapshot.tasks, snapshot.accounts);
+  const lang = parsed.data.lang === "en" ? "en" : "lt";
   try {
+    const questionLabel = lang === "en" ? "Admin's question" : "Administratoriaus klausimas";
+    const answerInstruction = lang === "en" ? "Answer the question based on this data." : "Atsakyk į klausimą remdamasis šiais duomenimis.";
     const answer = await callGemini(
-      `${systemPrefix()}\n\nDuomenys:\n${snapshotText}\n\nAdministratoriaus klausimas: ${parsed.data.question}\n\nAtsakyk į klausimą remdamasis šiais duomenimis.`
+      `${systemPrefix(lang, session.username)}\n\nDuomenys:\n${snapshotText}\n\n${questionLabel}: ${parsed.data.question}\n\n${answerInstruction}`
     );
     return Response.json({ ok: true, answer });
   } catch {

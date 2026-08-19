@@ -142,7 +142,7 @@ export default function AdminAiPanel({ lang }: { lang: StaffLang }) {
     setLoadingSummary(true);
     setSummaryError(null);
     try {
-      const res = await fetch("/api/staff/ai-analytics");
+      const res = await fetch(`/api/staff/ai-analytics?lang=${lang}`);
       const data = await res.json();
       if (!res.ok || !data.ok) {
         setSummaryError(data.error === "store_not_configured" ? t.notConfigured : t.unavailable);
@@ -160,7 +160,7 @@ export default function AdminAiPanel({ lang }: { lang: StaffLang }) {
     setLoadingReport(period);
     setReportError(null);
     try {
-      const res = await fetch(`/api/staff/ai-analytics/report?period=${period}`);
+      const res = await fetch(`/api/staff/ai-analytics/report?period=${period}&lang=${lang}`);
       const data = await res.json();
       if (!res.ok || !data.ok) {
         setReportError(data.error === "store_not_configured" ? t.notConfigured : t.unavailable);
@@ -185,7 +185,7 @@ export default function AdminAiPanel({ lang }: { lang: StaffLang }) {
       const res = await fetch("/api/staff/ai-analytics", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: question.trim() }),
+        body: JSON.stringify({ question: question.trim(), lang }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
