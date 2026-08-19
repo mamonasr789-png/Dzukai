@@ -22,7 +22,7 @@ import { useLanguage, type Lang } from "@/lib/store";
 import {
   useT,
   orderStatusLabels,
-  orderStatusMessages,
+  dynamicWaitMessage,
   servingPreferenceLabels,
   sessionStatusLabels,
 } from "@/lib/i18n";
@@ -95,6 +95,7 @@ function OrderContent() {
   const {
     session,
     orders: sessionOrders,
+    estimatedMinutesByOrderId,
     loading: sessionLoading,
     requestBill: requestBillApi,
     payOrders,
@@ -102,7 +103,12 @@ function OrderContent() {
   } = useTableSession();
   // The specific pinned order when viewing /order?id=... — independent poll,
   // since it may belong to a different (past) table visit than the session.
-  const { order: pinnedOrder, loading: orderLoading, refresh: refreshOrder } = useTableOrder(id);
+  const {
+    order: pinnedOrder,
+    estimatedMinutes: pinnedEstimatedMinutes,
+    loading: orderLoading,
+    refresh: refreshOrder,
+  } = useTableOrder(id);
 
   // Payment state
   const [justPaid, setJustPaid] = useState(false);
@@ -138,6 +144,13 @@ function OrderContent() {
       : session && sessionOrders.length === 1
         ? sessionOrders[0]
         : null;
+
+  // Same id-vs-session split as `order` above, for its live ETA.
+  const estimatedMinutes: number | null = id
+    ? (pinnedEstimatedMinutes ?? null)
+    : order
+      ? (estimatedMinutesByOrderId[order.id] ?? null)
+      : null;
 
   // Derived payment helpers (safe to compute before early returns)
   const allOrders = !id && sessionOrders.length > 0 ? sessionOrders : (order ? [order] : []);
@@ -316,7 +329,7 @@ function OrderContent() {
             </p>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            {orderStatusMessages[lang][order.status]}
+            {dynamicWaitMessage(lang, order.status, estimatedMinutes)}
           </p>
         </div>
 

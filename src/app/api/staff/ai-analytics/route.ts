@@ -9,6 +9,7 @@ import {
   getTodayOrders,
 } from "../../../../lib/analytics";
 import { categories, products } from "../../../../lib/data";
+import { callGemini } from "../../../../lib/server/geminiClient";
 
 export const runtime = "nodejs";
 
@@ -148,29 +149,6 @@ function buildSnapshotText(orders: Order[], sessions: TableSession[], tasks: Wai
     `Padavėjų aktyvumas šiandien: ${waiterLines.join("; ") || "nėra duomenų"}.`,
     `Iš viso užduočių įvykių šiandien: ${tasks.filter((t) => new Date(t.updatedAt).getTime() >= startOfToday()).length}.`,
   ].join("\n");
-}
-
-async function callGemini(prompt: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) throw new Error("provider_unavailable");
-  const model = process.env.AI_WAITER_GEMINI_MODEL ?? "gemini-2.5-flash";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 1024, thinkingConfig: { thinkingBudget: 0 } },
-    }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error("provider_request_failed");
-  const json = (await response.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
-  const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-  if (!text.trim()) throw new Error("provider_empty_response");
-  return text.trim();
 }
 
 const SYSTEM_PREFIX =

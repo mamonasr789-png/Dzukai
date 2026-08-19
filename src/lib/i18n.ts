@@ -84,6 +84,24 @@ export const orderStatusLabels: Record<Lang, Record<OrderStatus, string>> = {
   },
 };
 
+/**
+ * Same copy as orderStatusMessages, but with the live ETA prediction
+ * (src/lib/server/etaPrediction.ts) substituted in for NEW/PREPARING instead
+ * of the fixed "apie 15/10 min." — falls back to the static message when no
+ * estimate is available yet (still loading, or history too thin).
+ */
+export function dynamicWaitMessage(lang: Lang, status: OrderStatus, estimatedMinutes: number | null): string {
+  if (estimatedMinutes === null || (status !== "NEW" && status !== "PREPARING")) {
+    return orderStatusMessages[lang][status];
+  }
+  const templates: Record<Lang, string> = {
+    lt: status === "NEW" ? "Užsakymas priimtas. Numatomas laukimo laikas: ~{m} min." : "Užsakymas gaminamas. Numatomas laukimo laikas: ~{m} min.",
+    en: status === "NEW" ? "Order received. Estimated wait: ~{m} min." : "Your order is being prepared. Estimated wait: ~{m} min.",
+    ru: status === "NEW" ? "Заказ принят. Ожидаемое время: ~{m} мин." : "Заказ готовится. Ожидаемое время: ~{m} мин.",
+  };
+  return templates[lang].replace("{m}", String(estimatedMinutes));
+}
+
 export const orderStatusMessages: Record<Lang, Record<OrderStatus, string>> = {
   lt: {
     PENDING_CONFIRMATION: "Laukiama padavėjo patvirtinimo.",

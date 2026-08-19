@@ -6,13 +6,14 @@ import type { Order, OrderItem, ServingPreference, TableSession } from "../order
 interface SessionResponse {
   session: TableSession | null;
   orders: Order[];
+  estimatedMinutesByOrderId: Record<string, number | null>;
 }
 
 async function fetchSession(): Promise<SessionResponse> {
   const res = await fetch("/api/table/session");
   const data = await res.json();
   if (!res.ok || !data.ok) throw new Error(data.error ?? "fetch_failed");
-  return { session: data.session, orders: data.orders };
+  return { session: data.session, orders: data.orders, estimatedMinutesByOrderId: data.estimatedMinutesByOrderId ?? {} };
 }
 
 async function postJson<T = unknown>(url: string, body?: unknown): Promise<T> {
@@ -37,6 +38,7 @@ export function useTableSession() {
   const { data, loading, error, refresh } = usePolling(fetchSession, 2000);
   const session = data?.session ?? null;
   const orders = data?.orders ?? [];
+  const estimatedMinutesByOrderId = data?.estimatedMinutesByOrderId ?? {};
 
   async function createOrder(params: {
     items: OrderItem[];
@@ -66,19 +68,30 @@ export function useTableSession() {
     return result;
   }
 
-  return { session, orders, loading, error, refresh, createOrder, requestBill, callWaiter, payOrders };
+  return {
+    session,
+    orders,
+    estimatedMinutesByOrderId,
+    loading,
+    error,
+    refresh,
+    createOrder,
+    requestBill,
+    callWaiter,
+    payOrders,
+  };
 }
 
 /** Single order lookup for /order?id=... — independent of the session poll above. */
 export function useTableOrder(id: string | null) {
-  const fetcher = async (): Promise<Order | null> => {
+  const fetcher = async (): Promise<{ order: Order; estimatedMinutes: number | null } | null> => {
     if (!id) return null;
     const res = await fetch(`/api/table/orders/${id}`);
     const data = await res.json();
     if (res.status === 404) return null;
     if (!res.ok || !data.ok) throw new Error(data.error ?? "fetch_failed");
-    return data.order as Order;
+    return { order: data.order as Order, estimatedMinutes: data.estimatedMinutes ?? null };
   };
   const { data, loading, error, refresh } = usePolling(fetcher, 2000);
-  return { order: data, loading, error, refresh };
+  return { order: data?.order ?? null, estimatedMinutes: data?.estimatedMinutes ?? null, loading, error, refresh };
 }
