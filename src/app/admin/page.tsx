@@ -42,6 +42,7 @@ import StaffLogoutButton from "@/components/StaffLogoutButton";
 import StaffAccountsPanel from "@/components/StaffAccountsPanel";
 import TablesPanel from "@/components/TablesPanel";
 import AdminAiPanel from "@/components/AdminAiPanel";
+import CollapsibleSection from "@/components/CollapsibleSection";
 import { useCurrentStaff } from "@/lib/useCurrentStaff";
 import { tProduct } from "@/lib/product-translations";
 
@@ -351,8 +352,7 @@ export default function AdminPage() {
             {/* ── Popular + Recent ── */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Popular dishes */}
-              <section>
-                <SectionLabel>{t.adminPopular}</SectionLabel>
+              <CollapsibleSection title={t.adminPopular} count={popularItems.length}>
                 {popularItems.length === 0 ? (
                   <Card><p className="text-white/40 text-sm py-2">{t.noData}</p></Card>
                 ) : (
@@ -364,11 +364,10 @@ export default function AdminPage() {
                     </div>
                   </Card>
                 )}
-              </section>
+              </CollapsibleSection>
 
               {/* Recent orders */}
-              <section>
-                <SectionLabel>{t.adminRecent}</SectionLabel>
+              <CollapsibleSection title={t.adminRecent} count={recentOrders.length}>
                 {recentOrders.length === 0 ? (
                   <Card><p className="text-white/40 text-sm py-2">{t.noData}</p></Card>
                 ) : (
@@ -380,7 +379,7 @@ export default function AdminPage() {
                     </div>
                   </Card>
                 )}
-              </section>
+              </CollapsibleSection>
             </div>
           </>
         )}

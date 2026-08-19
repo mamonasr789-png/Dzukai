@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { ChevronDown, ChevronUp, Copy, Plus, QrCode as QrCodeIcon, Trash2 } from "lucide-react";
 import type { StaffLang } from "@/lib/staff-i18n";
+import CollapsibleSection from "./CollapsibleSection";
 
 interface RestaurantTable {
   id: string;
@@ -155,11 +156,7 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
   if (!loaded) return null;
 
   return (
-    <section>
-      <p className="text-[11px] font-semibold uppercase tracking-widest text-white/30 mb-3">
-        {t.title}
-      </p>
-
+    <CollapsibleSection title={t.title} count={tables.length}>
       <div className="border border-white/8 rounded-xl bg-white/3 p-4 mb-3">
         <form onSubmit={handleCreate} className="flex flex-wrap items-end gap-2">
           <div className="flex flex-col gap-1">
@@ -260,6 +257,6 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
           })}
         </div>
       )}
-    </section>
+    </CollapsibleSection>
   );
 }
