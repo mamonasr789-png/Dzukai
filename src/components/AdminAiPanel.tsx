@@ -202,7 +202,7 @@ export default function AdminAiPanel({ lang }: { lang: StaffLang }) {
 
   return (
     <section>
-      <p className="text-[11px] font-semibold uppercase tracking-widest text-white/30 mb-3 flex items-center gap-1.5">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-white/60 mb-3 flex items-center gap-1.5">
         <Sparkles size={12} />
         {t.title}
       </p>

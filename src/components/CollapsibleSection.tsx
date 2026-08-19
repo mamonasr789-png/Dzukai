@@ -27,16 +27,16 @@ export default function CollapsibleSection({
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center justify-between gap-2 mb-3 group"
       >
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-white/30 group-hover:text-white/50 transition-colors flex items-center gap-1.5">
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-white/60 group-hover:text-white/80 transition-colors flex items-center gap-1.5">
           {title}
           {count !== undefined && (
-            <span className="text-white/20 normal-case tracking-normal">({count})</span>
+            <span className="text-white/40 normal-case tracking-normal">({count})</span>
           )}
         </span>
         {open ? (
-          <ChevronUp size={13} className="text-white/30 group-hover:text-white/50 transition-colors shrink-0" />
+          <ChevronUp size={13} className="text-white/60 group-hover:text-white/80 transition-colors shrink-0" />
         ) : (
-          <ChevronDown size={13} className="text-white/30 group-hover:text-white/50 transition-colors shrink-0" />
+          <ChevronDown size={13} className="text-white/60 group-hover:text-white/80 transition-colors shrink-0" />
         )}
       </button>
       {open && children}
