@@ -41,6 +41,16 @@ export interface SyncStore {
     collection: SyncCollection,
     since: number
   ): Promise<{ records: PulledRecord[]; watermark: number }>;
+  /**
+   * Point lookup by primary key — for the common case of "I already know the
+   * exact id, I just need that one record." Walking the whole collection via
+   * pull()/pullAllRecords() to find a single row by id was the direct cause
+   * of a real production incident: every single-order mutation (confirm, mark
+   * item ready, start/complete delivery) pulled the ENTIRE orders collection
+   * first, so as the collection grew toward ~7000 rows, routine per-order
+   * writes multiplied into tens of GB of monthly network transfer.
+   */
+  getRecord(collection: SyncCollection, id: string): Promise<PulledRecord | null>;
   /** Wipes every order/session/task for every device — the admin "clear test data" reset. */
   purgeAll(): Promise<void>;
 }
@@ -158,6 +168,17 @@ class PostgresSyncStore implements SyncStore {
     return { records, watermark: watermarkFrom(records, since) };
   }
 
+  async getRecord(collection: SyncCollection, id: string): Promise<PulledRecord | null> {
+    await this.ensureSchema();
+    const rows = (await this.sql`
+      SELECT id, data, updated_at, seq FROM sync_records
+      WHERE collection = ${collection} AND id = ${id}
+      LIMIT 1`) as Array<{ id: string; data: string; updated_at: string; seq: string | number }>;
+    if (rows.length === 0) return null;
+    const row = rows[0];
+    return { id: row.id, data: row.data, updatedAt: row.updated_at, seq: Number(row.seq) };
+  }
+
   async purgeAll(): Promise<void> {
     await this.ensureSchema();
     await this.sql`DELETE FROM sync_records`;
@@ -271,6 +292,14 @@ export class SqliteSyncStore implements SyncStore {
       seq: row.seq,
     }));
     return { records, watermark: watermarkFrom(records, since) };
+  }
+
+  async getRecord(collection: SyncCollection, id: string): Promise<PulledRecord | null> {
+    const row = this.db
+      .prepare("SELECT id, data, updated_at, seq FROM records WHERE collection = ? AND id = ?")
+      .get(collection, id) as { id: string; data: string; updated_at: string; seq: number } | undefined;
+    if (!row) return null;
+    return { id: row.id, data: row.data, updatedAt: row.updated_at, seq: row.seq };
   }
 
   async purgeAll(): Promise<void> {

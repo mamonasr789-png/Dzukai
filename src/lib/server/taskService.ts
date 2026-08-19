@@ -29,13 +29,20 @@ async function pushTask(task: WaiterTask): Promise<void> {
   await store.push("tasks", [{ id: task.id, data: JSON.stringify(task), updatedAt: task.updatedAt }]);
 }
 
+/** Point lookup by id — see SyncStore.getRecord's doc for why this matters. */
+async function getTaskRecord(id: string): Promise<WaiterTask | undefined> {
+  const store = await getSyncStore();
+  if (!store) throw new Error("store_not_configured");
+  const record = await store.getRecord("tasks", id);
+  return record ? (JSON.parse(record.data) as WaiterTask) : undefined;
+}
+
 export async function listTasks(): Promise<WaiterTask[]> {
   return pullTasks();
 }
 
 export async function getTask(id: string): Promise<WaiterTask | undefined> {
-  const tasks = await pullTasks();
-  return tasks.find((t) => t.id === id);
+  return getTaskRecord(id);
 }
 
 /**
@@ -77,8 +84,7 @@ export async function updateTaskStatus(
   status: WaiterTaskStatus,
   staff?: StaffStamp
 ): Promise<WaiterTask | undefined> {
-  const tasks = await pullTasks();
-  const task = tasks.find((t) => t.id === id);
+  const task = await getTaskRecord(id);
   if (!task) return undefined;
   const updated: WaiterTask = {
     ...task,

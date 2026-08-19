@@ -153,4 +153,41 @@ describe("pullAllRecords", () => {
   });
 });
 
+describe("getRecord", () => {
+  it("finds a record by id without needing a full pull", async () => {
+    // Regression: orderService/taskService used to pull the WHOLE collection
+    // to find one record by id — every single-order mutation (confirm, mark
+    // item ready, deliver) paid that cost, and as the collection grew toward
+    // thousands of rows this alone drove a real production network-transfer
+    // cost incident. getRecord is the direct point lookup that replaced it.
+    const s = store();
+    const total = PULL_PAGE_SIZE + 50; // bigger than one pull() page
+    for (let i = 0; i < total; i++) {
+      await s.push("orders", [record(`o${i}`, "2026-01-01T00:00:00Z")]);
+    }
+    const found = await s.getRecord("orders", `o${total - 1}`); // past the first page
+    expect(found?.id).toBe(`o${total - 1}`);
+  });
+
+  it("returns null for a missing id", async () => {
+    const s = store();
+    await s.push("orders", [record("o1", "2026-01-01T00:00:00Z")]);
+    expect(await s.getRecord("orders", "nope")).toBeFalsy();
+  });
+
+  it("returns null for an id that exists in a different collection", async () => {
+    const s = store();
+    await s.push("sessions", [record("shared-id", "2026-01-01T00:00:00Z")]);
+    expect(await s.getRecord("orders", "shared-id")).toBeFalsy();
+  });
+
+  it("reflects the latest push, matching last-write-wins", async () => {
+    const s = store();
+    await s.push("orders", [record("o1", "2026-01-01T00:00:00Z")]);
+    await s.push("orders", [record("o1", "2026-01-02T00:00:00Z")]);
+    const found = await s.getRecord("orders", "o1");
+    expect(found?.updatedAt).toBe("2026-01-02T00:00:00Z");
+  });
+});
+
 printResults();

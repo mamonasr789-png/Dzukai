@@ -50,6 +50,20 @@ async function pullOrders(): Promise<Order[]> {
   return records.map((r) => normalizeOrder(JSON.parse(r.data) as Order));
 }
 
+/**
+ * Point lookup by id — skips walking the whole orders collection. Every
+ * single-order mutation below used to pull the entire collection just to
+ * find one row by id; as the collection grew, that turned routine writes
+ * into a real production cost incident (see SyncStore.getRecord's doc).
+ */
+async function getOrderRecord(id: string): Promise<Order | undefined> {
+  const store = await getSyncStore();
+  if (!store) throw new Error("store_not_configured");
+  const record = await store.getRecord("orders", id);
+  if (!record) return undefined;
+  return normalizeOrder(JSON.parse(record.data) as Order);
+}
+
 async function pullSessions(): Promise<TableSession[]> {
   const store = await getSyncStore();
   if (!store) throw new Error("store_not_configured");
@@ -70,8 +84,7 @@ async function pushSession(session: TableSession): Promise<void> {
 }
 
 export async function getOrder(id: string): Promise<Order | undefined> {
-  const orders = await pullOrders();
-  return orders.find((o) => o.id === id);
+  return getOrderRecord(id);
 }
 
 export async function listOrders(): Promise<Order[]> {
@@ -96,13 +109,22 @@ function findOpenSessionForTable(sessions: TableSession[], tableNumber: string |
 export async function getTrackableSessionWithOrders(
   tableNumber: string | null
 ): Promise<{ session: TableSession | null; orders: Order[] }> {
-  const [sessions, orders] = await Promise.all([pullSessions(), pullOrders()]);
+  const sessions = await pullSessions();
 
+  // Common/steady-state case (customer polls every 2s while a session is
+  // open) — the session already names its exact order ids, so point lookups
+  // replace what used to be a full orders-collection pull on every poll.
   const open = findOpenSessionForTable(sessions, tableNumber);
   if (open) {
-    return { session: open, orders: orders.filter((o) => open.orderIds.includes(o.id)) };
+    const orders = (await Promise.all(open.orderIds.map((id) => getOrderRecord(id)))).filter(
+      (o): o is Order => o !== undefined
+    );
+    return { session: open, orders };
   }
 
+  // Rare fallback (session just closed/paid) — genuinely needs to search all
+  // orders by table + status, which has no id to look up by yet.
+  const orders = await pullOrders();
   const activeOrders = orders
     .filter((o) => ACTIVE_ORDER_STATUSES.includes(o.status))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -207,8 +229,7 @@ export async function updateItemStatus(
   status: OrderStatus,
   staff?: StaffStamp
 ): Promise<Order | undefined> {
-  const orders = await pullOrders();
-  const order = orders.find((o) => o.id === orderId);
+  const order = await getOrderRecord(orderId);
   if (!order) return undefined;
 
   const now = new Date().toISOString();
@@ -232,8 +253,7 @@ export async function updateItemStatus(
 
 /** Update the whole order status at once (also sets all items). */
 export async function updateOrderStatus(id: string, status: OrderStatus): Promise<Order | undefined> {
-  const orders = await pullOrders();
-  const order = orders.find((o) => o.id === id);
+  const order = await getOrderRecord(id);
   if (!order) return undefined;
   const updated: Order = {
     ...order,
@@ -254,8 +274,7 @@ export async function rejectFirstOrder(orderId: string): Promise<Order | undefin
 
 /** Waiter accepts delivery — READY → DELIVERING for the given items (all READY items if empty). */
 export async function startItemsDelivery(orderId: string, productIds: string[]): Promise<Order | undefined> {
-  const orders = await pullOrders();
-  const order = orders.find((o) => o.id === orderId);
+  const order = await getOrderRecord(orderId);
   if (!order) return undefined;
 
   const targets = new Set(productIds.length ? productIds : order.items.map((i) => i.productId));
@@ -280,8 +299,7 @@ export async function completeItemsDelivery(
   productIds: string[],
   staff?: StaffStamp
 ): Promise<Order | undefined> {
-  const orders = await pullOrders();
-  const order = orders.find((o) => o.id === orderId);
+  const order = await getOrderRecord(orderId);
   if (!order) return undefined;
 
   const now = new Date().toISOString();
@@ -348,9 +366,8 @@ export async function settleSessionByWaiter(
   const session = findOpenSessionForTable(sessions, tableNumber);
   if (!session) return null;
 
-  const orders = await pullOrders();
   for (const id of session.orderIds) {
-    const order = orders.find((o) => o.id === id);
+    const order = await getOrderRecord(id);
     if (order) await markOrderPaid(order);
   }
   await completeTasksForOrders(session.orderIds, staff);
@@ -382,8 +399,8 @@ export async function payOrdersByCustomer(
   }
 
   if (!session) return { allPaid: false };
-  const freshOrders = await pullOrders();
-  const allPaid = session.orderIds.every((id) => freshOrders.find((o) => o.id === id)?.isPaid === true);
+  const freshOrders = await Promise.all(session.orderIds.map((id) => getOrderRecord(id)));
+  const allPaid = freshOrders.every((o) => o?.isPaid === true);
   if (allPaid) {
     await completeTasksForOrders(session.orderIds);
     const updatedSession: TableSession = {
