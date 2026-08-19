@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { requireStaffRole } from "../../../../lib/server/auth/requireSession";
 import { getSyncStore, pullAllRecords } from "../../../../lib/server/syncStore";
+import { getStaffAccountStore } from "../../../../lib/server/staffAccountStore";
 import type { Order, TableSession, WaiterTask } from "../../../../lib/orderTypes";
 import {
   calculateRevenue,
+  dateKey,
   getPopularItems,
   getStaffActivityToday,
   getTodayOrders,
@@ -19,6 +21,10 @@ const AskRequestSchema = z
   })
   .strict();
 
+// Same "still working" window StaffAccountsPanel uses for its online dot —
+// keeps "kas dabar dirba?" answers consistent with what the admin sees visually.
+const ONLINE_WINDOW_MS = 90_000;
+
 async function gatherSnapshot() {
   const store = await getSyncStore();
   if (!store) return null;
@@ -30,7 +36,9 @@ async function gatherSnapshot() {
   const orders: Order[] = orderRecords.map((r) => JSON.parse(r.data));
   const sessions: TableSession[] = sessionRecords.map((r) => JSON.parse(r.data));
   const tasks: WaiterTask[] = taskRecords.map((r) => JSON.parse(r.data));
-  return { orders, sessions, tasks };
+  const accountStore = await getStaffAccountStore();
+  const accounts = accountStore ? await accountStore.list() : [];
+  return { orders, sessions, tasks, accounts };
 }
 
 function startOfToday(): number {
@@ -39,7 +47,19 @@ function startOfToday(): number {
   return d.getTime();
 }
 
-function buildSnapshotText(orders: Order[], sessions: TableSession[], tasks: WaiterTask[]): string {
+interface StaffAccountLite {
+  id: string;
+  username: string;
+  role: "admin" | "waiter" | "kitchen";
+  lastSeenAt: string | null;
+}
+
+function buildSnapshotText(
+  orders: Order[],
+  sessions: TableSession[],
+  tasks: WaiterTask[],
+  accounts: StaffAccountLite[]
+): string {
   const todayOrders = getTodayOrders(orders);
   const revenue = calculateRevenue(todayOrders);
   const topItems = getPopularItems(todayOrders, 8)
@@ -136,6 +156,35 @@ function buildSnapshotText(orders: Order[], sessions: TableSession[], tasks: Wai
     }
   }
 
+  // "Kas dabar dirba?" needs a live snapshot, not "who did something today" —
+  // same 90s heartbeat window StaffAccountsPanel's online dot uses.
+  const onlineStaff = accounts.filter(
+    (a) => a.role !== "admin" && a.lastSeenAt && Date.now() - new Date(a.lastSeenAt).getTime() < ONLINE_WINDOW_MS
+  );
+  const onlineLines = onlineStaff
+    .map((a) => `${a.username} (${a.role === "kitchen" ? "virėjas" : "padavėjas"})`)
+    .join(", ");
+
+  // Per-day history (last 60 days) so date-specific questions ("kiek pajamų
+  // buvo rugpjūčio 5?", "kiek vakar?") can be answered without a separate
+  // query path — today's line above stays as the fast/primary summary.
+  const historyStart = Date.now() - 60 * 24 * 60 * 60 * 1000;
+  const billableForHistory = orders.filter(
+    (o) => o.status !== "CANCELLED" && o.status !== "PENDING_CONFIRMATION" && new Date(o.createdAt).getTime() >= historyStart
+  );
+  const byDay = new Map<string, { orders: number; revenue: number }>();
+  for (const o of billableForHistory) {
+    const key = dateKey(new Date(o.createdAt));
+    const entry = byDay.get(key) ?? { orders: 0, revenue: 0 };
+    entry.orders += 1;
+    entry.revenue += o.total;
+    byDay.set(key, entry);
+  }
+  const dailyHistoryLines = [...byDay.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([day, v]) => `${day}: ${v.orders} užsakymų, ${v.revenue.toFixed(2)} EUR`)
+    .join("\n");
+
   return [
     `Iš viso užsakymų šiandien: ${todayOrders.length}. Statusai: ${statusLine || "nėra"}.`,
     `Pajamos šiandien (be atšauktų ir nepatvirtintų): ${revenue.toFixed(2)} EUR.`,
@@ -148,14 +197,23 @@ function buildSnapshotText(orders: Order[], sessions: TableSession[], tasks: Wai
     `Virtuvės personalo aktyvumas šiandien: ${kitchenLines.join("; ") || "nėra duomenų"}.`,
     `Padavėjų aktyvumas šiandien: ${waiterLines.join("; ") || "nėra duomenų"}.`,
     `Iš viso užduočių įvykių šiandien: ${tasks.filter((t) => new Date(t.updatedAt).getTime() >= startOfToday()).length}.`,
+    `Šiuo metu dirba (prisijungę per pastarąsias 90 sek.): ${onlineLines || "niekas šiuo metu neprisijungęs"}.`,
+    `Pajamos ir užsakymų skaičius pagal dieną (paskutinės 60 dienų, data YYYY-MM-DD, naudok šį sąrašą klausimams apie konkrečią praeitą dieną ar "vakar"): \n${dailyHistoryLines || "nėra duomenų"}`,
   ].join("\n");
 }
 
-const SYSTEM_PREFIX =
-  "Tu esi restorano 'Dzūkų Ainiai' administracijos analitikos asistentas. " +
-  "Tau pateikiami tikri, dabartiniai restorano duomenys (užsakymai, klientų sesijos, personalas). " +
-  "Atsakinėk lietuviškai, trumpai ir konkrečiai, remdamasis TIK pateiktais duomenimis. " +
-  "Jei duomenų nepakanka atsakyti, taip ir pasakyk. Neišgalvok skaičių.";
+function systemPrefix(): string {
+  const today = dateKey(new Date());
+  const yesterday = dateKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  return (
+    "Tu esi restorano 'Dzūkų Ainiai' administracijos analitikos asistentas. " +
+    "Tau pateikiami tikri, dabartiniai restorano duomenys (užsakymai, klientų sesijos, personalas). " +
+    `Šiandienos data: ${today}. Vakarykštė data: ${yesterday}. ` +
+    "Klausimuose apie konkrečią praeitą dieną ar 'vakar' naudok 'Pajamos ir užsakymų skaičius pagal dieną' sąrašą duomenyse — jame yra iki 60 praėjusių dienų. " +
+    "Atsakinėk lietuviškai, trumpai ir konkrečiai, remdamasis TIK pateiktais duomenimis. " +
+    "Jei konkrečios dienos duomenų sąraše nėra (pvz. per senai arba dar neįvyko), taip ir pasakyk. Neišgalvok skaičių."
+  );
+}
 
 export async function GET(): Promise<Response> {
   const session = await requireStaffRole("admin");
@@ -166,13 +224,13 @@ export async function GET(): Promise<Response> {
   if (!snapshot) {
     return Response.json({ ok: false, error: "store_not_configured" }, { status: 503 });
   }
-  const snapshotText = buildSnapshotText(snapshot.orders, snapshot.sessions, snapshot.tasks);
+  const snapshotText = buildSnapshotText(snapshot.orders, snapshot.sessions, snapshot.tasks, snapshot.accounts);
   if (snapshot.orders.length === 0) {
     return Response.json({ ok: true, summary: "Kol kas nėra užsakymų analizei.", snapshot: snapshotText });
   }
   try {
     const summary = await callGemini(
-      `${SYSTEM_PREFIX}\n\nDuomenys:\n${snapshotText}\n\nPateik trumpą (4-6 sakinių) šios dienos veiklos apžvalgą administratoriui: kaip sekasi, kas išsiskiria, ką verta atkreipti dėmesį.`
+      `${systemPrefix()}\n\nDuomenys:\n${snapshotText}\n\nPateik trumpą (4-6 sakinių) šios dienos veiklos apžvalgą administratoriui: kaip sekasi, kas išsiskiria, ką verta atkreipti dėmesį.`
     );
     return Response.json({ ok: true, summary, snapshot: snapshotText });
   } catch {
@@ -199,10 +257,10 @@ export async function POST(request: Request): Promise<Response> {
   if (!snapshot) {
     return Response.json({ ok: false, error: "store_not_configured" }, { status: 503 });
   }
-  const snapshotText = buildSnapshotText(snapshot.orders, snapshot.sessions, snapshot.tasks);
+  const snapshotText = buildSnapshotText(snapshot.orders, snapshot.sessions, snapshot.tasks, snapshot.accounts);
   try {
     const answer = await callGemini(
-      `${SYSTEM_PREFIX}\n\nDuomenys:\n${snapshotText}\n\nAdministratoriaus klausimas: ${parsed.data.question}\n\nAtsakyk į klausimą remdamasis šiais duomenimis.`
+      `${systemPrefix()}\n\nDuomenys:\n${snapshotText}\n\nAdministratoriaus klausimas: ${parsed.data.question}\n\nAtsakyk į klausimą remdamasis šiais duomenimis.`
     );
     return Response.json({ ok: true, answer });
   } catch {
