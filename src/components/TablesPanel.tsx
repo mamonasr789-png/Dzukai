@@ -11,6 +11,12 @@ interface RestaurantTable {
   tableNumber: string;
   createdAt: string;
   link: string | null;
+  waiterId: string | null;
+}
+
+interface WaiterAccountLite {
+  id: string;
+  username: string;
 }
 
 const TEXT: Record<StaffLang, Record<string, string>> = {
@@ -31,6 +37,8 @@ const TEXT: Record<StaffLang, Record<string, string>> = {
     copied: "Nukopijuota!",
     showQr: "Rodyti QR",
     hideQr: "Slėpti QR",
+    waiterLabel: "Padavėjas",
+    unassigned: "Nepriskirta",
   },
   en: {
     title: "Tables",
@@ -49,6 +57,8 @@ const TEXT: Record<StaffLang, Record<string, string>> = {
     copied: "Copied!",
     showQr: "Show QR",
     hideQr: "Hide QR",
+    waiterLabel: "Waiter",
+    unassigned: "Unassigned",
   },
 };
 
@@ -63,6 +73,8 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
   const [qrByTable, setQrByTable] = useState<Record<string, string>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [waiters, setWaiters] = useState<WaiterAccountLite[]>([]);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
 
   function toggleExpanded(id: string) {
     setExpandedIds((prev) => {
@@ -84,6 +96,29 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    fetch("/api/staff/accounts")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { accounts: Array<{ id: string; username: string; role: string }> } | null) => {
+        if (!data) return;
+        setWaiters(data.accounts.filter((a) => a.role === "waiter").map((a) => ({ id: a.id, username: a.username })));
+      });
+  }, []);
+
+  async function handleAssignWaiter(tableId: string, waiterId: string | null) {
+    setAssigningId(tableId);
+    try {
+      const res = await fetch(`/api/staff/tables/${tableId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ waiterId }),
+      });
+      if (res.ok) await refresh();
+    } finally {
+      setAssigningId(null);
+    }
+  }
 
   // Render a table's QR as a data URL only once it's actually expanded —
   // generating all of them up front doesn't cost much per-table, but there's
@@ -193,9 +228,23 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
             return (
               <div key={table.id}>
                 {/* Collapsed row — always visible */}
-                <div className="flex items-center gap-3 px-4 py-3">
+                <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
                   <QrCodeIcon size={14} className="text-white/40 shrink-0" />
                   <p className="text-sm font-semibold flex-1 min-w-0 truncate">{table.tableNumber}</p>
+                  <select
+                    value={table.waiterId ?? ""}
+                    disabled={assigningId === table.id}
+                    onChange={(e) => handleAssignWaiter(table.id, e.target.value || null)}
+                    title={t.waiterLabel}
+                    className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white/60 focus:outline-none focus:border-primary/50 shrink-0 disabled:opacity-50 max-w-[120px]"
+                  >
+                    <option value="">{t.unassigned}</option>
+                    {waiters.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.username}
+                      </option>
+                    ))}
+                  </select>
                   <button
                     onClick={() => toggleExpanded(table.id)}
                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-white/50 hover:text-primary hover:bg-primary/10 transition-colors border border-white/10 shrink-0"

@@ -17,12 +17,16 @@ export interface RestaurantTable {
   id: string;
   tableNumber: string;
   createdAt: string;
+  /** Staff account id of the waiter this table is assigned to, or null if unassigned
+   *  (visible to every waiter — see waiterTableAccess.ts). */
+  waiterId: string | null;
 }
 
 export interface RestaurantTableStore {
   create(tableNumber: string): Promise<RestaurantTable>;
   list(): Promise<RestaurantTable[]>;
   remove(id: string): Promise<void>;
+  assignWaiter(id: string, waiterId: string | null): Promise<void>;
 }
 
 export class DuplicateTableNumberError extends Error {
@@ -50,6 +54,7 @@ class PostgresRestaurantTableStore implements RestaurantTableStore {
           table_number TEXT NOT NULL UNIQUE,
           created_at TEXT NOT NULL
         )`;
+      await this.sql`ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS waiter_id TEXT`;
     })();
     return this.ready;
   }
@@ -68,23 +73,34 @@ class PostgresRestaurantTableStore implements RestaurantTableStore {
       }
       throw error;
     }
-    return { id, tableNumber, createdAt };
+    return { id, tableNumber, createdAt, waiterId: null };
   }
 
   async list(): Promise<RestaurantTable[]> {
     await this.ensureSchema();
     const rows = (await this.sql`
-      SELECT id, table_number, created_at FROM restaurant_tables ORDER BY created_at`) as Array<{
+      SELECT id, table_number, created_at, waiter_id FROM restaurant_tables ORDER BY created_at`) as Array<{
       id: string;
       table_number: string;
       created_at: string;
+      waiter_id: string | null;
     }>;
-    return rows.map((row) => ({ id: row.id, tableNumber: row.table_number, createdAt: row.created_at }));
+    return rows.map((row) => ({
+      id: row.id,
+      tableNumber: row.table_number,
+      createdAt: row.created_at,
+      waiterId: row.waiter_id,
+    }));
   }
 
   async remove(id: string): Promise<void> {
     await this.ensureSchema();
     await this.sql`DELETE FROM restaurant_tables WHERE id = ${id}`;
+  }
+
+  async assignWaiter(id: string, waiterId: string | null): Promise<void> {
+    await this.ensureSchema();
+    await this.sql`UPDATE restaurant_tables SET waiter_id = ${waiterId} WHERE id = ${id}`;
   }
 }
 
@@ -104,6 +120,11 @@ export class SqliteRestaurantTableStore implements RestaurantTableStore {
         created_at TEXT NOT NULL
       );
     `);
+    try {
+      this.db.exec(`ALTER TABLE restaurant_tables ADD COLUMN waiter_id TEXT`);
+    } catch {
+      // Column already exists — SQLite has no "ADD COLUMN IF NOT EXISTS".
+    }
   }
 
   async create(tableNumber: string): Promise<RestaurantTable> {
@@ -119,18 +140,27 @@ export class SqliteRestaurantTableStore implements RestaurantTableStore {
       }
       throw error;
     }
-    return { id, tableNumber, createdAt };
+    return { id, tableNumber, createdAt, waiterId: null };
   }
 
   async list(): Promise<RestaurantTable[]> {
     const rows = this.db
-      .prepare("SELECT id, table_number, created_at FROM restaurant_tables ORDER BY created_at")
-      .all() as Array<{ id: string; table_number: string; created_at: string }>;
-    return rows.map((row) => ({ id: row.id, tableNumber: row.table_number, createdAt: row.created_at }));
+      .prepare("SELECT id, table_number, created_at, waiter_id FROM restaurant_tables ORDER BY created_at")
+      .all() as Array<{ id: string; table_number: string; created_at: string; waiter_id: string | null }>;
+    return rows.map((row) => ({
+      id: row.id,
+      tableNumber: row.table_number,
+      createdAt: row.created_at,
+      waiterId: row.waiter_id,
+    }));
   }
 
   async remove(id: string): Promise<void> {
     this.db.prepare("DELETE FROM restaurant_tables WHERE id = ?").run(id);
+  }
+
+  async assignWaiter(id: string, waiterId: string | null): Promise<void> {
+    this.db.prepare("UPDATE restaurant_tables SET waiter_id = ? WHERE id = ?").run(waiterId, id);
   }
 }
 
