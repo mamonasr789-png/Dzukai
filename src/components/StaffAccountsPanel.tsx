@@ -187,6 +187,7 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
 
   return (
     <CollapsibleSection title={t.title} count={accounts.length}>
+      <div className="staff-accounts-panel">
       <div className="border border-white/8 rounded-xl bg-white/3 p-4 mb-3">
         <form onSubmit={handleCreate} className="flex flex-wrap items-end gap-2">
           <div className="flex flex-col gap-1">
@@ -217,10 +218,10 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
             <select
               value={role}
               onChange={(e) => setRole(e.target.value as StaffRole)}
-              className="bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-primary/50"
+              className="bg-zinc-900 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none focus:border-primary/50"
             >
-              <option value="waiter">{t.waiter}</option>
-              <option value="kitchen">{t.kitchen}</option>
+              <option value="waiter" className="bg-zinc-900 text-white">{t.waiter}</option>
+              <option value="kitchen" className="bg-zinc-900 text-white">{t.kitchen}</option>
             </select>
           </div>
           <button
@@ -355,6 +356,7 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
           })}
         </div>
       )}
+      </div>
     </CollapsibleSection>
   );
 }

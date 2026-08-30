@@ -192,6 +192,7 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
 
   return (
     <CollapsibleSection title={t.title} count={tables.length}>
+      <div className="tables-panel">
       <div className="border border-white/8 rounded-xl bg-white/3 p-4 mb-3">
         <form onSubmit={handleCreate} className="flex flex-wrap items-end gap-2">
           <div className="flex flex-col gap-1">
@@ -236,11 +237,11 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
                     disabled={assigningId === table.id}
                     onChange={(e) => handleAssignWaiter(table.id, e.target.value || null)}
                     title={t.waiterLabel}
-                    className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white/60 focus:outline-none focus:border-primary/50 shrink-0 disabled:opacity-50 max-w-[120px]"
+                    className="bg-zinc-900 border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-primary/50 shrink-0 disabled:opacity-50 max-w-[120px]"
                   >
-                    <option value="">{t.unassigned}</option>
+                    <option value="" className="bg-zinc-900 text-white">{t.unassigned}</option>
                     {waiters.map((w) => (
-                      <option key={w.id} value={w.id}>
+                      <option key={w.id} value={w.id} className="bg-zinc-900 text-white">
                         {w.username}
                       </option>
                     ))}
@@ -306,6 +307,7 @@ export default function TablesPanel({ lang }: { lang: StaffLang }) {
           })}
         </div>
       )}
+      </div>
     </CollapsibleSection>
   );
 }

@@ -119,3 +119,18 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Native <select> on always-dark admin tables/staff panels.
+   OS option popups default to white; inherited light text is unreadable until hover. */
+.tables-panel select,
+.staff-accounts-panel select {
+  color-scheme: dark;
+  background-color: #171717;
+  color: #fafafa;
+}
+
+.tables-panel select option,
+.staff-accounts-panel select option {
+  background-color: #171717;
+  color: #fafafa;
+}
