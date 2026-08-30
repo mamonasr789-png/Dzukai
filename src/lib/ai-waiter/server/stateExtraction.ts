@@ -1,5 +1,7 @@
 import "server-only";
 
+import { products } from "../../data.ts";
+import { foodGroupForCategory } from "../../foodGroups.ts";
 import type {
   ConversationState,
   SupportedLanguage,
@@ -70,12 +72,99 @@ const menuCategoryPatterns: ReadonlyArray<{
   {
     category: "gerimai",
     pattern:
-      /\b(?:a\s+)?(?:drinks?|beverages?)\b|\bgerim(?:as|o|u|a|ai|us|ams|ais)?\b|напит(?:ок|ка|ки|ков|ку|ками)?/u,
+      /\b(?:a\s+)?(?:drinks?|beverages?)\b|\bgerim(?:as|o|u|a|ai|us|ams|ais)?\b|\b(?:atsigert\w*|isgert\w*|gert\w*)\b|напит(?:ок|ка|ки|ков|ку|ками)?|выпит/u,
   },
 ];
 
 const CATEGORY_REFUSAL =
   /\b(nenoriu|nemegstu|nepatinka|jokio|jokios|dont want|do not want|dont like|do not like|no more|without)\b|не\s+хочу|не\s+люблю|никакой/u;
+
+const DRINK_CATEGORY_IDS = new Set([
+  "alus",
+  "vynas",
+  "kokteiliai",
+  "sidras",
+  "limonadai",
+  "kava",
+  "gerimai",
+]);
+
+const BEER_SNACK_PATTERN =
+  /\bprie\s+alaus\b|\b(?:beer|pub)\s+snacks?\b|\bwith\s+(?:a\s+|the\s+)?beer\b|к\s+пиву|под\s+пиво/u;
+
+const FOOD_EAT_PATTERN =
+  /\b(valgyti|valgyt|uzkand\w*|uzkas\w*|eat|food|snacks?|dish)\b|ед|закуск|блюд/u;
+
+/** Informal recommend verbs: pasiulyk, pasiulysi, recommend, посоветуй. */
+export const RECOMMEND_REQUEST_PATTERN =
+  /\b(noriu|want|recommend|rekomend\w*|pasiul\w*|parodyk|something|kazko|vegetar\w*|beef|jautien\w*|nenoriu|nemegstu|nepatinka|dont like|do not like)\b|хочу|рекоменд|посовет|покаж|вегетари|говядин|не\s+люблю|не\s+хочу/u;
+
+/** Drink verbs and pairing: atsigerti, ka gerti, what to drink with, к чему выпить. */
+export const DRINK_REQUEST_PATTERN =
+  /\b(atsigert\w*|isgert\w*|gert\w*|gerim\w*|drinks?|beverages?)\b|what to drink|drink with|выпит|напит|к\s+чему\s+выпить|что\s+(?:выпить|пить)\s+к/u;
+
+const PAIRING_PATTERN =
+  /\bprie\s+[a-z]{3,}|what to drink with|drink with\b|(?:выпить|пить)\s+к|к\s+чему/u;
+
+const MENU_HELP_PATTERN =
+  /\b(valgyti|valgyt|patiekal|maist|meniu|menu|eat|food|dish|meal|sriub\w*|soups?|gert\w*|atsigert\w*|gerim\w*|drinks?|beverages?|pasiul\w*|rekomend\w*|recommend|noriu|want|kazko|something)\b|ед|блюд|меню|суп|напит|выпит|рекоменд|хочу/u;
+
+function messageMentionsFoodDish(normalizedMessage: string): boolean {
+  const words = normalizedMessage
+    .split(/[^a-z0-9]+/u)
+    .filter((word) => word.length >= 5);
+  if (words.length === 0) return false;
+  for (const product of products) {
+    if (foodGroupForCategory(product.category) === "drinks") continue;
+    const tokens = normalize(product.name)
+      .split(/[^a-z0-9]+/u)
+      .filter((token) => token.length >= 5);
+    for (const token of tokens) {
+      const stem = token.slice(0, Math.min(6, token.length));
+      if (
+        words.some(
+          (word) =>
+            word.startsWith(stem) || stem.startsWith(word.slice(0, stem.length))
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function messageRequestsDrinks(message: string): boolean {
+  const normalized = normalize(message);
+  if (DRINK_REQUEST_PATTERN.test(normalized)) return true;
+  return (
+    PAIRING_PATTERN.test(normalized) &&
+    messageMentionsFoodDish(normalized) &&
+    !FOOD_EAT_PATTERN.test(normalized)
+  );
+}
+
+export function messageRequestsRecommendation(message: string): boolean {
+  return RECOMMEND_REQUEST_PATTERN.test(normalize(message));
+}
+
+export function messageLooksLikeMenuHelp(message: string): boolean {
+  const normalized = normalize(message);
+  return (
+    MENU_HELP_PATTERN.test(normalized) ||
+    messageRequestsDrinks(message) ||
+    messageMentionsFoodDish(normalized)
+  );
+}
+
+function isBeerSnackRequest(normalized: string): boolean {
+  if (!BEER_SNACK_PATTERN.test(normalized)) return false;
+  // "ką gerti prie alaus" is drinks; "ką valgyti prie alaus" stays snacks.
+  if (DRINK_REQUEST_PATTERN.test(normalized) && !FOOD_EAT_PATTERN.test(normalized)) {
+    return false;
+  }
+  return true;
+}
 
 /** Maps explicit customer category wording to an official menu category. */
 export function menuCategoryForMessage(message: string): string | null {
@@ -83,6 +172,16 @@ export function menuCategoryForMessage(message: string): string | null {
   // "I don't want fish" names a category it is refusing; picking it would
   // recommend the exact thing the guest just turned down.
   if (CATEGORY_REFUSAL.test(normalized)) return null;
+  if (isBeerSnackRequest(normalized)) return "prie-alaus";
+  if (messageRequestsDrinks(message)) {
+    const specific = menuCategoryPatterns.find(
+      ({ category, pattern }) =>
+        DRINK_CATEGORY_IDS.has(category) &&
+        category !== "gerimai" &&
+        pattern.test(normalized)
+    )?.category;
+    return specific ?? "gerimai";
+  }
   return (
     menuCategoryPatterns.find(({ pattern }) => pattern.test(normalized))
       ?.category ?? null
@@ -112,7 +211,7 @@ export function detectLanguage(
   }
   if (
     /[ąčęėįšųūž]/iu.test(message) ||
-    /\b(kalbek lietuviskai|noriu|prasau|pridek|parodyk|rekomend\w*|gerim\w*|dar|kita|geriau|esu|iki|sotus|sotaus)\b/u.test(
+    /\b(kalbek lietuviskai|noriu|prasau|pridek|parodyk|rekomend\w*|pasiul\w*|gerim\w*|atsigert\w*|dar|kita|geriau|esu|iki|sotus|sotaus)\b/u.test(
       normalized
     )
   ) {
@@ -416,9 +515,8 @@ export function extractTurnState(
     stage = "greeting";
   }
   if (
-    /\b(noriu|want|recommend|rekomend\w*|pasiulyk|parodyk|something|kazko)\b|хочу|рекоменд|посовет|покаж/u.test(
-      normalized
-    )
+    RECOMMEND_REQUEST_PATTERN.test(normalized) ||
+    messageRequestsDrinks(message)
   ) {
     intent = "recommendation";
     stage = "discovering_preferences";

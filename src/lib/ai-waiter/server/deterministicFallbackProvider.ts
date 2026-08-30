@@ -9,7 +9,11 @@ import type { ProviderStep } from "./providerTooling.ts";
 import { tProduct } from "../../product-translations.ts";
 import {
   menuCategoryForMessage,
+  messageLooksLikeMenuHelp,
   messageRequestsAnotherRecommendation,
+  messageRequestsDrinks,
+  messageRequestsRecommendation,
+  RECOMMEND_REQUEST_PATTERN,
 } from "./stateExtraction.ts";
 import {
   allergyCaution,
@@ -404,7 +408,7 @@ export class DeterministicFallbackProvider implements AIProvider {
       } satisfies ProviderStep);
     }
     const foodSafetyOrSelection =
-      /\b(valgyti|patiekal|maist|eat|food|dish|safe|saug\w*|recommend|pasiulyk|noriu)\b|ед|блюд|безопас|рекоменд|хочу/u.test(
+      /\b(valgyti|patiekal|maist|eat|food|dish|safe|saug\w*|recommend|pasiul\w*|noriu)\b|ед|блюд|безопас|рекоменд|хочу/u.test(
         message
       );
     if (
@@ -502,9 +506,8 @@ export class DeterministicFallbackProvider implements AIProvider {
     if (
       (/\b(labas|sveiki|hello|hi|hey)\b/u.test(message) ||
         /привет|здравств/u.test(message)) &&
-      !/\b(noriu|want|recommend|pasiulyk|parodyk|something|kazko)\b|хочу|рекоменд|покаж/u.test(
-        message
-      )
+      !RECOMMEND_REQUEST_PATTERN.test(message) &&
+      !messageRequestsDrinks(context.customerMessage)
     ) {
       return Promise.resolve({
         kind: "final",
@@ -519,9 +522,8 @@ export class DeterministicFallbackProvider implements AIProvider {
       (categoryRequest.contextualFollowUp &&
         (Boolean(categoryRequest.category) ||
           context.state.latestReferencedProductIds.length > 0)) ||
-      /\b(noriu|want|recommend|rekomend\w*|pasiulyk|parodyk|something|kazko|vegetar\w*|beef|jautien\w*|nenoriu|nemegstu|nepatinka|dont like|do not like)\b|хочу|рекоменд|посовет|покаж|вегетари|говядин|не\s+люблю|не\s+хочу/u.test(
-        message
-      );
+      messageRequestsRecommendation(context.customerMessage) ||
+      messageRequestsDrinks(context.customerMessage);
 
     if (recommendationRequested) {
       return Promise.resolve({
@@ -573,6 +575,30 @@ export class DeterministicFallbackProvider implements AIProvider {
           proposedValue: record.value,
           provenance: "restaurant_knowledge" as const,
         })),
+      } satisfies ProviderStep);
+    }
+
+    if (messageLooksLikeMenuHelp(context.customerMessage)) {
+      return Promise.resolve({
+        kind: "tool_requests",
+        toolCalls: [
+          {
+            callId: "fallback_recommend",
+            toolName: "recommend_products",
+            input: {
+              ...(categoryRequest.category
+                ? { category: categoryRequest.category }
+                : {}),
+              ...(context.state.budget
+                ? { maxPrice: context.state.budget }
+                : {}),
+              excludeProductIds: context.state.latestReferencedProductIds,
+              dietaryRequirements: context.state.dietaryRequirements,
+              allergies: context.state.allergies,
+              limit: RECOMMENDATION_POOL,
+            },
+          },
+        ],
       } satisfies ProviderStep);
     }
 

@@ -603,22 +603,22 @@ export function smallTalk(kind: SmallTalkKind, ctx: VoiceContext): string {
   return pick(smallTalkPools[kind], ctx, `smalltalk-${kind}`);
 }
 
-/** Replaces dead-end "I didn't understand" with a waiter-like redirect. */
+/** Humble menu offer — never claim inability and capability in one sentence. */
 const unknownPools: LangPools = {
   lt: [
-    "Čia jau ne mano sritis 🙂 Bet meniu išmanau neblogai — gal ko nors pasiūlyti?",
-    "Nelabai turiu ką atsakyti, atvirai. Užtat žinau, kas šiandien virtuvėje gero — parodyti?",
-    "Su tuo nepadėsiu, bet dėl valgio ar gėrimo — klauskite drąsiai.",
+    "Galiu pasiūlyti iš meniu — ko norėtumėte, valgio ar gėrimo?",
+    "Pasakykite, ko ieškote — parinksiu iš meniu.",
+    "Kuo galiu padėti prie stalo: valgiu ar gėrimu?",
   ],
   en: [
-    "That's a bit outside my patch 🙂 But I do know the menu — shall I suggest something?",
-    "Honestly, not much I can say to that. I do know what's good today though — want to hear?",
-    "Can't help with that one, but food and drink — ask away.",
+    "I can suggest something from the menu — food or a drink?",
+    "Tell me what you're after and I'll pick from the menu.",
+    "Food or drink — what would you like me to suggest?",
   ],
   ru: [
-    "Это уже не по моей части 🙂 Зато меню знаю хорошо — предложить что-нибудь?",
-    "Честно, тут мне нечего сказать. Зато знаю, что сегодня хорошо на кухне — показать?",
-    "С этим не помогу, а вот насчёт еды или напитков — спрашивайте смело.",
+    "Могу предложить из меню — еду или напиток?",
+    "Скажите, что ищете — подберу из меню.",
+    "Чем помочь за столом — едой или напитком?",
   ],
 };
 

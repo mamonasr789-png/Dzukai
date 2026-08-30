@@ -21,9 +21,11 @@ import {
   resetDevelopmentRuntime,
 } from "../server/runtime.ts";
 import { InMemoryStaffTaskAdapter } from "../server/staffTaskPort.ts";
+import { foodGroupForCategory } from "../../foodGroups.ts";
 import {
   menuCategoryForMessage,
   messageRequestsAnotherRecommendation,
+  messageRequestsDrinks,
   messageUsesPriorReference,
 } from "../server/stateExtraction.ts";
 import { SafeToolRegistry } from "../server/toolRegistry.ts";
@@ -32,6 +34,7 @@ import {
   buildVoiceContext,
   greeting,
   turnSeed,
+  unknownRedirect,
 } from "../server/waiterVoice.ts";
 import { InMemoryTurnIdempotencyStore } from "../server/turnIdempotencyStore.ts";
 import {
@@ -162,6 +165,79 @@ test("\"prie alaus\" asks for beer snacks, a bare beer word asks for beer", () =
   }
   for (const phrase of ["noriu alaus", "I want a beer", "хочу пиво"]) {
     assert.equal(menuCategoryForMessage(phrase), "alus", phrase);
+  }
+});
+
+test("informal LT/EN/RU drink-pairing phrasing maps to drinks, not beer snacks", () => {
+  for (const phrase of [
+    "ka pasiulysi atsigerti prie saltibarciu?",
+    "ką pasiūlysi atsigerti prie šaltibarščių?",
+    "ka gerti prie saltibarciu",
+    "what to drink with saltibarsciai",
+    "к чему выпить",
+  ]) {
+    assert.equal(messageRequestsDrinks(phrase), true, phrase);
+    assert.equal(menuCategoryForMessage(phrase), "gerimai", phrase);
+  }
+});
+
+test("unknown-topic copy never claims inability and menu help together", () => {
+  for (const language of ["lt", "en", "ru"] as const) {
+    for (let i = 0; i < 24; i += 1) {
+      const voice = buildVoiceContext({
+        language,
+        sessionId: `unknown-${language}-${i}`,
+        turn: i,
+        message: "asdfxyz",
+      });
+      assert.doesNotMatch(
+        unknownRedirect(voice),
+        /nepadėsiu|can't help with that|не помогу/iu,
+        `${language}:${i}`
+      );
+    }
+  }
+});
+
+test("informal LT drink pairing recommends real drinks instead of the unknown-topic fallback", async () => {
+  for (const [message, clientTurnId] of [
+    ["ka pasiulysi atsigerti prie saltibarciu?", "turn_pair_ascii"],
+    ["ką pasiūlysi atsigerti prie šaltibarščių?", "turn_pair_diacritics"],
+  ] as const) {
+    const harness = createHarness();
+    const session = await createSession(harness, "lt", true);
+    const result = await harness.controller.handleWaiterTurn(
+      request(session.sessionId, message, clientTurnId)
+    );
+    assert.equal(result.ok, true, message);
+    if (!result.ok) return;
+    assert.equal(result.data.fallbackUsed, true, message);
+    assert.ok(
+      result.data.references.length >= 1 && result.data.references.length <= 3,
+      `${message} refs=${result.data.references.length}`
+    );
+    assert.doesNotMatch(
+      result.data.message,
+      /nepadėsiu|can't help with that/iu,
+      message
+    );
+    assert.match(
+      result.data.message,
+      /siūlyčiau|rinkčiausi|gerai eina|neapsiriksite|pažiūrėkite|suggest|gėrim|gira|vandens|cola|limonad|\*\*/iu,
+      result.data.message
+    );
+    for (const reference of result.data.references) {
+      const product = await harness.menuRepository.getProductDetails(
+        reference.productId
+      );
+      assert.ok(product, reference.productId);
+      assert.equal(
+        foodGroupForCategory(product.category),
+        "drinks",
+        product.category
+      );
+      assert.ok(reference.referenceSetId, reference.productId);
+    }
   }
 });
 
