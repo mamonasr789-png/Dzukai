@@ -10,7 +10,7 @@ export async function GET(): Promise<Response> {
     return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
   try {
-    const { session, orders } = await getTrackableSessionWithOrders(access.tableNumber);
+    const { session, orders } = await getTrackableSessionWithOrders(access.tableNumber, access.visitId);
     const estimatedMinutesByOrderId: Record<string, number | null> = {};
     for (const order of orders) {
       estimatedMinutesByOrderId[order.id] = await estimateEtaMinutes(order);

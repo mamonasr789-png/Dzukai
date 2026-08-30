@@ -16,7 +16,7 @@ require0.cache[serverOnlyPath] = {
   exports: {},
 };
 
-const { signTableAccessToken, verifyTableAccessToken } = await import(
+const { signTableAccessToken, signTableVisitToken, newTableVisitId, verifyTableAccessToken } = await import(
   "../server/tableAccessToken.ts"
 );
 
@@ -64,6 +64,36 @@ describe("table access tokens", () => {
     const token = signTableAccessToken("12", SECRET);
     expect(verifyTableAccessToken(token, SECRET).ok).toBe(true);
     expect(verifyTableAccessToken(token, SECRET).ok).toBe(true);
+  });
+
+  it("printed QR tokens remain version 1 with no visit id", () => {
+    const token = signTableAccessToken("5", SECRET);
+    const result = verifyTableAccessToken(token, SECRET);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload.version).toBe(1);
+      expect(result.payload.tableNumber).toBe("5");
+    }
+  });
+
+  it("issues a visit-bound cookie that still names the table", () => {
+    const visitId = newTableVisitId();
+    const token = signTableVisitToken("5", visitId, SECRET);
+    const result = verifyTableAccessToken(token, SECRET);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload.tableNumber).toBe("5");
+      expect(result.payload.version).toBe(2);
+      if (result.payload.version === 2) {
+        expect(result.payload.visitId).toBe(visitId);
+      }
+    }
+  });
+
+  it("does not treat a version-1 sticker as a version-2 visit cookie", () => {
+    const sticker = signTableAccessToken("5", SECRET);
+    const visit = signTableVisitToken("5", newTableVisitId(), SECRET);
+    expect(sticker).not.toBe(visit);
   });
 });
 

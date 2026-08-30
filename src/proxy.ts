@@ -9,6 +9,8 @@ import {
 } from "./lib/server/auth/session";
 import {
   getTableAccessTokenSecret,
+  newTableVisitId,
+  signTableVisitToken,
   verifyTableAccessToken,
 } from "./lib/server/tableAccessToken";
 import { TABLE_ACCESS_COOKIE } from "./lib/tableAccessCookie";
@@ -67,10 +69,18 @@ function tableGate(request: NextRequest): NextResponse | null {
   const queryToken = request.nextUrl.searchParams.get("tableToken") ?? undefined;
   if (queryToken) {
     const queryVerification = secret ? verifyTableAccessToken(queryToken, secret) : { ok: false as const };
-    if (queryVerification.ok) {
+    if (queryVerification.ok && secret) {
       const cleanUrl = new URL(pathname, request.url);
       const response = NextResponse.redirect(cleanUrl);
-      response.cookies.set(TABLE_ACCESS_COOKIE, queryToken, {
+      // Sticker token stays version 1 (printed QR never expires). The cookie
+      // is a fresh version-2 visit so a later settle can refuse this visit
+      // without invalidating the sticker for the next party.
+      const visitToken = signTableVisitToken(
+        queryVerification.payload.tableNumber,
+        newTableVisitId(),
+        secret
+      );
+      response.cookies.set(TABLE_ACCESS_COOKIE, visitToken, {
         httpOnly: false, // menu/page.tsx reads the table number out of this client-side
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",

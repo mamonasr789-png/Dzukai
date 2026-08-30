@@ -182,9 +182,17 @@ export interface TableSession {
   updatedAt: string;
   paymentMethod?: PaymentMethod;
   paymentStatus?: PaymentStatus;
+  /** Bound to the signed visit cookie issued on a QR scan. Optional for sessions
+   *  created before visit cookies existed. */
+  visitId?: string;
 }
 
 export const OPEN_SESSION_STATUSES: SessionStatus[] = ["ACTIVE", "BILL_REQUESTED"];
+export const SETTLED_SESSION_STATUSES: SessionStatus[] = ["PAID", "CLOSED"];
+
+export function isSettledSessionStatus(status: SessionStatus): boolean {
+  return status === "PAID" || status === "CLOSED";
+}
 
 export function getSessionStats(sessions: TableSession[]): { active: number; billRequested: number; total: number } {
   return {

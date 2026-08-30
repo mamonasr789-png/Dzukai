@@ -163,7 +163,7 @@ async function main() {
 
     const waiter = { id: "acc_2", username: "Rytis" };
     const result = await orderService.settleSessionByWaiter("5", waiter);
-    expect(result?.session.status).toBe("PAID");
+    expect(result?.session.status).toBe("CLOSED");
     expect(result?.session.paymentMethod).toBe("WAITER");
 
     const o1 = await orderService.getOrder(first.order.id);
@@ -188,7 +188,7 @@ async function main() {
     const sessions = await orderService.listSessions();
     const s5 = sessions.find((s) => s.tableNumber === "5");
     const s7 = sessions.find((s) => s.tableNumber === "7");
-    expect(s5?.status).toBe("PAID");
+    expect(s5?.status).toBe("CLOSED");
     expect(s7?.status).toBe("ACTIVE");
   });
 
@@ -207,7 +207,7 @@ async function main() {
 
     const { session } = await orderService.getTrackableSessionWithOrders("5");
     expect(session?.paymentMethod).toBe("APP");
-    expect(session?.status).toBe("PAID");
+    expect(session?.status).toBe("CLOSED");
   });
 
   await itAsync("refuses to pay an order id that does not belong to the table's session", async () => {
@@ -282,6 +282,72 @@ async function main() {
   });
 
   describe("requestBill / callWaiter", () => {});
+  describe("session close after waiter settle", () => {});
+  await itAsync("waiter settle closes the session", async () => {
+    freshStore();
+    const first = await orderService.submitOrder({
+      tableNumber: "5",
+      items: items(),
+      total: 10,
+      visitId: "visit-aaaa",
+    });
+    const result = await orderService.settleSessionByWaiter("5");
+    expect(result?.session.status).toBe("CLOSED");
+    expect(result?.session.paymentStatus).toBe("PAID");
+    expect(result?.session.paymentMethod).toBe("WAITER");
+    expect(result?.session.id).toBe(first.session.id);
+  });
+
+  await itAsync("submitOrder on a closed/paid session fails", async () => {
+    freshStore();
+    await orderService.submitOrder({ tableNumber: "5", items: items(), total: 10, visitId: "visit-aaaa" });
+    await orderService.settleSessionByWaiter("5");
+    let code = "";
+    try {
+      await orderService.submitOrder({ tableNumber: "5", items: items(), total: 10, visitId: "visit-aaaa" });
+    } catch (error) {
+      code = error instanceof orderService.SessionClosedError ? error.code : "other";
+    }
+    expect(code).toBe("session_closed");
+    expect((await orderService.listOrders()).length).toBe(1);
+  });
+
+  await itAsync("a stale cookie without a new visit cannot order after settle", async () => {
+    freshStore();
+    await orderService.submitOrder({ tableNumber: "5", items: items(), total: 10 });
+    await orderService.settleSessionByWaiter("5");
+    let code = "";
+    try {
+      await orderService.submitOrder({ tableNumber: "5", items: items(), total: 10 });
+    } catch (error) {
+      code = error instanceof orderService.SessionClosedError ? error.code : "other";
+    }
+    expect(code).toBe("session_closed");
+    expect((await orderService.listOrders()).length).toBe(1);
+  });
+
+  await itAsync("a new visit/session after close can order again", async () => {
+    freshStore();
+    const first = await orderService.submitOrder({
+      tableNumber: "5",
+      items: items(),
+      total: 10,
+      visitId: "visit-aaaa",
+    });
+    await orderService.settleSessionByWaiter("5");
+    const next = await orderService.submitOrder({
+      tableNumber: "5",
+      items: items(),
+      total: 10,
+      visitId: "visit-bbbb",
+    });
+    expect(next.session.id).not.toBe(first.session.id);
+    expect(next.session.status).toBe("ACTIVE");
+    expect(next.session.visitId).toBe("visit-bbbb");
+    expect(next.order.status).toBe("PENDING_CONFIRMATION");
+    expect((await orderService.listOrders()).length).toBe(2);
+  });
+
   await itAsync("bill request transitions the session and creates exactly one task even if called twice", async () => {
     freshStore();
     await orderService.submitOrder({ tableNumber: "5", items: items(), total: 10 });

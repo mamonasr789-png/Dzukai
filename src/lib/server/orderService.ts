@@ -5,6 +5,7 @@ import {
   deriveOrderStatus,
   normalizeOrder,
   OPEN_SESSION_STATUSES,
+  SETTLED_SESSION_STATUSES,
   ACTIVE_ORDER_STATUSES,
   type Order,
   type OrderItem,
@@ -18,6 +19,15 @@ import { createUniqueTask, completeTasksForOrders } from "./taskService.ts";
 import { OrderPricingError, priceGuestOrderItems } from "./menuCatalog.ts";
 
 export { OrderPricingError };
+
+export class SessionClosedError extends Error {
+  readonly code = "session_closed" as const;
+
+  constructor() {
+    super("session_closed");
+    this.name = "SessionClosedError";
+  }
+}
 
 /**
  * Server-side twin of the old src/lib/orders.ts + src/lib/tableSession.ts —
@@ -102,6 +112,18 @@ function findOpenSessionForTable(sessions: TableSession[], tableNumber: string |
   return sessions.find((s) => OPEN_SESSION_STATUSES.includes(s.status) && s.tableNumber === tableNumber) ?? null;
 }
 
+function findLatestSessionForTable(sessions: TableSession[], tableNumber: string | null): TableSession | null {
+  const forTable = sessions.filter((s) => s.tableNumber === tableNumber);
+  if (forTable.length === 0) return null;
+  return forTable.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b));
+}
+
+async function ordersForSession(session: TableSession): Promise<Order[]> {
+  return (await Promise.all(session.orderIds.map((id) => getOrderRecord(id)))).filter(
+    (o): o is Order => o !== undefined
+  );
+}
+
 /**
  * The session a customer at this table can still see/track on /order and /cart.
  * Mirrors the old tableSession.ts getTrackableSession() resolution order exactly:
@@ -110,7 +132,8 @@ function findOpenSessionForTable(sessions: TableSession[], tableNumber: string |
  *   3. else null
  */
 export async function getTrackableSessionWithOrders(
-  tableNumber: string | null
+  tableNumber: string | null,
+  visitId?: string
 ): Promise<{ session: TableSession | null; orders: Order[] }> {
   const sessions = await pullSessions();
 
@@ -119,10 +142,22 @@ export async function getTrackableSessionWithOrders(
   // replace what used to be a full orders-collection pull on every poll.
   const open = findOpenSessionForTable(sessions, tableNumber);
   if (open) {
-    const orders = (await Promise.all(open.orderIds.map((id) => getOrderRecord(id)))).filter(
-      (o): o is Order => o !== undefined
-    );
-    return { session: open, orders };
+    return { session: open, orders: await ordersForSession(open) };
+  }
+
+  // This visit's session even after settle — guest thank-you / tracking.
+  if (visitId) {
+    const mine = sessions
+      .filter((s) => s.tableNumber === tableNumber && s.visitId === visitId)
+      .reduce<TableSession | null>((best, s) => (!best || s.updatedAt > best.updatedAt ? s : best), null);
+    if (mine) return { session: mine, orders: await ordersForSession(mine) };
+  } else {
+    // Stale cookie with no visit id: still surface the settled session so
+    // the guest UI can bounce to "scan again" instead of looking empty.
+    const latest = findLatestSessionForTable(sessions, tableNumber);
+    if (latest && SETTLED_SESSION_STATUSES.includes(latest.status)) {
+      return { session: latest, orders: await ordersForSession(latest) };
+    }
   }
 
   // Rare fallback (session just closed/paid) — genuinely needs to search all
@@ -133,9 +168,10 @@ export async function getTrackableSessionWithOrders(
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   for (const order of activeOrders) {
     const owner = sessions.find((s) => s.orderIds.includes(order.id) && s.tableNumber === tableNumber);
-    if (owner) {
-      return { session: owner, orders: orders.filter((o) => owner.orderIds.includes(o.id)) };
-    }
+    if (!owner) continue;
+    // A new scan must not inherit the previous party's still-cooking orders.
+    if (visitId && owner.visitId !== visitId) continue;
+    return { session: owner, orders: orders.filter((o) => owner.orderIds.includes(o.id)) };
   }
 
   return { session: null, orders: [] };
@@ -155,10 +191,23 @@ export async function submitOrder(params: {
   notes?: string;
   language?: string;
   servingPreference?: ServingPreference;
+  visitId?: string;
 }): Promise<{ order: Order; session: TableSession }> {
   const priced = await priceGuestOrderItems(params.items);
+  const existingSessions = await pullSessions();
+  const openExisting = findOpenSessionForTable(existingSessions, params.tableNumber);
+  if (!openExisting) {
+    const latest = findLatestSessionForTable(existingSessions, params.tableNumber);
+    if (latest && SETTLED_SESSION_STATUSES.includes(latest.status)) {
+      // Same visit (or a cookie with no visit id) cannot start a new party
+      // after settle. A different visitId is a new scan of the same sticker.
+      const isFreshVisit = Boolean(params.visitId) && params.visitId !== latest.visitId;
+      if (!isFreshVisit) throw new SessionClosedError();
+    }
+  }
+
   const createdAt = new Date().toISOString();
-  const isFirstOrder = !findOpenSessionForTable(await pullSessions(), params.tableNumber);
+  const isFirstOrder = !openExisting;
 
   const order: Order = {
     id: generateOrderId(),
@@ -196,6 +245,7 @@ export async function submitOrder(params: {
       status: "ACTIVE",
       createdAt,
       updatedAt: createdAt,
+      ...(params.visitId ? { visitId: params.visitId } : {}),
     };
   }
   await pushSession(session);
@@ -378,7 +428,7 @@ export async function settleSessionByWaiter(
 
   const updatedSession: TableSession = {
     ...session,
-    status: "PAID",
+    status: "CLOSED",
     paymentMethod: "WAITER",
     paymentStatus: "PAID",
     updatedAt: new Date().toISOString(),
@@ -409,7 +459,7 @@ export async function payOrdersByCustomer(
     await completeTasksForOrders(session.orderIds);
     const updatedSession: TableSession = {
       ...session,
-      status: "PAID",
+      status: "CLOSED",
       paymentMethod: "APP",
       paymentStatus: "PAID",
       updatedAt: new Date().toISOString(),

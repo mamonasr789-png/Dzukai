@@ -6,6 +6,8 @@ import { TABLE_ACCESS_COOKIE } from "../../tableAccessCookie.ts";
 
 export interface TableAccess {
   tableNumber: string;
+  /** Present on cookies issued after a QR scan (version-2 visit token). */
+  visitId?: string;
 }
 
 /**
@@ -22,5 +24,9 @@ export async function requireTableAccess(): Promise<TableAccess | null> {
   if (!secret) return null;
   const token = (await cookies()).get(TABLE_ACCESS_COOKIE)?.value;
   const result = verifyTableAccessToken(token, secret);
-  return result.ok ? { tableNumber: result.payload.tableNumber } : null;
+  if (!result.ok) return null;
+  return {
+    tableNumber: result.payload.tableNumber,
+    visitId: result.payload.version === 2 ? result.payload.visitId : undefined,
+  };
 }

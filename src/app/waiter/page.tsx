@@ -67,10 +67,11 @@ function derivePaymentBadge(
   const order = orders.find((o) => o.id === orderId);
   const session = sessions.find((s) => s.orderIds.includes(orderId));
 
-  if (order?.isPaid || (session?.status === "PAID" && session.paymentMethod === "APP")) {
+  const settled = session?.status === "PAID" || session?.status === "CLOSED";
+  if (order?.isPaid || (settled && session?.paymentMethod === "APP")) {
     return "PAID_APP";
   }
-  if (session?.status === "PAID" && session.paymentMethod === "WAITER") return "PAID_WAITER";
+  if (settled && session?.paymentMethod === "WAITER") return "PAID_WAITER";
   if (session?.status === "BILL_REQUESTED") return "BILL_REQUESTED";
   return null; // UNPAID — omit badge to reduce clutter
 }
@@ -683,7 +684,7 @@ function TaskRow({
         await actions.updateTaskStatus(task.id, "completed", staff ?? undefined);
       } else if (task.type === "bill_requested") {
         // settleSession atomically marks every order in the session paid,
-        // completes non-ready_to_serve tasks, and marks the session PAID —
+        // completes non-ready_to_serve tasks, and closes the session —
         // the server-side twin of what used to be four separate local writes.
         if (task.tableNumber) await actions.settleSession(task.tableNumber);
         await actions.updateTaskStatus(task.id, "completed", staff ?? undefined);

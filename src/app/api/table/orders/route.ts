@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireTableAccess } from "../../../../lib/server/auth/requireTableAccess";
-import { OrderPricingError, submitOrder } from "../../../../lib/server/orderService";
+import { OrderPricingError, SessionClosedError, submitOrder } from "../../../../lib/server/orderService";
 
 export const runtime = "nodejs";
 
@@ -46,11 +46,15 @@ export async function POST(request: Request): Promise<Response> {
       notes: parsed.data.notes,
       language: parsed.data.language,
       servingPreference: parsed.data.servingPreference,
+      visitId: access.visitId,
     });
     return Response.json({ ok: true, order, session }, { status: 201 });
   } catch (error) {
     if (error instanceof OrderPricingError) {
       return Response.json({ ok: false, error: error.code }, { status: 400 });
+    }
+    if (error instanceof SessionClosedError) {
+      return Response.json({ ok: false, error: "session_closed" }, { status: 409 });
     }
     return Response.json({ ok: false, error: "store_not_configured" }, { status: 503 });
   }
