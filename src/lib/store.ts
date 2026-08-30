@@ -5,6 +5,10 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { Product } from "./data";
 import { readTableAccessCookie } from "./tableAccessCookie";
+import {
+  uniqueValidGuestAllergens,
+  type GuestAllergenId,
+} from "./allergens";
 
 export interface CartItem {
   product: Product;
@@ -17,12 +21,14 @@ interface CartStore {
   items: CartItem[];
   tableNumber: string | null;
   lang: Lang;
+  guestAllergens: GuestAllergenId[];
   addItem: (product: Product, quantity?: number) => void;
   removeItem: (productId: string) => void;
   updateQuantity: (productId: string, quantity: number) => void;
   clearCart: () => void;
   setTableNumber: (n: string) => void;
   setLang: (l: Lang) => void;
+  setGuestAllergens: (allergens: GuestAllergenId[]) => void;
   totalItems: () => number;
   totalPrice: () => number;
 }
@@ -52,6 +58,7 @@ export const useCartStore = create<CartStore>()(
       items: [],
       tableNumber: null,
       lang: "lt",
+      guestAllergens: [],
 
       addItem: (product, quantity = 1) => {
         // Browsing (/, /product/:id) is open to anyone, but actually ordering
@@ -108,6 +115,8 @@ export const useCartStore = create<CartStore>()(
       clearCart: () => set({ items: [] }),
 
       setTableNumber: (n) => set({ tableNumber: n }),
+      setGuestAllergens: (allergens) =>
+        set({ guestAllergens: uniqueValidGuestAllergens(allergens) }),
       setLang: (l) => {
         set({ lang: l });
         if (typeof window !== "undefined") {

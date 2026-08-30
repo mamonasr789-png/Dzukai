@@ -61,6 +61,7 @@ import { products } from "@/lib/data";
 import { useCartStore } from "@/lib/store";
 import { useT } from "@/lib/i18n";
 import { tProduct } from "@/lib/product-translations";
+import { guestAllergyChatContext } from "@/lib/allergens";
 
 type Message = StoredDisplayMessage;
 
@@ -105,6 +106,13 @@ function timestamp(language: SupportedLanguage): string {
     minute: "2-digit",
   });
 }
+
+
+function messageWithGuestAllergies(message: string): string {
+  const context = guestAllergyChatContext(useCartStore.getState().guestAllergens);
+  return context ? `${context}\n\n${message}` : message;
+}
+
 
 const TYPING_BASE_MS = 700;
 const TYPING_PER_CHARACTER_MS = 16;
@@ -917,7 +925,7 @@ export function AIPageClient({
           await clientRef.current.sendTurn(
             {
           sessionId: session.state.sessionId,
-          message: attempt.message,
+          message: messageWithGuestAllergies(attempt.message),
           clientTurnId: attempt.clientTurnId,
           requestedLanguage: language,
           ...(attempt.selectionHint

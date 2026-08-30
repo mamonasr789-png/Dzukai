@@ -3,13 +3,14 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
-import { ArrowLeft, ShoppingCart, AlertCircle } from "lucide-react";
+import { ArrowLeft, ShoppingCart } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import QuantitySelector from "@/components/QuantitySelector";
 import { useCartStore } from "@/lib/store";
 import { useLiveMenu } from "@/lib/hooks/useLiveMenu";
 import { useT } from "@/lib/i18n";
+import AllergenNotice from "@/components/AllergenNotice";
 
 export default function ProductPage() {
   const { id } = useParams();
@@ -92,17 +93,7 @@ export default function ProductPage() {
           </div>
         )}
 
-        {product.allergens.length > 0 && (
-          <div className="mt-4 flex items-start gap-2 bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800/50 rounded-2xl p-3">
-            <AlertCircle size={15} className="text-orange-500 mt-0.5 shrink-0" />
-            <div>
-              <p className="text-xs font-semibold text-orange-700 dark:text-orange-400">Alergenai</p>
-              <p className="text-xs text-orange-600 dark:text-orange-500 mt-0.5">
-                {product.allergens.join(", ")}
-              </p>
-            </div>
-          </div>
-        )}
+        <AllergenNotice declaredAllergens={product.allergens} />
 
         {product.soldOut && (
           <p className="mt-5 text-sm font-bold text-red-600">{tr.sold_out}</p>

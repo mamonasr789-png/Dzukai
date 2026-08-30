@@ -16,9 +16,12 @@ import { badgeTranslations, tProduct } from "@/lib/product-translations";
 import ThemeToggle from "@/components/ThemeToggle";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import QuantitySelector from "@/components/QuantitySelector";
+import AllergenPrompt from "@/components/AllergenPrompt";
+import AllergenNotice from "@/components/AllergenNotice";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { allergenRowFlag } from "@/lib/allergens";
 
 function tBadge(badge: string, lang: string) {
   if (lang === "lt") return badge;
@@ -26,9 +29,10 @@ function tBadge(badge: string, lang: string) {
 }
 
 function ProductRow({ product, onOpen }: { product: Product; onOpen: () => void }) {
-  const { addItem, items, lang } = useCartStore();
+  const { addItem, items, lang, guestAllergens } = useCartStore();
   const tr = useT(lang);
   const inCart = items.find((i) => i.product.id === product.id);
+  const rowFlag = allergenRowFlag(product.allergens, guestAllergens);
   const qty = inCart?.quantity ?? 0;
   const hasPrice = product.price > 0;
   const name = tProduct(product.id, lang, "name", product.name);
@@ -56,6 +60,18 @@ function ProductRow({ product, onOpen }: { product: Product; onOpen: () => void 
                 : tr.ask_price}
           </span>
         </div>
+        {rowFlag === "match" && (
+          <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-orange-700 dark:text-orange-400">
+            <AlertCircle size={11} />
+            {tr.allergen_warning}
+          </span>
+        )}
+        {rowFlag === "unknown" && (
+          <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-orange-700 dark:text-orange-400">
+            <AlertCircle size={11} />
+            {tr.allergen_unknown}
+          </span>
+        )}
       </button>
       <div className="flex flex-col items-center gap-2 shrink-0">
         <button onClick={onOpen} className="relative w-[88px] h-[88px] rounded-xl overflow-hidden bg-muted">
@@ -143,15 +159,7 @@ function ProductSheet({ product, open, onClose }: { product: Product | null; ope
               </div>
             </div>
           )}
-          {product.allergens.length > 0 && (
-            <div className="mt-3 flex items-start gap-2 bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800/50 rounded-xl p-3">
-              <AlertCircle size={14} className="text-orange-500 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-xs font-bold text-orange-700 dark:text-orange-400">{tr.allergens}</p>
-                <p className="text-xs text-orange-600 dark:text-orange-500 mt-0.5">{product.allergens.join(", ")}</p>
-              </div>
-            </div>
-          )}
+          <AllergenNotice declaredAllergens={product.allergens} />
           {product.soldOut && (
             <p className="mt-4 text-sm font-bold text-red-600">{tr.sold_out}</p>
           )}
@@ -468,6 +476,7 @@ function MenuScreen() {
       </main>
 
       <ProductSheet product={selectedProduct} open={sheetOpen} onClose={() => setSheetOpen(false)} />
+      <AllergenPrompt tableNumber={tableNumber} />
       <CartBar />
     </div>
   );
