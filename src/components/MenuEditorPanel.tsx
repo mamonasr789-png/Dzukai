@@ -9,7 +9,7 @@ import CollapsibleSection from "./CollapsibleSection";
 
 const TEXT: Record<StaffLang, Record<string, string>> = {
   lt: {
-    title: "Meniu: yra / nėra, kaina",
+    title: "Meniu: yra arba nėra, kaina",
     search: "Ieškoti patiekalo…",
     soldOut: "Nėra",
     available: "Yra",
@@ -21,7 +21,7 @@ const TEXT: Record<StaffLang, Record<string, string>> = {
     hint: "Palieskite Nėra, jei patiekalo nėra. Kainą ir pavadinimą galite keisti čia. Pakeitimai matomi svečiams iš karto.",
   },
   en: {
-    title: "Menu: available / unavailable, price",
+    title: "Menu (available / price)",
     search: "Search dish…",
     soldOut: "Unavailable",
     available: "Available",
@@ -138,7 +138,7 @@ function EditorRow({
               : "bg-white/10 text-white/70 border border-white/10"
           }`}
         >
-          {product.soldOut ? t.soldOut : t.available}
+          {product.soldOut ? t.available : t.soldOut}
         </button>
       </div>
       <div className="flex flex-wrap items-center gap-2">
