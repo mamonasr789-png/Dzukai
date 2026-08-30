@@ -23,11 +23,13 @@ const serverOnly = require0.resolve("server-only");
 require0.cache[serverOnly] = { id: serverOnly, filename: serverOnly, loaded: true, exports: {} } as never;
 
 const { SqliteSyncStore, __setSyncStoreForTests } = await import("../server/syncStore.ts");
+const { SqliteMenuOverrideStore, __setMenuOverrideStoreForTests } = await import("../server/menuOverrideStore.ts");
 const orderService = await import("../server/orderService.ts");
 const taskService = await import("../server/taskService.ts");
 
 function freshStore() {
   __setSyncStoreForTests(new SqliteSyncStore(new DatabaseSync(":memory:")));
+  __setMenuOverrideStoreForTests(new SqliteMenuOverrideStore(new DatabaseSync(":memory:")));
 }
 
 function items(total = 10) {
@@ -218,6 +220,65 @@ async function main() {
     const order = await orderService.getOrder(t5.order.id);
     expect(order?.isPaid).toBeFalsy();
     expect(result.allPaid).toBe(false);
+  });
+
+  describe("submitOrder server prices", () => {});
+  await itAsync("ignores client price/total and persists official menu prices", async () => {
+    freshStore();
+    const { order } = await orderService.submitOrder({
+      tableNumber: "5",
+      items: [{ productId: "p1", name: "Hacked", price: 0, quantity: 2 }],
+      total: 0,
+    });
+    // p1 is Margarita at €9.00 in data.ts
+    expect(order.items[0].price).toBe(9);
+    expect(order.items[0].name).toBe("Margarita");
+    expect(order.total).toBe(18);
+  });
+
+  await itAsync("rejects unknown product ids so an underpay cannot persist", async () => {
+    freshStore();
+    let code = "";
+    try {
+      await orderService.submitOrder({
+        tableNumber: "5",
+        items: [{ productId: "not-a-real-dish", name: "Free", price: 0, quantity: 1 }],
+        total: 0,
+      });
+    } catch (error) {
+      code = error instanceof orderService.OrderPricingError ? error.code : "other";
+    }
+    expect(code).toBe("unknown_product");
+    expect((await orderService.listOrders()).length).toBe(0);
+  });
+
+  await itAsync("uses live override price and refuses a sold-out dish", async () => {
+    freshStore();
+    const { getMenuOverrideStore } = await import("../server/menuOverrideStore.ts");
+    const store = await getMenuOverrideStore();
+    if (!store) throw new Error("override store missing");
+    await store.upsert({ productId: "p1", price: 12.5 });
+    const priced = await orderService.submitOrder({
+      tableNumber: "5",
+      items: [{ productId: "p1", name: "Hacked", price: 1, quantity: 1 }],
+      total: 1,
+    });
+    expect(priced.order.items[0].price).toBe(12.5);
+    expect(priced.order.total).toBe(12.5);
+
+    await store.upsert({ productId: "p1", soldOut: true });
+    let code = "";
+    try {
+      await orderService.submitOrder({
+        tableNumber: "5",
+        items: [{ productId: "p1", quantity: 1 }],
+        total: 0,
+      });
+    } catch (error) {
+      code = error instanceof orderService.OrderPricingError ? error.code : "other";
+    }
+    expect(code).toBe("sold_out");
+    expect((await orderService.listOrders()).length).toBe(1);
   });
 
   describe("requestBill / callWaiter", () => {});

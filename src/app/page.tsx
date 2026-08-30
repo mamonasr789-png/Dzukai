@@ -7,13 +7,15 @@ import { Button } from "@/components/ui/button";
 import ProductCard from "@/components/ProductCard";
 import ThemeToggle from "@/components/ThemeToggle";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
-import { featuredProducts } from "@/lib/data";
 import { useCartStore } from "@/lib/store";
 import { useT } from "@/lib/i18n";
+import { useLiveMenu } from "@/lib/hooks/useLiveMenu";
 
 export default function HomePage() {
   const lang = useCartStore((s) => s.lang);
   const tr = useT(lang);
+  const { products: liveProducts } = useLiveMenu();
+  const featured = liveProducts.filter((p) => p.featured).slice(0, 6);
 
   return (
     <div className="flex flex-col">
@@ -72,7 +74,7 @@ export default function HomePage() {
           </Link>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          {featuredProducts.slice(0, 6).map((product) => (
+          {featured.map((product) => (
             <ProductCard key={product.id} product={product} />
           ))}
         </div>

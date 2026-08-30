@@ -27,6 +27,7 @@ import {
   UtensilsCrossed, Sun, Moon, Utensils, Zap, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
+import Kitchen86Panel from "@/components/Kitchen86Panel";
 
 // ── Kitchen-specific theme ────────────────────────────────────────────────────
 
@@ -207,6 +208,7 @@ export default function KitchenPage() {
 
       {/* Content */}
       <div className="p-4 max-w-6xl mx-auto">
+        <Kitchen86Panel lang={lang} dark={theme === "dark"} />
         {tab === "active" ? (
           activeOrders.length === 0 ? (
             <EmptyState message={t.kitchenEmptyActive} hint={t.kitchenEmptyHint} />

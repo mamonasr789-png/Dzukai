@@ -42,9 +42,12 @@
       "id": "lietiniai",
       "name": "Lietiniai blynai",
       "items": [
-        { "name": "Lietiniai su varške", "price_small": 5.80, "price_large": 7.90 },
-        { "name": "Lietiniai su bananais", "price_small": 5.80, "price_large": 7.90 },
-        { "name": "Lietiniai su kumpiu ir sūriu", "price_small": 6.80, "price_large": 9.00 }
+        { "name": "Lietiniai su varške (2 vnt.)", "price": 5.80 },
+        { "name": "Lietiniai su varške (3 vnt.)", "price": 7.90 },
+        { "name": "Lietiniai su bananais (2 vnt.)", "price": 5.80 },
+        { "name": "Lietiniai su bananais (3 vnt.)", "price": 7.90 },
+        { "name": "Lietiniai su kumpiu ir sūriu (2 vnt.)", "price": 6.80 },
+        { "name": "Lietiniai su kumpiu ir sūriu (3 vnt.)", "price": 9.00 }
       ]
     },
     {
@@ -81,9 +84,12 @@
       "id": "bulviniai",
       "name": "Lietuviški bulviniai patiekalai",
       "items": [
-        { "name": "Didžkukuliai su mėsa", "price_small": 7.50, "price_large": 9.90 },
-        { "name": "Apkepinti didžkukuliai", "price_small": 7.50, "price_large": 9.90 },
-        { "name": "Žemaičių blynai", "price_small": 7.50, "price_large": 9.90 },
+        { "name": "Didžkukuliai su mėsa (mažas)", "price": 7.50 },
+        { "name": "Didžkukuliai su mėsa (didelis)", "price": 9.90 },
+        { "name": "Apkepinti didžkukuliai (mažas)", "price": 7.50 },
+        { "name": "Apkepinti didžkukuliai (didelis)", "price": 9.90 },
+        { "name": "Žemaičių blynai (mažas)", "price": 7.50 },
+        { "name": "Žemaičių blynai (didelis)", "price": 9.90 },
         { "name": "Bulviniai blynai", "price": 9.90 },
         { "name": "Bulviniai blynai su varške ir šonine", "price": 13.50 },
         { "name": "Bulviniai blynai su varške ir lašiša", "price": 13.50 }
@@ -154,14 +160,17 @@
       "name": "Vištienos patiekalai",
       "items": [
         { "name": "Glazūruoti vištienos sparneliai (BBQ arba aštrūs Buffalo)", "price": 14.90 },
-        { "name": "Vištienos šašlykas", "price_small": 10.90, "price_large": 14.90 },
+        { "name": "Vištienos šašlykas (mažas)", "price": 10.90 },
+        { "name": "Vištienos šašlykas (didelis)", "price": 14.90 },
         { "name": "Vištienos Vienos šnicelis", "price": 16.50 },
         { "name": "Vištienos kebabas", "price": 16.50 },
         { "name": "Vištienos filė", "price": 15.50 },
         { "name": "Glazūruota vištienos filė (BBQ arba aštri Buffalo)", "price": 15.90 },
         { "name": "Antienos krūtinėlė su kriauše ir pelėsiniu sūriu", "price": 21.00 },
-        { "name": "Grilyje keptas viščiukas", "price_small": 15.00, "price_large": 26.00 },
-        { "name": "Glazūruotas grilyje keptas viščiukas (BBQ arba aštrus Buffalo)", "price_small": 16.00, "price_large": 27.00 }
+        { "name": "Grilyje keptas viščiukas (pusė)", "price": 15.00 },
+        { "name": "Grilyje keptas viščiukas (visas)", "price": 26.00 },
+        { "name": "Glazūruotas grilyje keptas viščiukas (BBQ arba aštrus Buffalo) (pusė)", "price": 16.00 },
+        { "name": "Glazūruotas grilyje keptas viščiukas (BBQ arba aštrus Buffalo) (visas)", "price": 27.00 }
       ]
     },
     {
@@ -170,8 +179,10 @@
       "items": [
         { "name": "BBQ glazūruotos kiaulienos šoninės juostelės", "price": 13.90 },
         { "name": "Kiaulienos Vienos šnicelis", "price": 16.60 },
-        { "name": "Aštrus kiaulienos šašlykas", "price_small": 11.90, "price_large": 15.90 },
-        { "name": "Kaukazietiškas kiaulienos šašlykas", "price_small": 11.90, "price_large": 15.90 },
+        { "name": "Aštrus kiaulienos šašlykas (mažas)", "price": 11.90 },
+        { "name": "Aštrus kiaulienos šašlykas (didelis)", "price": 15.90 },
+        { "name": "Kaukazietiškas kiaulienos šašlykas (mažas)", "price": 11.90 },
+        { "name": "Kaukazietiškas kiaulienos šašlykas (didelis)", "price": 15.90 },
         { "name": "Kiaulienos šoninė", "price": 16.90 },
         { "name": "Kiaulienos išpjova", "price": 16.90 },
         { "name": "Kiaulienos sprandinės kepsnys", "price": 16.90 },
@@ -251,12 +262,15 @@
     {
       "id": "limonadai",
       "name": "Mūsų gamybos limonadai, kokteiliai",
-      "note": "0,3 l / 1 l",
       "items": [
-        { "name": "Kokosų – žemuogių limonadas", "price_03l": 4.00, "price_1l": 9.90 },
-        { "name": "Greipfrutų limonadas", "price_03l": 4.00, "price_1l": 9.90 },
-        { "name": "Pasiflorų limonadas", "price_03l": 4.00, "price_1l": 9.90 },
-        { "name": "Citrusinių vaisių limonadas", "price_03l": 4.00, "price_1l": 9.90 },
+        { "name": "Kokosų – žemuogių limonadas (0,3l)", "price": 4.00 },
+        { "name": "Kokosų – žemuogių limonadas (1l)", "price": 9.90 },
+        { "name": "Greipfrutų limonadas (0,3l)", "price": 4.00 },
+        { "name": "Greipfrutų limonadas (1l)", "price": 9.90 },
+        { "name": "Pasiflorų limonadas (0,3l)", "price": 4.00 },
+        { "name": "Pasiflorų limonadas (1l)", "price": 9.90 },
+        { "name": "Citrusinių vaisių limonadas (0,3l)", "price": 4.00 },
+        { "name": "Citrusinių vaisių limonadas (1l)", "price": 9.90 },
         { "name": "Kokteilis ŠALTUKAS", "price": 5.50 },
         { "name": "Kokteilis VYNUOGIUKAS", "price": 5.50 },
         { "name": "Pieniški kokteiliai (vanilinis, šokoladinis, braškinis)", "price": 5.50 },
@@ -304,7 +318,8 @@
         { "name": "Mineralinis vanduo (0,33 l)", "price": 2.50 },
         { "name": "Sultys (0,2 l)", "price": 2.50 },
         { "name": "Sprite, Coca Cola, Coca Cola Light, Fanta, Schweppes (0,25 l)", "price": 2.90 },
-        { "name": "Pilstoma Gira (0,3 l / 0,5 l)", "price_03l": 3.50, "price_05l": 4.50 },
+        { "name": "Pilstoma Gira (0,3l)", "price": 3.50 },
+        { "name": "Pilstoma Gira (0,5l)", "price": 4.50 },
         { "name": "Energinis gėrimas Red Bull (0,25 l)", "price": 3.50 },
         { "name": "Acala (fermentuota arbata) (0,75 l)", "price": 15.00 }
       ]
@@ -312,14 +327,25 @@
     {
       "id": "alus-darykla",
       "name": "Dzūkų alaus darykla",
-      "note": "0,3 l / 0,5 l / 1 l",
       "items": [
-        { "name": "Čystas 5%", "price_03l": 3.90, "price_05l": 5.40, "price_1l": 7.90 },
-        { "name": "Šposas 5,5%", "price_03l": 4.00, "price_05l": 5.50, "price_1l": 8.10 },
-        { "name": "Kviecinis 4,5%", "price_03l": 4.00, "price_05l": 5.50, "price_1l": 8.10 },
-        { "name": "Razumnas 6,3%", "price_03l": 4.10, "price_05l": 5.60, "price_1l": 8.30 },
-        { "name": "Spakainas 5,4%", "price_03l": 4.10, "price_05l": 5.60, "price_1l": 8.30 },
-        { "name": "Slyvinis Porteris 7,2%", "price_03l": 4.10, "price_05l": 5.60, "price_1l": 8.30 },
+        { "name": "Čystas 5% (0,3l)", "price": 3.90 },
+        { "name": "Čystas 5% (0,5l)", "price": 5.40 },
+        { "name": "Čystas 5% (1l)", "price": 7.90 },
+        { "name": "Šposas 5,5% (0,3l)", "price": 4.00 },
+        { "name": "Šposas 5,5% (0,5l)", "price": 5.50 },
+        { "name": "Šposas 5,5% (1l)", "price": 8.10 },
+        { "name": "Kviecinis 4,5% (0,3l)", "price": 4.00 },
+        { "name": "Kviecinis 4,5% (0,5l)", "price": 5.50 },
+        { "name": "Kviecinis 4,5% (1l)", "price": 8.10 },
+        { "name": "Razumnas 6,3% (0,3l)", "price": 4.10 },
+        { "name": "Razumnas 6,3% (0,5l)", "price": 5.60 },
+        { "name": "Razumnas 6,3% (1l)", "price": 8.30 },
+        { "name": "Spakainas 5,4% (0,3l)", "price": 4.10 },
+        { "name": "Spakainas 5,4% (0,5l)", "price": 5.60 },
+        { "name": "Spakainas 5,4% (1l)", "price": 8.30 },
+        { "name": "Slyvinis Porteris 7,2% (0,3l)", "price": 4.10 },
+        { "name": "Slyvinis Porteris 7,2% (0,5l)", "price": 5.60 },
+        { "name": "Slyvinis Porteris 7,2% (1l)", "price": 8.30 },
         { "name": "Sezoninis alus", "price": null, "note": "Teiraukitės padavėjo" },
         { "name": "Alaus degustacija", "price": 14.00 }
       ]
@@ -329,7 +355,8 @@
       "name": "Sidras",
       "items": [
         { "name": "Tinginio pantis sidras 4,5% (0,33 l)", "price": 4.80 },
-        { "name": "Sidras pilstomas (0,3 l / 0,5 l)", "price_03l": 5.00, "price_05l": 6.50 }
+        { "name": "Sidras pilstomas (0,3l)", "price": 5.00 },
+        { "name": "Sidras pilstomas (0,5l)", "price": 6.50 }
       ]
     },
     {
@@ -477,10 +504,11 @@
     {
       "id": "putojantis-vynas",
       "name": "Putojantis vynas",
-      "note": "150 ml / butelis",
       "items": [
-        { "name": "Alita", "price_150ml": 6.50, "price_bottle": 27.00 },
-        { "name": "Valdo Etichetta Nera Prosecco D.O.C", "price_150ml": 7.00, "price_bottle": 32.00 },
+        { "name": "Alita putojantis vynas (taurė)", "price": 6.50 },
+        { "name": "Alita putojantis vynas (butelis)", "price": 27.00 },
+        { "name": "Valdo Etichetta Nera Prosecco D.O.C (taurė)", "price": 7.00 },
+        { "name": "Valdo Etichetta Nera Prosecco D.O.C (butelis)", "price": 32.00 },
         { "name": "Salasar Cremant De Limoux Brut (butelis)", "price": 36.00 },
         { "name": "Anna Codorniu Blanc De Blac Brut Cava D.O. — Ispanija (butelis)", "price": 39.00 }
       ]

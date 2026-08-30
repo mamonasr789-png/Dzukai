@@ -63,6 +63,9 @@ export const useCartStore = create<CartStore>()(
           window.location.href = "/table-required";
           return;
         }
+        if (product.soldOut || !(product.price > 0)) {
+          return;
+        }
         set((state) => {
           // Always trust the current cookie over whatever table was stamped
           // last time: a re-scanned QR updates the cookie (proxy.ts), and a

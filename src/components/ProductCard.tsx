@@ -8,6 +8,7 @@ import { Product } from "@/lib/data";
 import { useCartStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { productTranslations, badgeTranslations } from "@/lib/product-translations";
+import { useT } from "@/lib/i18n";
 
 function tProduct(id: string, lang: string, field: "name" | "description", fallback: string) {
   if (lang === "lt") return fallback;
@@ -22,6 +23,7 @@ interface Props {
 export default function ProductCard({ product, compact = false }: Props) {
   const addItem = useCartStore((s) => s.addItem);
   const lang = useCartStore((s) => s.lang);
+  const tr = useT(lang);
   const name = tProduct(product.id, lang, "name", product.name);
   const desc = tProduct(product.id, lang, "description", product.description);
   const badge = product.badge ? (badgeTranslations[lang as "en" | "ru"]?.[product.badge] ?? product.badge) : null;
@@ -71,8 +73,13 @@ export default function ProductCard({ product, compact = false }: Props) {
         </p>
         <div className={cn("flex items-center justify-between", compact ? "mt-auto pt-2" : "mt-2")}>
           <span className={cn("font-bold text-foreground", compact ? "text-sm" : "text-base")}>
-            {product.price > 0 ? `${product.price.toFixed(2)} €` : "Teirautis"}
+            {product.soldOut
+              ? tr.sold_out
+              : product.price > 0
+                ? `${product.price.toFixed(2)} €`
+                : tr.ask_price}
           </span>
+          {product.price > 0 && !product.soldOut && (
           <button
             onClick={(e) => {
               e.preventDefault();
@@ -83,6 +90,7 @@ export default function ProductCard({ product, compact = false }: Props) {
           >
             <Plus size={16} strokeWidth={2.5} />
           </button>
+          )}
         </div>
       </div>
     </div>

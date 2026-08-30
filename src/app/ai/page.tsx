@@ -141,7 +141,15 @@ function mirrorServerCart(cart: Cart): void {
     const product = products.find(
       (candidate) => candidate.id === line.productId
     );
-    return product ? [{ product, quantity: line.quantity }] : [];
+    if (!product) return [];
+    return [{
+      product: {
+        ...product,
+        name: line.product.name,
+        price: line.product.officialUnitPrice,
+      },
+      quantity: line.quantity,
+    }];
   });
   useCartStore.setState({ items });
 }

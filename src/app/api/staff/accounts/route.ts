@@ -20,9 +20,7 @@ const CreateAccountRequestSchema = z
       .min(3)
       .max(40)
       .regex(/^[a-zA-Z0-9_.]+$/, "Only letters, digits, dot and underscore are allowed."),
-    // Testing phase: 1-char minimum. Tighten back up before this is
-    // exposed beyond the current small team.
-    password: z.string().min(1).max(200),
+    password: z.string().min(8).max(200),
     role: CreatableRoleSchema,
   })
   .strict();

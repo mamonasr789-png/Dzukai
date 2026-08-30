@@ -606,7 +606,9 @@ export class StandaloneVaiseCartAdapter implements CartPort {
       if (product.orderability.status !== "orderable") {
         return operationError(
           "cart_reconciliation_failed",
-          "A cart product now requires an unconfigured variant selection."
+          product.orderability.status === "unavailable"
+            ? "A cart product is no longer available."
+            : "A cart product now requires an unconfigured variant selection."
         );
       }
       const modifiers = this.validateModifiers(product, line.modifiers);
@@ -663,6 +665,12 @@ export class StandaloneVaiseCartAdapter implements CartPort {
       return operationError(
         "product_not_found",
         "Product does not exist in the official menu."
+      );
+    }
+    if (product.orderability.status === "unavailable") {
+      return operationError(
+        "sold_out",
+        "This product is currently sold out."
       );
     }
     if (product.orderability.status === "requires_variant") {
@@ -1344,7 +1352,9 @@ abstract class DurableVaiseCartAdapter implements CartPort {
       if (product.orderability.status !== "orderable") {
         return operationError(
           "cart_reconciliation_failed",
-          "A cart product now requires an unconfigured variant selection."
+          product.orderability.status === "unavailable"
+            ? "A cart product is no longer available."
+            : "A cart product now requires an unconfigured variant selection."
         );
       }
       const modifiers = this.validateModifiers(product, line.modifiers);
@@ -1383,6 +1393,9 @@ abstract class DurableVaiseCartAdapter implements CartPort {
   ): SafeOperationResult<ProductDetails> {
     if (!product) {
       return operationError("product_not_found", "Product does not exist in the official menu.");
+    }
+    if (product.orderability.status === "unavailable") {
+      return operationError("sold_out", "This product is currently sold out.");
     }
     if (product.orderability.status === "requires_variant") {
       return operationError(

@@ -30,6 +30,7 @@ import {
   waiterCalled,
   whichItem,
   whichVariant,
+  itemSoldOut,
   type VoiceContext,
 } from "./waiterVoice.ts";
 
@@ -109,6 +110,7 @@ function copyFor(voice: VoiceContext) {
   return {
     clarifyReference: whichItem(voice),
     clarifyVariant: whichVariant(voice),
+    soldOut: itemSoldOut(voice),
     clarifyModifier: modifierUnsure(voice),
     allergy: allergyCaution(voice),
     noResults: noMatch(voice),
@@ -234,27 +236,32 @@ function resultStep(
   const error = results.find((item) => !item.result.ok);
   if (error && !error.result.ok) {
     const requiredVariant = error.result.error.code === "required_variant_missing";
+    const soldOut = error.result.error.code === "sold_out";
     const modifier =
       error.result.error.code === "unsupported_modifier" ||
       error.result.error.code === "requires_staff_confirmation";
     return {
       kind: "clarification",
-      message: requiredVariant
-        ? copy.clarifyVariant
-        : modifier
-          ? copy.clarifyModifier
-          : copy.clarifyReference,
+      message: soldOut
+        ? copy.soldOut
+        : requiredVariant
+          ? copy.clarifyVariant
+          : modifier
+            ? copy.clarifyModifier
+            : copy.clarifyReference,
       unresolvedQuestion: {
         kind: requiredVariant
           ? "product_reference"
           : modifier
             ? "modifier_confirmation"
             : "other",
-        promptKey: requiredVariant
-          ? "required_variant"
-          : modifier
-            ? "unsupported_modifier"
-            : "tool_error",
+        promptKey: soldOut
+          ? "sold_out"
+          : requiredVariant
+            ? "required_variant"
+            : modifier
+              ? "unsupported_modifier"
+              : "tool_error",
         relatedProductIds: request.context.state.latestReferencedProductIds,
       },
       ambiguity: request.context.state.ambiguity,
@@ -438,6 +445,14 @@ export class DeterministicFallbackProvider implements AIProvider {
       const grounded = context.relevantProducts.find(
         (product) => product.productId === reference
       );
+      if (grounded?.orderability.status === "unavailable") {
+        return Promise.resolve({
+          kind: "final",
+          message: copy.soldOut,
+          referencedProductIds: [reference],
+          stateUpdate: { stage: "recommending" },
+        } satisfies ProviderStep);
+      }
       if (grounded?.orderability.status === "requires_variant") {
         return Promise.resolve({
           kind: "clarification",

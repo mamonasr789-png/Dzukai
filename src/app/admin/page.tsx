@@ -40,6 +40,7 @@ import {
 import StaffLangSwitch from "@/components/StaffLangSwitch";
 import StaffLogoutButton from "@/components/StaffLogoutButton";
 import StaffAccountsPanel from "@/components/StaffAccountsPanel";
+import MenuEditorPanel from "@/components/MenuEditorPanel";
 import TablesPanel from "@/components/TablesPanel";
 import AdminAiPanel from "@/components/AdminAiPanel";
 import CollapsibleSection from "@/components/CollapsibleSection";
@@ -224,8 +225,8 @@ export default function AdminPage() {
               <span className="hidden sm:inline">{formatTime(lastRefresh.toISOString())}</span>
             </button>
 
-            {/* Dev reset */}
-            {confirmReset ? (
+            {/* Dev-only reset — production admin must not one-tap wipe live data */}
+            {process.env.NODE_ENV === "development" && (confirmReset ? (
               <div className="flex items-center gap-1.5">
                 <span className="hidden sm:inline text-[11px] text-red-400/80">{t.adminResetConfirmQ}</span>
                 <button
@@ -250,7 +251,7 @@ export default function AdminPage() {
                 <XCircle size={11} />
                 <span className="hidden sm:inline">{t.adminResetBtn}</span>
               </button>
-            )}
+            ))}
           </div>
         </div>
       </div>
@@ -386,6 +387,7 @@ export default function AdminPage() {
 
         <AdminAiPanel lang={lang} />
         <TablesPanel lang={lang} />
+        <MenuEditorPanel lang={lang} />
         <StaffAccountsPanel lang={lang} />
       </div>
     </div>

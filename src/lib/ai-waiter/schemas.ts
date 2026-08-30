@@ -302,8 +302,8 @@ export type ModifierSelection = z.infer<typeof ModifierSelectionSchema>;
 
 export const ProductOrderabilitySchema = z
   .object({
-    status: z.enum(["orderable", "requires_variant"]),
-    reason: z.enum(["confirmed_base_price", "variant_data_missing"]),
+    status: z.enum(["orderable", "requires_variant", "unavailable"]),
+    reason: z.enum(["confirmed_base_price", "variant_data_missing", "sold_out"]),
   })
   .strict();
 
@@ -521,6 +521,7 @@ export const ToolErrorCodeSchema = z.enum([
   "unknown_tool",
   "session_not_found",
   "product_not_found",
+  "sold_out",
   "price_unavailable",
   "cart_reconciliation_failed",
   "cart_line_not_found",

@@ -667,7 +667,7 @@ test("unsupported modifier stays non-mutating and asks for staff confirmation", 
   assert.equal(result.data.stage, "clarifying");
 });
 
-test("priceNote product without a variant is not added", async () => {
+test("split portion SKU is added without a variant picker", async () => {
   const harness = createHarness();
   const session = await createSession(harness);
   await harness.conversationStore.setLatestReferences(session.sessionId, [
@@ -678,8 +678,8 @@ test("priceNote product without a variant is not added", async () => {
   );
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.equal(result.data.cart.lines.length, 0);
-  assert.match(result.data.message, /variant|dyd/iu);
+  assert.equal(result.data.cart.lines.length, 1);
+  assert.equal(result.data.cart.lines[0]?.productId, "lb1");
 });
 
 test("allergy is stored and response never confirms safety", async () => {

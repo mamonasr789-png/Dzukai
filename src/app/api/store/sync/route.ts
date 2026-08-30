@@ -10,6 +10,9 @@ export const runtime = "nodejs";
  * not staff accounts.
  */
 export async function DELETE(): Promise<Response> {
+  if (process.env.NODE_ENV !== "development") {
+    return Response.json({ ok: false, error: "not_available" }, { status: 403 });
+  }
   const session = await requireStaffRole("admin");
   if (!session) {
     return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });

@@ -20,6 +20,7 @@ import {
 } from "../server/http.ts";
 import {
   StaticMenuRepository,
+  productRequiresVariantSelection,
   type MenuRepository,
   type ProductSearchOptions,
   type RecommendationCandidateOptions,
@@ -52,6 +53,11 @@ import {
   GET as toolsGet,
   POST as toolsPost,
 } from "../../../app/api/ai/tools/route.ts";
+import {
+  getTableAccessTokenSecret,
+  signTableAccessToken,
+} from "../../server/tableAccessToken.ts";
+import { TABLE_ACCESS_COOKIE } from "../../tableAccessCookie.ts";
 
 function fixedSessionId(counter: number): DiningSessionId {
   return `ds_${counter.toString(16).padStart(32, "0")}`;
@@ -813,15 +819,134 @@ test("unavailable, missing, or non-orderable products return reconciliation erro
   }
 });
 
-test("every current priceNote product requires an authoritative variant", async () => {
+test("productRequiresVariantSelection follows priceNote", () => {
+  const base = products.find((product) => product.id === "al1");
+  assert.ok(base);
+  assert.equal(productRequiresVariantSelection(base), false);
+  assert.equal(
+    productRequiresVariantSelection({ ...base, priceNote: "0,3l / 0,5l" }),
+    true
+  );
+});
+
+test("soldOut catalog products are unavailable, not requires_variant", async () => {
+  const base = products.find((product) => product.id === "al1");
+  const other = products.find((product) => product.id === "p1");
+  assert.ok(base);
+  assert.ok(other);
+  const menu = new StaticMenuRepository(async () => [
+    { ...base, soldOut: true },
+    {
+      ...base,
+      id: `${base.id}-note`,
+      soldOut: true,
+      priceNote: "0,3l / 0,5l",
+    },
+    other,
+  ]);
+
+  const details = await menu.getProductDetails(base.id);
+  assert.ok(details);
+  assert.deepEqual(details.orderability, {
+    status: "unavailable",
+    reason: "sold_out",
+  });
+
+  const withNote = await menu.getProductDetails(`${base.id}-note`);
+  assert.ok(withNote);
+  assert.deepEqual(withNote.orderability, {
+    status: "unavailable",
+    reason: "sold_out",
+  });
+
+  const recommendations = await menu.getRecommendationCandidates({
+    excludeProductIds: [],
+    dietaryRequirements: [],
+    allergies: [],
+    limit: 10,
+  });
+  assert.equal(
+    recommendations.some((product) => product.productId === base.id),
+    false
+  );
+  assert.equal(
+    recommendations.some((product) => product.productId === other.id),
+    true
+  );
+
+  const harness = await createHarness({ menu });
+  const response = await harness.registry.execute({
+    sessionId: harness.state.sessionId,
+    toolName: "get_product_details",
+    input: { productId: base.id },
+  });
+  if (!response.ok) throw new Error(response.error.message);
+  const output = ProductDetailsOutputSchema.parse(response.data);
+  assert.deepEqual(output.product.orderability, {
+    status: "unavailable",
+    reason: "sold_out",
+  });
+
+  assertError(
+    await addProduct(harness, {
+      productId: base.id,
+      expectedRevision: 0,
+      idempotencyKey: "sold_out_al1_001",
+    }),
+    "sold_out"
+  );
+});
+
+test("split size SKUs are orderable; leftover priceNote products still require a variant", async () => {
+  const splitIds = [
+    "sam3",
+    "sam3-b",
+    "sam4",
+    "sam4-b",
+    "al1",
+    "al1-05",
+    "al1-1l",
+    "lim1",
+    "lim1-1l",
+    "gg6",
+    "gg6-05",
+    "sid2",
+    "sid2-05",
+    "lb1",
+    "lb1-3",
+    "b1",
+    "b1-d",
+    "v2",
+    "v2-d",
+    "v8",
+    "v8-v",
+    "v9",
+    "v9-v",
+    "ki3",
+    "ki3-d",
+  ];
+  const harness = await createHarness();
+  for (const productId of splitIds) {
+    const details = await harness.menu.getProductDetails(productId);
+    assert.ok(details, `missing split SKU ${productId}`);
+    assert.equal(details.orderability.status, "orderable");
+    assert.equal(details.priceNote, null);
+  }
+  const added = parseCartResponse(
+    await addProduct(harness, {
+      productId: "al1-05",
+      expectedRevision: 0,
+      idempotencyKey: "split_al1_05_001",
+    })
+  );
+  assert.equal(added.cart.lines[0]?.productId, "al1-05");
+  assert.equal(added.cart.lines[0]?.product.officialUnitPrice, 5.4);
+
   const variantProducts = products.filter((product) => product.priceNote);
-  assert.ok(variantProducts.length > 0);
-  const categories = new Set(variantProducts.map((product) => product.category));
-  assert.ok(categories.size >= 5);
   for (const product of variantProducts) {
-    const harness = await createHarness();
+    const leftoverHarness = await createHarness();
     assertError(
-      await addProduct(harness, {
+      await addProduct(leftoverHarness, {
         productId: product.id,
         expectedRevision: 0,
         idempotencyKey: `variant_${product.id}_001`,
@@ -1333,6 +1458,49 @@ test("route methods, signed session creation, and table override rejection", asy
   );
   assert.equal(sessionOptions().status, 204);
   assert.equal(toolsGet().status, 405);
+});
+
+test("printed QR table-access cookie creates a real table session, not demo", async () => {
+  await resetDevelopmentRuntime();
+  const secret = getTableAccessTokenSecret();
+  assert.ok(secret);
+  const token = signTableAccessToken("7", secret);
+  const created = await sessionPost(
+    new Request("http://test/api/ai/session", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-for": "203.0.113.15",
+        "user-agent": "phase2a-tests",
+        cookie: `${TABLE_ACCESS_COOKIE}=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({ action: "create_demo_session", language: "lt" }),
+    })
+  );
+  assert.equal(created.status, 201);
+  const body = (await created.json()) as {
+    state: ConversationState;
+    capabilities: { mode: string; persistent: boolean };
+  };
+  assert.equal(body.capabilities.mode, "table");
+  assert.equal(body.capabilities.persistent, true);
+  assert.equal(body.state.tableNumber, "7");
+  assert.equal(body.state.restaurantId, "dzuku_ainiai");
+  assert.equal(body.state.tableTokenId, "qr_table_7");
+
+  const demo = await sessionPost(
+    jsonRequest("http://test/api/ai/session", {
+      action: "create_demo_session",
+      language: "lt",
+    })
+  );
+  assert.equal(demo.status, 201);
+  const demoBody = (await demo.json()) as {
+    capabilities: { mode: string };
+    state: ConversationState;
+  };
+  assert.equal(demoBody.capabilities.mode, "demo");
+  assert.equal(demoBody.state.tableNumber, null);
 });
 
 test("route-level tool execution and malformed HTTP responses are structured", async () => {

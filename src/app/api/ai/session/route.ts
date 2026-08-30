@@ -22,6 +22,26 @@ import {
   getTableTokenSecret,
   verifyTableToken,
 } from "../../../../lib/ai-waiter/server/tableToken.ts";
+import {
+  getTableAccessTokenSecret,
+  verifyTableAccessToken,
+} from "../../../../lib/server/tableAccessToken.ts";
+import { TABLE_ACCESS_COOKIE } from "../../../../lib/tableAccessCookie.ts";
+
+const QR_RESTAURANT_ID = "dzuku_ainiai";
+
+function tableAccessFromRequest(request: Request): { tableNumber: string } | null {
+  const secret = getTableAccessTokenSecret();
+  if (!secret) return null;
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const match = cookieHeader.split(/;\s*/).find((part) =>
+    part.startsWith(`${TABLE_ACCESS_COOKIE}=`)
+  );
+  if (!match) return null;
+  const raw = decodeURIComponent(match.slice(TABLE_ACCESS_COOKIE.length + 1));
+  const verified = verifyTableAccessToken(raw, secret);
+  return verified.ok ? { tableNumber: verified.payload.tableNumber } : null;
+}
 
 const MAXIMUM_SESSION_REQUEST_BYTES = 2_048;
 const ALLOWED_METHODS = ["OPTIONS", "POST"];
@@ -64,7 +84,7 @@ async function sessionSnapshot(
       capabilities: {
         mode: verifiedTable ? "table" : "demo",
         staffRequestsAvailable,
-        persistent: false,
+        persistent: !isProductionInMemoryDemoOverride(),
       },
     }),
     { status }
@@ -76,9 +96,20 @@ async function createSession(
     DiningSessionRequest,
     { action: "create_demo_session" | "create_table_session" }
   >,
-  demoOnly: boolean
+  demoOnly: boolean,
+  httpRequest: Request
 ): Promise<Response> {
   let tableContext = null;
+  if (request.action === "create_demo_session" && !demoOnly) {
+    const access = tableAccessFromRequest(httpRequest);
+    if (access) {
+      tableContext = {
+        restaurantId: QR_RESTAURANT_ID,
+        tableNumber: access.tableNumber,
+        tableTokenId: `qr_table_${access.tableNumber}`,
+      };
+    }
+  }
   if (request.action === "create_table_session") {
     if (demoOnly) {
       return safeJsonResponse(
@@ -232,7 +263,7 @@ export async function POST(request: Request): Promise<Response> {
 
     return parsed.data.action === "restore_session"
       ? restoreSession(parsed.data, demoOnly)
-      : createSession(parsed.data, demoOnly);
+      : createSession(parsed.data, demoOnly, request);
   } catch {
     return safeJsonResponse(
       {

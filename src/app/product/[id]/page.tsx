@@ -7,13 +7,17 @@ import { ArrowLeft, ShoppingCart, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import QuantitySelector from "@/components/QuantitySelector";
-import { products } from "@/lib/data";
 import { useCartStore } from "@/lib/store";
+import { useLiveMenu } from "@/lib/hooks/useLiveMenu";
+import { useT } from "@/lib/i18n";
 
 export default function ProductPage() {
   const { id } = useParams();
   const router = useRouter();
   const addItem = useCartStore((s) => s.addItem);
+  const lang = useCartStore((s) => s.lang);
+  const tr = useT(lang);
+  const { products } = useLiveMenu();
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
 
@@ -100,7 +104,10 @@ export default function ProductPage() {
           </div>
         )}
 
-        {hasPrice && (
+        {product.soldOut && (
+          <p className="mt-5 text-sm font-bold text-red-600">{tr.sold_out}</p>
+        )}
+        {hasPrice && !product.soldOut && (
           <div className="mt-6 flex items-center justify-between gap-3">
             <QuantitySelector
               quantity={quantity}

@@ -272,7 +272,12 @@ function toDetails(
           },
     // The current menu has no authoritative modifier catalogue.
     supportedModifiers: [],
-    orderability: productRequiresVariantSelection(product)
+    orderability: product.soldOut
+      ? {
+          status: "unavailable",
+          reason: "sold_out",
+        }
+      : productRequiresVariantSelection(product)
       ? {
           status: "requires_variant",
           reason: "variant_data_missing",
@@ -285,12 +290,22 @@ function toDetails(
 }
 
 export class StaticMenuRepository implements MenuRepository {
+  private readonly loadProducts: () => Promise<Product[]>;
+
+  constructor(loadProducts?: () => Promise<Product[]>) {
+    this.loadProducts = loadProducts ?? (async () => products);
+  }
+
+  private async catalog(): Promise<Product[]> {
+    return this.loadProducts();
+  }
+
   async searchProducts(
     query: string,
     options: ProductSearchOptions,
     language?: SupportedLanguage
   ): Promise<ProductDetails[]> {
-    return products
+    return (await this.catalog())
       .filter((product) => !options.category || product.category === options.category)
       .filter((product) => containsEverySearchTerm(product, query))
       .slice(0, options.limit)
@@ -298,12 +313,12 @@ export class StaticMenuRepository implements MenuRepository {
   }
 
   async getProductById(productId: string): Promise<Product | null> {
-    return products.find((product) => product.id === productId) ?? null;
+    return (await this.catalog()).find((product) => product.id === productId) ?? null;
   }
 
   async getProductsByIds(productIds: string[]): Promise<Product[]> {
     const requestedIds = new Set(productIds);
-    return products.filter((product) => requestedIds.has(product.id));
+    return (await this.catalog()).filter((product) => requestedIds.has(product.id));
   }
 
   async getProductDetails(
@@ -343,7 +358,8 @@ export class StaticMenuRepository implements MenuRepository {
     }
 
     const excluded = new Set(options.excludeProductIds);
-    const candidates = products
+    const candidates = (await this.catalog())
+      .filter((product) => !product.soldOut)
       .filter((product) => !options.category || product.category === options.category)
       .filter((product) => !excluded.has(product.id))
       .filter(

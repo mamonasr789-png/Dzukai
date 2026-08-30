@@ -7,6 +7,7 @@ import { GeminiAIProvider } from "./geminiProvider.ts";
 import { createDurableConversationStateStore } from "./conversationStateStore.ts";
 import { DeterministicFallbackProvider } from "./deterministicFallbackProvider.ts";
 import { StaticMenuRepository } from "./menuRepository.ts";
+import { getMergedProducts } from "../../server/menuCatalog.ts";
 import { InMemoryRateLimitAdapter } from "./rateLimitPort.ts";
 import { createDurableStaffTaskAdapter } from "./staffTaskPort.ts";
 import { SafeToolRegistry } from "./toolRegistry.ts";
@@ -73,7 +74,7 @@ export function isProductionInMemoryDemoOverride(
   );
 }
 
-export const menuRepository = new StaticMenuRepository();
+export const menuRepository = new StaticMenuRepository(getMergedProducts);
 export const rateLimitPort = new InMemoryRateLimitAdapter();
 
 export const conversationStateStore = await createDurableConversationStateStore();

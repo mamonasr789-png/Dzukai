@@ -207,7 +207,7 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={1}
+              minLength={8}
               maxLength={200}
               className="bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm w-40 focus:outline-none focus:border-primary/50"
             />
@@ -293,7 +293,7 @@ export default function StaffAccountsPanel({ lang }: { lang: StaffLang }) {
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder={t.resetPasswordPlaceholder}
                     required
-                    minLength={1}
+                    minLength={8}
                     maxLength={200}
                     autoFocus
                     className="bg-white/5 border border-white/10 rounded-md px-2 py-1 text-[11px] w-32 focus:outline-none focus:border-primary/50"

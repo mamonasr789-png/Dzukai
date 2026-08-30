@@ -174,6 +174,7 @@ export const t = {
     add_to_cart: "Į krepšelį",
     added: "Pridėta! ✓",
     ask_price: "Teirautis",
+    sold_out: "Išparduota",
     // Cart page
     cart_title: "Krepšelis",
     cart_empty_title: "Krepšelis tuščias",
@@ -278,6 +279,7 @@ export const t = {
     add_to_cart: "Add to cart",
     added: "Added! ✓",
     ask_price: "Ask price",
+    sold_out: "Sold out",
     cart_title: "Cart",
     cart_empty_title: "Cart is empty",
     cart_empty_sub: "Choose dishes from the menu",
@@ -379,6 +381,7 @@ export const t = {
     add_to_cart: "В корзину",
     added: "Добавлено! ✓",
     ask_price: "Уточнить цену",
+    sold_out: "Нет в наличии",
     cart_title: "Корзина",
     cart_empty_title: "Корзина пуста",
     cart_empty_sub: "Выберите блюда из меню",

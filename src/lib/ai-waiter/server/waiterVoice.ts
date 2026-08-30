@@ -379,6 +379,25 @@ export function whichVariant(ctx: VoiceContext): string {
   return pick(whichVariantPools, ctx, "which-variant");
 }
 
+const soldOutPools: LangPools = {
+  lt: [
+    "Šito šiuo metu neturime — išparduota.",
+    "Deja, šis patiekalas šiuo metu išparduotas.",
+  ],
+  en: [
+    "That one's sold out at the moment.",
+    "Sorry — that dish isn't available right now.",
+  ],
+  ru: [
+    "Этого сейчас нет — закончилось.",
+    "К сожалению, это блюдо сейчас недоступно.",
+  ],
+};
+
+export function itemSoldOut(ctx: VoiceContext): string {
+  return pick(soldOutPools, ctx, "sold-out");
+}
+
 export function noMatch(ctx: VoiceContext): string {
   return pick(noMatchPools, ctx, "no-match");
 }

@@ -15,6 +15,9 @@ import {
   type SessionStatus,
 } from "../orderTypes.ts";
 import { createUniqueTask, completeTasksForOrders } from "./taskService.ts";
+import { OrderPricingError, priceGuestOrderItems } from "./menuCatalog.ts";
+
+export { OrderPricingError };
 
 /**
  * Server-side twin of the old src/lib/orders.ts + src/lib/tableSession.ts —
@@ -147,12 +150,13 @@ export async function getTrackableSessionWithOrders(
  */
 export async function submitOrder(params: {
   tableNumber: string;
-  items: OrderItem[];
-  total: number;
+  items: Array<{ productId: string; quantity: number; name?: string; price?: number }>;
+  total?: number;
   notes?: string;
   language?: string;
   servingPreference?: ServingPreference;
 }): Promise<{ order: Order; session: TableSession }> {
+  const priced = await priceGuestOrderItems(params.items);
   const createdAt = new Date().toISOString();
   const isFirstOrder = !findOpenSessionForTable(await pullSessions(), params.tableNumber);
 
@@ -162,8 +166,8 @@ export async function submitOrder(params: {
     createdAt,
     updatedAt: createdAt,
     status: isFirstOrder ? "PENDING_CONFIRMATION" : "NEW",
-    items: params.items.map((i) => ({ ...i, itemStatus: isFirstOrder ? "PENDING_CONFIRMATION" : "NEW" })),
-    total: params.total,
+    items: priced.items.map((i) => ({ ...i, itemStatus: isFirstOrder ? "PENDING_CONFIRMATION" : "NEW" })),
+    total: priced.total,
     notes: params.notes ?? "",
     language: params.language ?? "lt",
     servingPreference: params.servingPreference ?? "together",

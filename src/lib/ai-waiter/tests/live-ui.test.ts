@@ -142,7 +142,7 @@ test("live client creates a demo session and restores its authoritative cart", a
   assert.equal(established.source, "created_demo");
   assert.equal(established.snapshot.capabilities.staffRequestsAvailable, true);
   assert.equal(established.snapshot.capabilities.mode, "demo");
-  assert.equal(established.snapshot.capabilities.persistent, false);
+  assert.equal(established.snapshot.capabilities.persistent, true);
   assert.equal(
     readStoredSessionId(storage),
     established.snapshot.state.sessionId

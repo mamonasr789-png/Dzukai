@@ -13,7 +13,8 @@ import {
 } from "./lib/server/tableAccessToken";
 import { TABLE_ACCESS_COOKIE } from "./lib/tableAccessCookie";
 
-const TABLE_ACCESS_COOKIE_MAX_AGE_SECONDS = 3 * 60 * 60;
+// 12h covers a long beer-restaurant sitting plus buffer; QR token itself does not expire.
+const TABLE_ACCESS_COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60;
 const TABLE_GATED_PREFIXES = ["/menu", "/cart", "/ai"];
 
 function isTableGatedPath(pathname: string): boolean {

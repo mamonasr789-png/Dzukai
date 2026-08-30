@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   CheckCircle2, Clock, ChefHat, Bell, XCircle,
-  UtensilsCrossed, Utensils, Zap, Truck, CreditCard,
+  UtensilsCrossed, Utensils, Zap, Truck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -27,7 +27,6 @@ import {
   sessionStatusLabels,
 } from "@/lib/i18n";
 import { tProduct } from "@/lib/product-translations";
-import { processPayment } from "@/lib/payment";
 import {
   splitEqually,
   splitByItems,
@@ -98,7 +97,6 @@ function OrderContent() {
     estimatedMinutesByOrderId,
     loading: sessionLoading,
     requestBill: requestBillApi,
-    payOrders,
     refresh: refreshSession,
   } = useTableSession();
   // The specific pinned order when viewing /order?id=... — independent poll,
@@ -110,11 +108,7 @@ function OrderContent() {
     refresh: refreshOrder,
   } = useTableOrder(id);
 
-  // Payment state
-  const [justPaid, setJustPaid] = useState(false);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showSplitModal, setShowSplitModal] = useState(false);
-  const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [billCalledFeedback, setBillCalledFeedback] = useState(false);
 
   // Once a session has been seen, its disappearance (no id pinned) means the
@@ -129,11 +123,6 @@ function OrderContent() {
     refreshOrder();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-
-  const doRefresh = () => {
-    refreshSession();
-    if (id) refreshOrder();
-  };
 
   // order = the pinned order when ?id= is set; otherwise the session's single
   // order when there's exactly one, else null (session view handles >1 itself).
@@ -202,31 +191,6 @@ function OrderContent() {
     setBillCalledFeedback(true);
   };
 
-  const handleInAppPayment = async () => {
-    if (!session || paymentProcessing || payableOrders.length === 0) return;
-    setPaymentProcessing(true);
-    const result = await processPayment(payableTotal);
-    if (result.success) {
-      // Record payment only — this is a financial event. payOrders marks each
-      // order paid server-side and, once every order in the session is paid,
-      // atomically settles the session too (orderService.payOrdersByCustomer).
-      // Crucially we do NOT navigate away: the customer keeps tracking food
-      // preparation and delivery on this page until it's all delivered.
-      await payOrders(payableOrders.map((o) => o.id));
-      setShowPaymentModal(false);
-      setJustPaid(true);
-      doRefresh();
-    }
-    setPaymentProcessing(false);
-  };
-
-  // Auto-dismiss the "payment successful" banner; tracking stays put.
-  useEffect(() => {
-    if (!justPaid) return;
-    const t = setTimeout(() => setJustPaid(false), 4000);
-    return () => clearTimeout(t);
-  }, [justPaid]);
-
   // ── Early returns ─────────────────────────────────────────────────────────
 
   if (sessionEnded) return <SessionEndedView lang={lang} />;
@@ -242,7 +206,6 @@ function OrderContent() {
   if (!id && !order && session && sessionOrders.length > 1) {
     return (
       <>
-        {justPaid && <PaidBanner lang={lang} />}
         <SessionView
           lang={lang}
           session={session}
@@ -251,7 +214,6 @@ function OrderContent() {
           sessionTotal={sessionTotal}
           paymentHintStatus={paymentHintStatus}
           isBillRequested={!!isBillRequested}
-          onPayInApp={() => setShowPaymentModal(true)}
           onCallWaiter={handleCallWaiter}
           onSplitBill={() => setShowSplitModal(true)}
         />
@@ -261,15 +223,6 @@ function OrderContent() {
             total={payableTotal}
             lines={splitLines}
             onClose={() => setShowSplitModal(false)}
-          />
-        )}
-        {showPaymentModal && (
-          <PaymentModal
-            lang={lang}
-            total={payableTotal}
-            processing={paymentProcessing}
-            onCancel={() => setShowPaymentModal(false)}
-            onConfirm={handleInAppPayment}
           />
         )}
       </>
@@ -299,7 +252,6 @@ function OrderContent() {
 
   return (
     <>
-      {justPaid && <PaidBanner lang={lang} />}
       <div className="flex flex-col min-h-screen bg-background pb-10">
         {/* Header */}
         <div className="px-4 pt-14 pb-6 border-b border-border/40">
@@ -471,7 +423,6 @@ function OrderContent() {
             total={payableTotal}
             orderStatus={order.status}
             isBillRequested={!!isBillRequested}
-            onPayInApp={() => setShowPaymentModal(true)}
             onCallWaiter={handleCallWaiter}
             onSplitBill={() => setShowSplitModal(true)}
           />
@@ -495,15 +446,6 @@ function OrderContent() {
           onClose={() => setShowSplitModal(false)}
         />
       )}
-      {showPaymentModal && (
-        <PaymentModal
-          lang={lang}
-          total={payableTotal}
-          processing={paymentProcessing}
-          onCancel={() => setShowPaymentModal(false)}
-          onConfirm={handleInAppPayment}
-        />
-      )}
     </>
   );
 }
@@ -515,7 +457,6 @@ function ActionCard({
   total,
   orderStatus,
   isBillRequested,
-  onPayInApp,
   onCallWaiter,
   onSplitBill,
 }: {
@@ -523,7 +464,6 @@ function ActionCard({
   total: number;
   orderStatus: OrderStatus;
   isBillRequested: boolean;
-  onPayInApp: () => void;
   onCallWaiter: () => void;
   onSplitBill: () => void;
 }) {
@@ -549,12 +489,6 @@ function ActionCard({
           </button>
         </Link>
         <button
-          onClick={onPayInApp}
-          className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors"
-        >
-          💳 {copy.pay_in_app}
-        </button>
-        <button
           onClick={onSplitBill}
           className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors"
         >
@@ -575,62 +509,6 @@ function ActionCard({
             👨‍💼 {copy.request_bill}
           </button>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ── Payment modal ─────────────────────────────────────────────────────────────
-
-function PaymentModal({
-  lang,
-  total,
-  processing,
-  onCancel,
-  onConfirm,
-}: {
-  lang: Lang;
-  total: number;
-  processing: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const copy = useT(lang);
-  return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 px-4">
-      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm shadow-xl">
-        <div className="flex items-center justify-center w-14 h-14 rounded-full bg-primary/10 mx-auto mb-4">
-          <CreditCard size={26} className="text-primary" />
-        </div>
-        <h2 className="font-black text-xl text-center mb-1">
-          {copy.payment_question} {total.toFixed(2)} €?
-        </h2>
-        <p className="text-muted-foreground text-sm text-center mb-6">
-          {copy.payment_secure}
-        </p>
-        <div className="flex flex-col gap-2.5">
-          <button
-            onClick={onConfirm}
-            disabled={processing}
-            className="w-full h-12 rounded-2xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
-          >
-            {processing ? (
-              <>
-                <div className="w-4 h-4 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground animate-spin" />
-                {copy.processing}
-              </>
-            ) : (
-              copy.pay
-            )}
-          </button>
-          <button
-            onClick={onCancel}
-            disabled={processing}
-            className="w-full h-12 rounded-2xl border border-border/60 text-sm font-semibold bg-secondary/60 hover:bg-secondary transition-colors disabled:opacity-50"
-          >
-            {copy.cancel}
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -865,22 +743,6 @@ function SplitBillModal({
   );
 }
 
-// ── Payment success banner ────────────────────────────────────────────────────
-// Non-blocking: payment is confirmed but the order tracking stays on screen so
-// the customer can keep following food preparation and delivery.
-
-function PaidBanner({ lang }: { lang: Lang }) {
-  const copy = useT(lang);
-  return (
-    <div className="fixed top-4 inset-x-0 z-50 flex justify-center px-4 pointer-events-none">
-      <div className="flex items-center gap-2 bg-emerald-500 text-white rounded-full px-4 py-2.5 shadow-lg shadow-emerald-500/30">
-        <CheckCircle2 size={18} className="shrink-0" />
-        <p className="text-sm font-bold">{copy.payment_success_tracking}</p>
-      </div>
-    </div>
-  );
-}
-
 // ── Session overview (multiple orders) ───────────────────────────────────────
 
 function SessionView({
@@ -891,7 +753,6 @@ function SessionView({
   sessionTotal,
   paymentHintStatus,
   isBillRequested,
-  onPayInApp,
   onCallWaiter,
   onSplitBill,
 }: {
@@ -902,7 +763,6 @@ function SessionView({
   sessionTotal: number;
   paymentHintStatus: OrderStatus;
   isBillRequested: boolean;
-  onPayInApp: () => void;
   onCallWaiter: () => void;
   onSplitBill: () => void;
 }) {
@@ -947,7 +807,6 @@ function SessionView({
           total={unpaidTotal}
           orderStatus={paymentHintStatus}
           isBillRequested={isBillRequested}
-          onPayInApp={onPayInApp}
           onCallWaiter={onCallWaiter}
           onSplitBill={onSplitBill}
         />

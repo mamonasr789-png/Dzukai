@@ -14,6 +14,7 @@ import {
   type SupportedLanguage,
   type WaiterTurnData,
 } from "../schemas.ts";
+import { readTableAccessCookie } from "../../tableAccessCookie.ts";
 
 export const LIVE_WAITER_SESSION_KEY = "vaise-ai-waiter-session-v1";
 export const LIVE_WAITER_DEVELOPMENT_PROVIDER_MODE_KEY =
@@ -411,6 +412,28 @@ export function storeSessionId(
   }
 }
 
+function cookieTableNumber(): string | null {
+  try {
+    return readTableAccessCookie()?.tableNumber ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function createdSource(
+  snapshot: DiningSessionSnapshot
+): "created_table" | "created_demo" {
+  return snapshot.capabilities.mode === "table" ? "created_table" : "created_demo";
+}
+
+function snapshotMatchesCookie(
+  snapshot: DiningSessionSnapshot,
+  cookieTable: string | null
+): boolean {
+  if (!cookieTable) return true;
+  return snapshot.state.tableNumber === cookieTable;
+}
+
 export async function establishDiningSession(command: {
   client: LiveWaiterClient;
   storage: SessionStoragePort;
@@ -441,16 +464,17 @@ export async function establishDiningSession(command: {
       ok: true,
       data: {
         snapshot: demo.data,
-        source: "created_demo",
+        source: createdSource(demo.data),
         warningCode: "invalid_table_token",
       },
     };
   }
 
+  const cookieTable = cookieTableNumber();
   const storedSessionId = readStoredSessionId(command.storage);
   if (storedSessionId) {
     const restored = await command.client.restoreSession(storedSessionId);
-    if (restored.ok) {
+    if (restored.ok && snapshotMatchesCookie(restored.data, cookieTable)) {
       return {
         ok: true,
         data: {
@@ -460,26 +484,31 @@ export async function establishDiningSession(command: {
         },
       };
     }
-    if (restored.error.code !== "session_not_found") return restored;
-    try {
-      command.storage.removeItem(LIVE_WAITER_SESSION_KEY);
-    } catch {
-      // Session restoration is optional; the replacement remains server-owned.
+    if (restored.ok || restored.error.code === "session_not_found") {
+      try {
+        command.storage.removeItem(LIVE_WAITER_SESSION_KEY);
+      } catch {
+        // Session restoration is optional; the replacement remains server-owned.
+      }
+      if (!restored.ok && restored.error.code !== "session_not_found") {
+        return restored;
+      }
+      const replacement = await command.client.createSession(
+        command.language,
+        null
+      );
+      if (!replacement.ok) return replacement;
+      storeSessionId(command.storage, replacement.data.state.sessionId);
+      return {
+        ok: true,
+        data: {
+          snapshot: replacement.data,
+          source: restored.ok ? createdSource(replacement.data) : "recovered_expired",
+          warningCode: restored.ok ? null : "session_not_found",
+        },
+      };
     }
-    const replacement = await command.client.createSession(
-      command.language,
-      null
-    );
-    if (!replacement.ok) return replacement;
-    storeSessionId(command.storage, replacement.data.state.sessionId);
-    return {
-      ok: true,
-      data: {
-        snapshot: replacement.data,
-        source: "recovered_expired",
-        warningCode: "session_not_found",
-      },
-    };
+    return restored;
   }
 
   const created = await command.client.createSession(command.language, null);
@@ -489,7 +518,7 @@ export async function establishDiningSession(command: {
     ok: true,
     data: {
       snapshot: created.data,
-      source: "created_demo",
+      source: createdSource(created.data),
       warningCode: null,
     },
   };

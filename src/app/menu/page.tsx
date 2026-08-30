@@ -7,7 +7,8 @@ import Link from "next/link";
 import {
   Search, ShoppingCart, Bot, X, AlertCircle, Plus, ChevronRight,
 } from "lucide-react";
-import { categories, products, Product, Category } from "@/lib/data";
+import { categories, Product, Category } from "@/lib/data";
+import { useLiveMenu } from "@/lib/hooks/useLiveMenu";
 import { useCartStore } from "@/lib/store";
 import { readTableAccessCookie } from "@/lib/tableAccessCookie";
 import { useT, categoryLabels } from "@/lib/i18n";
@@ -48,15 +49,24 @@ function ProductRow({ product, onOpen }: { product: Product; onOpen: () => void 
         ) : null}
         <div className="mt-2">
           <span className="font-bold text-sm text-foreground">
-            {hasPrice ? `${product.price.toFixed(2)} €` : tr.ask_price}
+            {product.soldOut
+              ? tr.sold_out
+              : hasPrice
+                ? `${product.price.toFixed(2)} €`
+                : tr.ask_price}
           </span>
         </div>
       </button>
       <div className="flex flex-col items-center gap-2 shrink-0">
         <button onClick={onOpen} className="relative w-[88px] h-[88px] rounded-xl overflow-hidden bg-muted">
           <Image src={product.image} alt={product.name} fill className="object-cover" sizes="88px" />
+          {product.soldOut && (
+            <span className="absolute inset-0 bg-black/45 flex items-center justify-center text-[10px] font-bold text-white uppercase">
+              {tr.sold_out}
+            </span>
+          )}
         </button>
-        {hasPrice && (
+        {hasPrice && !product.soldOut && (
           <button
             onClick={() => addItem(product)}
             className={cn(
@@ -142,7 +152,10 @@ function ProductSheet({ product, open, onClose }: { product: Product | null; ope
               </div>
             </div>
           )}
-          {hasPrice && (
+          {product.soldOut && (
+            <p className="mt-4 text-sm font-bold text-red-600">{tr.sold_out}</p>
+          )}
+          {hasPrice && !product.soldOut && (
             <div className="mt-5 flex items-center gap-3">
               <QuantitySelector quantity={qty} onIncrease={() => setQty((q) => q + 1)} onDecrease={() => setQty((q) => Math.max(1, q - 1))} size="md" />
               <button
@@ -208,6 +221,7 @@ function MenuScreen() {
   const searchParams = useSearchParams();
   const { setTableNumber, tableNumber, lang } = useCartStore();
   const tr = useT(lang);
+  const { products } = useLiveMenu();
   const [activeCategory, setActiveCategory] = useState<Category>("visi");
   const [query, setQuery] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
