@@ -1,6 +1,7 @@
 import type { Lang } from "./store";
 import type { Category } from "./data";
 import type { OrderStatus, ServingPreference } from "./orderTypes";
+import type { FoodGroup } from "./foodGroups";
 
 export const categoryLabels: Record<Lang, Partial<Record<Category, string>>> = {
   lt: {},
@@ -119,22 +120,95 @@ export const orderStatusLabels: Record<Lang, Record<OrderStatus, string>> = {
   },
 };
 
+export const foodGroupLabels: Record<Lang, Record<FoodGroup, string>> = {
+  lt: {
+    starters: "Užkandžiai",
+    mains: "Pagrindiniai patiekalai",
+    kids: "Vaikų meniu",
+    drinks: "Gėrimai",
+    desserts: "Desertai",
+  },
+  en: {
+    starters: "Starters",
+    mains: "Mains",
+    kids: "Kids menu",
+    drinks: "Drinks",
+    desserts: "Desserts",
+  },
+  ru: {
+    starters: "Закуски",
+    mains: "Основные блюда",
+    kids: "Детское меню",
+    drinks: "Напитки",
+    desserts: "Десерты",
+  },
+};
+
+export function groupWaitMinutesLabel(lang: Lang, minutes: number): string {
+  const templates: Record<Lang, string> = {
+    lt: "~{m} min.",
+    en: "~{m} min",
+    ru: "~{m} мин.",
+  };
+  return templates[lang].replace("{m}", String(minutes));
+}
+
+/** Status sentence without a single baked-in wait number — used above the per-group list. */
+export function guestWaitIntro(lang: Lang, status: OrderStatus): string {
+  if (status === "PENDING_CONFIRMATION" || status === "NEW" || status === "PREPARING") {
+    const intros: Record<Lang, Record<"PENDING_CONFIRMATION" | "NEW" | "PREPARING", string>> = {
+      lt: {
+        PENDING_CONFIRMATION: "Laukiama padavėjo patvirtinimo.",
+        NEW: "Užsakymas priimtas.",
+        PREPARING: "Užsakymas gaminamas.",
+      },
+      en: {
+        PENDING_CONFIRMATION: "Waiting for staff to confirm your order.",
+        NEW: "Order received.",
+        PREPARING: "Your order is being prepared.",
+      },
+      ru: {
+        PENDING_CONFIRMATION: "Ожидаем подтверждения от официанта.",
+        NEW: "Заказ принят.",
+        PREPARING: "Заказ готовится.",
+      },
+    };
+    return intros[lang][status];
+  }
+  return orderStatusMessages[lang][status];
+}
+
 /**
  * Same copy as orderStatusMessages, but with the live ETA prediction
- * (src/lib/server/etaPrediction.ts) substituted in for NEW/PREPARING instead
- * of the fixed "apie 15/10 min." — falls back to the static message when no
- * estimate is available yet (still loading, or history too thin).
+ * (src/lib/server/etaPrediction.ts) substituted in for NEW/PREPARING (and
+ * PENDING_CONFIRMATION) instead of the fixed "apie 15/10 min." — falls back
+ * to the static message when no estimate is available yet.
  */
 export function dynamicWaitMessage(lang: Lang, status: OrderStatus, estimatedMinutes: number | null): string {
-  if (estimatedMinutes === null || (status !== "NEW" && status !== "PREPARING")) {
+  if (
+    estimatedMinutes === null ||
+    (status !== "NEW" && status !== "PREPARING" && status !== "PENDING_CONFIRMATION")
+  ) {
     return orderStatusMessages[lang][status];
   }
-  const templates: Record<Lang, string> = {
-    lt: status === "NEW" ? "Užsakymas priimtas. Numatomas laukimo laikas: ~{m} min." : "Užsakymas gaminamas. Numatomas laukimo laikas: ~{m} min.",
-    en: status === "NEW" ? "Order received. Estimated wait: ~{m} min." : "Your order is being prepared. Estimated wait: ~{m} min.",
-    ru: status === "NEW" ? "Заказ принят. Ожидаемое время: ~{m} мин." : "Заказ готовится. Ожидаемое время: ~{m} мин.",
+  const templates: Record<Lang, Record<"PENDING_CONFIRMATION" | "NEW" | "PREPARING", string>> = {
+    lt: {
+      PENDING_CONFIRMATION: "Laukiama padavėjo patvirtinimo. Numatomas laukimo laikas: ~{m} min.",
+      NEW: "Užsakymas priimtas. Numatomas laukimo laikas: ~{m} min.",
+      PREPARING: "Užsakymas gaminamas. Numatomas laukimo laikas: ~{m} min.",
+    },
+    en: {
+      PENDING_CONFIRMATION: "Waiting for staff to confirm your order. Estimated wait: ~{m} min.",
+      NEW: "Order received. Estimated wait: ~{m} min.",
+      PREPARING: "Your order is being prepared. Estimated wait: ~{m} min.",
+    },
+    ru: {
+      PENDING_CONFIRMATION: "Ожидаем подтверждения от официанта. Ожидаемое время: ~{m} мин.",
+      NEW: "Заказ принят. Ожидаемое время: ~{m} мин.",
+      PREPARING: "Заказ готовится. Ожидаемое время: ~{m} мин.",
+    },
   };
-  return templates[lang].replace("{m}", String(estimatedMinutes));
+  return templates[lang][status].replace("{m}", String(estimatedMinutes));
 }
 
 export const orderStatusMessages: Record<Lang, Record<OrderStatus, string>> = {

@@ -27,9 +27,13 @@ import {
   useT,
   guestOrderStageLabels,
   dynamicWaitMessage,
+  guestWaitIntro,
+  foodGroupLabels,
+  groupWaitMinutesLabel,
   servingPreferenceLabels,
   sessionStatusLabels,
 } from "@/lib/i18n";
+import { isGuestGroupWaitStatus, type GroupWaitEstimate } from "@/lib/foodGroups";
 import { tProduct } from "@/lib/product-translations";
 import {
   splitEqually,
@@ -99,6 +103,7 @@ function OrderContent() {
     session,
     orders: sessionOrders,
     estimatedMinutesByOrderId,
+    estimatedMinutesByGroupByOrderId,
     loading: sessionLoading,
     requestBill: requestBillApi,
     refresh: refreshSession,
@@ -108,6 +113,7 @@ function OrderContent() {
   const {
     order: pinnedOrder,
     estimatedMinutes: pinnedEstimatedMinutes,
+    estimatedMinutesByGroup: pinnedEstimatedMinutesByGroup,
     loading: orderLoading,
     refresh: refreshOrder,
   } = useTableOrder(id);
@@ -150,6 +156,11 @@ function OrderContent() {
     : order
       ? (estimatedMinutesByOrderId[order.id] ?? null)
       : null;
+  const estimatedMinutesByGroup: GroupWaitEstimate[] = id
+    ? pinnedEstimatedMinutesByGroup
+    : order
+      ? (estimatedMinutesByGroupByOrderId[order.id] ?? [])
+      : [];
 
   // Derived payment helpers (safe to compute before early returns)
   const allOrders = !id && sessionOrders.length > 0 ? sessionOrders : (order ? [order] : []);
@@ -291,8 +302,20 @@ function OrderContent() {
             </p>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            {dynamicWaitMessage(lang, order.status, estimatedMinutes)}
+            {isGuestGroupWaitStatus(order.status) && estimatedMinutesByGroup.length > 0
+              ? guestWaitIntro(lang, order.status)
+              : dynamicWaitMessage(lang, order.status, estimatedMinutes)}
           </p>
+          {isGuestGroupWaitStatus(order.status) && estimatedMinutesByGroup.length > 0 && (
+            <ul className="mt-3 space-y-1.5">
+              {estimatedMinutesByGroup.map((row) => (
+                <li key={row.group} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="font-medium text-foreground">{foodGroupLabels[lang][row.group]}</span>
+                  <span className="tabular-nums text-muted-foreground">{groupWaitMinutesLabel(lang, row.minutes)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         {/* Serving preference */}

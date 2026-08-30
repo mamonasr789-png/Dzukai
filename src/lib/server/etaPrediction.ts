@@ -3,6 +3,12 @@ import "server-only";
 import { listOrders } from "./orderService";
 import { getStaffAccountStore } from "./staffAccountStore";
 import { ACTIVE_ORDER_STATUSES, type Order } from "../orderTypes";
+import { products } from "../data";
+import {
+  estimateMinutesByGroup,
+  finalizeOrderEta,
+  type OrderEta,
+} from "../foodGroups";
 
 /**
  * Preliminary "how long until this reaches the table" estimate for the
@@ -24,7 +30,6 @@ const CACHE_TTL_MS = 2 * 60_000;
 const HISTORY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // recent performance predicts near-term better than all-time
 const DEFAULT_PREP_MINUTES = 15;
 const DEFAULT_DELIVERY_MINUTES = 5;
-const MINIMUM_ETA_MINUTES = 2;
 
 /** 90s heartbeat window — same convention as StaffAccountsPanel's online dot. */
 const ONLINE_WINDOW_MS = 90_000;
@@ -101,30 +106,40 @@ async function getModel(): Promise<EtaModel> {
   return model;
 }
 
+const catalogCategoryByProductId: Record<string, string> = Object.fromEntries(
+  products.map((p) => [p.id, p.category])
+);
+
 /**
- * Minutes remaining until `order` is expected to reach the table, or null
- * once delivery has already started (a live countdown stops being useful
- * the moment food is on its way).
+ * Per-group remaining minutes until food in that group is expected to reach
+ * the table, plus a backward-compat overall number (max of the groups).
+ * Null / empty once delivery has started, completed, or cancelled.
  */
-export async function estimateEtaMinutes(order: Order): Promise<number | null> {
-  if (order.status === "DELIVERING" || order.status === "COMPLETED" || order.status === "CANCELLED") return null;
+export async function estimateOrderEta(order: Order): Promise<OrderEta> {
+  if (order.status === "DELIVERING" || order.status === "COMPLETED" || order.status === "CANCELLED") {
+    return { estimatedMinutes: null, estimatedMinutesByGroup: [] };
+  }
 
   const model = await getModel();
-  const perItemMinutes = order.items.map(
-    (item) => model.avgPrepMinutesByProduct.get(item.productId) ?? model.overallAvgPrepMinutes
-  );
-  // "together" waits for the slowest dish; "as_ready" still needs the whole
-  // order eventually plated for delivery, so the slowest dish still gates it.
-  const basePrep = perItemMinutes.length ? Math.max(...perItemMinutes) : model.overallAvgPrepMinutes;
-
   // Queue-depth load factor: kitchen busier than "one order per online cook"
   // stretches the estimate proportionally, capped so a big rush doesn't
-  // produce an absurd number.
+  // produce an absurd number. Shared across groups — not fake per-group precision.
   const loadRatio = model.activeOrderCount / model.onlineKitchenCount;
   const loadMultiplier = Math.min(2.5, Math.max(1, loadRatio / 3));
-
-  const totalMinutes = basePrep * loadMultiplier + model.avgDeliveryMinutes;
   const elapsedMinutes = minutesBetween(order.createdAt, new Date().toISOString());
-  const remaining = totalMinutes - elapsedMinutes;
-  return Math.max(MINIMUM_ETA_MINUTES, Math.round(remaining));
+
+  const groups = estimateMinutesByGroup({
+    items: order.items,
+    categoryByProductId: catalogCategoryByProductId,
+    historicalPrepByProductId: model.avgPrepMinutesByProduct,
+    loadMultiplier,
+    deliveryMinutes: model.avgDeliveryMinutes,
+    elapsedMinutes,
+  });
+  return finalizeOrderEta(order.status, groups);
+}
+
+/** Overall remaining minutes (max of groups), or null once food is on its way. */
+export async function estimateEtaMinutes(order: Order): Promise<number | null> {
+  return (await estimateOrderEta(order)).estimatedMinutes;
 }
