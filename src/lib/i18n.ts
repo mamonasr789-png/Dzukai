@@ -66,6 +66,41 @@ export const categoryLabels: Record<Lang, Partial<Record<Category, string>>> = {
   },
 };
 
+/**
+ * Five guest-visible order stages (plus cancelled). PENDING_CONFIRMATION and
+ * NEW both read as "submitted / pateikta"; the status card message still
+ * explains that a first ticket is waiting for the waiter.
+ */
+export const guestOrderStageLabels: Record<Lang, Record<OrderStatus, string>> = {
+  lt: {
+    PENDING_CONFIRMATION: "Pateikta",
+    NEW: "Pateikta",
+    PREPARING: "Gaminama",
+    READY: "Paruošta",
+    DELIVERING: "Patiekiama",
+    COMPLETED: "Patiekta",
+    CANCELLED: "Atšauktas",
+  },
+  en: {
+    PENDING_CONFIRMATION: "Submitted",
+    NEW: "Submitted",
+    PREPARING: "Preparing",
+    READY: "Ready",
+    DELIVERING: "Being served",
+    COMPLETED: "Served",
+    CANCELLED: "Cancelled",
+  },
+  ru: {
+    PENDING_CONFIRMATION: "Принят",
+    NEW: "Принят",
+    PREPARING: "Готовится",
+    READY: "Готов",
+    DELIVERING: "Подаётся",
+    COMPLETED: "Подан",
+    CANCELLED: "Отменён",
+  },
+};
+
 export const orderStatusLabels: Record<Lang, Record<OrderStatus, string>> = {
   lt: {
     PENDING_CONFIRMATION: "Laukia patvirtinimo",
@@ -107,7 +142,7 @@ export const orderStatusMessages: Record<Lang, Record<OrderStatus, string>> = {
     PENDING_CONFIRMATION: "Laukiama padavėjo patvirtinimo.",
     NEW: "Užsakymas priimtas. Laukimo laikas apie 15 min.",
     PREPARING: "Užsakymas gaminamas. Laukimo laikas apie 10 min.",
-    READY: "Užsakymas paruoštas! Padavėjas jau neša.",
+    READY: "Užsakymas paruoštas! Padavėjas netrukus atneš.",
     DELIVERING: "Padavėjas neša jūsų užsakymą. Jau beveik!",
     COMPLETED: "Skanaus!",
     CANCELLED: "Užsakymas atšauktas.",

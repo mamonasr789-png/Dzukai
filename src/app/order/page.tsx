@@ -14,6 +14,7 @@ import {
   type OrderStatus,
   type TableSession,
   STATUS_ORDER,
+  guestTimelineIndex,
   orderPreparedBy,
   orderDeliveredBy,
 } from "@/lib/orderTypes";
@@ -21,7 +22,7 @@ import { useTableSession, useTableOrder } from "@/lib/hooks/useTableOrders";
 import { useLanguage, type Lang } from "@/lib/store";
 import {
   useT,
-  orderStatusLabels,
+  guestOrderStageLabels,
   dynamicWaitMessage,
   servingPreferenceLabels,
   sessionStatusLabels,
@@ -246,7 +247,7 @@ function OrderContent() {
     );
   }
 
-  const activeIdx = order.status === "CANCELLED" ? -1 : STATUS_ORDER.indexOf(order.status);
+  const activeIdx = guestTimelineIndex(order.status);
   const itemStatuses = order.items.map((i) => i.itemStatus ?? order.status);
   const hasItemVariation = new Set(itemStatuses).size > 1;
 
@@ -277,7 +278,7 @@ function OrderContent() {
           <div className="flex items-center gap-3 mb-3">
             {STATUS_ICON[order.status]}
             <p className={`font-black text-xl ${STATUS_COLOR[order.status]}`}>
-              {orderStatusLabels[lang][order.status]}
+              {guestOrderStageLabels[lang][order.status]}
             </p>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
@@ -332,9 +333,9 @@ function OrderContent() {
           );
         })()}
 
-        {/* Progress timeline — hidden while awaiting confirmation; the status
-            card above already says so, and a 0%-progress bar would look broken. */}
-        {order.status !== "CANCELLED" && order.status !== "PENDING_CONFIRMATION" && (
+        {/* Five guest stages: pateikta → gaminama → paruošta → patiekiama →
+            patiekta. PENDING_CONFIRMATION maps to the first step (submitted). */}
+        {order.status !== "CANCELLED" && (
           <div className="mx-4 mt-4 bg-card border border-border/40 rounded-2xl p-4 shadow-sm">
             <div className="flex items-end justify-between gap-1">
               {STATUS_ORDER.map((s, i) => {
@@ -349,7 +350,7 @@ function OrderContent() {
                       {i + 1}
                     </div>
                     <p className={`text-[10px] text-center leading-tight ${done ? "text-foreground font-semibold" : "text-muted-foreground"}`}>
-                      {orderStatusLabels[lang][s]}
+                      {guestOrderStageLabels[lang][s]}
                     </p>
                   </div>
                 );
@@ -385,7 +386,7 @@ function OrderContent() {
                       {hasItemVariation && (
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${ITEM_BADGE[itemStatus]}`}>
                           {STATUS_ICON_SM[itemStatus]}
-                          {orderStatusLabels[lang][itemStatus]}
+                          {guestOrderStageLabels[lang][itemStatus]}
                         </span>
                       )}
                     </div>
@@ -826,7 +827,7 @@ function SessionView({
                   <p className="font-bold text-sm">#{o.id}</p>
                   {/* Food status is always shown; a paid order additionally gets a paid chip. */}
                   <span className={`text-xs font-semibold ${STATUS_COLOR[o.status]}`}>
-                    {orderStatusLabels[lang][o.status]}
+                    {guestOrderStageLabels[lang][o.status]}
                   </span>
                   {o.isPaid && (
                     <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">

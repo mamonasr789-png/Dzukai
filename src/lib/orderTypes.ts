@@ -82,6 +82,20 @@ export const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
 export const STATUS_ORDER: OrderStatus[] = ["NEW", "PREPARING", "READY", "DELIVERING", "COMPLETED"];
 
 /**
+ * Collapse staff-only PENDING_CONFIRMATION onto the first guest-visible stage
+ * (submitted / pateikta). CANCELLED stays CANCELLED — it is not a timeline step.
+ */
+export function guestVisibleStatus(status: OrderStatus): OrderStatus {
+  return status === "PENDING_CONFIRMATION" ? "NEW" : status;
+}
+
+/** Index into STATUS_ORDER for the guest timeline; -1 for cancelled. */
+export function guestTimelineIndex(status: OrderStatus): number {
+  if (status === "CANCELLED") return -1;
+  return STATUS_ORDER.indexOf(guestVisibleStatus(status));
+}
+
+/**
  * Derive the customer-visible order status from its items.
  *
  * Lifecycle per item: NEW → PREPARING → READY → DELIVERING → COMPLETED

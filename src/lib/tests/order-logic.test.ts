@@ -8,7 +8,7 @@
  */
 
 const { describe, it, expect, printResults } = await import("../assistant/tests/runner.ts");
-const { deriveOrderStatus } = await import("../orderTypes.ts");
+const { deriveOrderStatus, guestVisibleStatus, guestTimelineIndex, STATUS_ORDER } = await import("../orderTypes.ts");
 const analytics = await import("../analytics.ts");
 const i18n = await import("../i18n.ts");
 
@@ -170,6 +170,35 @@ describe("customer order tracking translations", () => {
     expect(copy.ordered_dishes).toBe("Ordered dishes");
     expect(copy.serving).toBe("Serving");
     expect(copy.payment_success_tracking).toContain("Payment successful");
+  });
+
+  it("shows guests five stages from submitted through served", () => {
+    expect(STATUS_ORDER).toEqual(["NEW", "PREPARING", "READY", "DELIVERING", "COMPLETED"]);
+    expect(guestVisibleStatus("PENDING_CONFIRMATION")).toBe("NEW");
+    expect(guestVisibleStatus("NEW")).toBe("NEW");
+    expect(guestVisibleStatus("DELIVERING")).toBe("DELIVERING");
+    expect(guestVisibleStatus("CANCELLED")).toBe("CANCELLED");
+    expect(guestTimelineIndex("PENDING_CONFIRMATION")).toBe(0);
+    expect(guestTimelineIndex("NEW")).toBe(0);
+    expect(guestTimelineIndex("PREPARING")).toBe(1);
+    expect(guestTimelineIndex("READY")).toBe(2);
+    expect(guestTimelineIndex("DELIVERING")).toBe(3);
+    expect(guestTimelineIndex("COMPLETED")).toBe(4);
+    expect(guestTimelineIndex("CANCELLED")).toBe(-1);
+    expect(i18n.guestOrderStageLabels.lt).toEqual({
+      PENDING_CONFIRMATION: "Pateikta",
+      NEW: "Pateikta",
+      PREPARING: "Gaminama",
+      READY: "Paruošta",
+      DELIVERING: "Patiekiama",
+      COMPLETED: "Patiekta",
+      CANCELLED: "Atšauktas",
+    });
+    expect(i18n.guestOrderStageLabels.en.NEW).toBe("Submitted");
+    expect(i18n.guestOrderStageLabels.en.COMPLETED).toBe("Served");
+    expect(i18n.orderStatusMessages.lt.PENDING_CONFIRMATION).toContain("padavėjo");
+    expect(i18n.orderStatusMessages.lt.READY).notToContain("jau neša");
+    expect(i18n.orderStatusMessages.lt.DELIVERING).toContain("neša");
   });
 });
 
