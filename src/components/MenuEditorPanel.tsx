@@ -9,28 +9,28 @@ import CollapsibleSection from "./CollapsibleSection";
 
 const TEXT: Record<StaffLang, Record<string, string>> = {
   lt: {
-    title: "Meniu (86 / kaina)",
+    title: "Meniu: yra / nėra, kaina",
     search: "Ieškoti patiekalo…",
-    soldOut: "86",
+    soldOut: "Nėra",
     available: "Yra",
     price: "Kaina €",
     name: "Pavadinimas",
     save: "Išsaugoti",
     saving: "Saugoma…",
     error: "Nepavyko išsaugoti.",
-    hint: "Pakeitimai matomi svečiams iš karto, be deploy.",
+    hint: "Palieskite Nėra, jei patiekalo nėra. Kainą ir pavadinimą galite keisti čia. Pakeitimai matomi svečiams iš karto.",
   },
   en: {
-    title: "Menu (86 / price)",
+    title: "Menu: available / unavailable, price",
     search: "Search dish…",
-    soldOut: "86",
-    available: "In",
+    soldOut: "Unavailable",
+    available: "Available",
     price: "Price €",
     name: "Name",
     save: "Save",
     saving: "Saving…",
     error: "Could not save.",
-    hint: "Changes show up for guests immediately, no deploy.",
+    hint: "Tap Unavailable to mark a dish as not available. Price and name can be edited here. Changes show for guests immediately.",
   },
 };
 

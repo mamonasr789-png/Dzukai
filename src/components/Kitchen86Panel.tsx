@@ -10,7 +10,7 @@ import type { StaffLang } from "@/lib/staff-i18n";
 type NightPreset = "86" | "alus" | "limonadai" | "populiarus" | "kategorijos";
 
 const NIGHT_PRESETS: { id: NightPreset; lt: string; en: string }[] = [
-  { id: "86", lt: "86", en: "86" },
+  { id: "86", lt: "Nėra", en: "Unavailable" },
   { id: "alus", lt: "Alus", en: "Beer" },
   { id: "limonadai", lt: "Limonadai", en: "Lemonades" },
   { id: "populiarus", lt: "Populiarūs", en: "Popular" },
@@ -82,27 +82,27 @@ const CAT_CHIP: Record<StaffLang, Partial<Record<Category, string>>> = {
 
 const TEXT: Record<StaffLang, Record<string, string>> = {
   lt: {
-    title: "86 — išparduota",
+    title: "Yra / nėra",
     search: "Ieškoti pavadinimo ar kategorijos…",
-    mark86: "86",
-    undo: "Grąžinti",
+    mark86: "Nėra",
+    undo: "Yra",
     error: "Nepavyko atnaujinti.",
-    already86: "Jau 86",
-    available: "Yra — palieskite 86",
-    empty86: "Nėra 86 patiekalų.",
+    already86: "Nėra",
+    available: "Yra — palieskite Nėra",
+    empty86: "Šiuo metu viskas yra.",
     emptySearch: "Nerasta.",
     pickCategory: "Pasirinkite kategoriją.",
     emptyPreset: "Šioje grupėje nieko nėra.",
   },
   en: {
-    title: "86 — sold out",
+    title: "Available / unavailable",
     search: "Search name or category…",
-    mark86: "86",
-    undo: "Restore",
+    mark86: "Unavailable",
+    undo: "Available",
     error: "Could not update.",
-    already86: "Already 86",
-    available: "In — tap 86",
-    empty86: "Nothing is 86'd.",
+    already86: "Unavailable",
+    available: "Available — tap Unavailable",
+    empty86: "Nothing is marked unavailable.",
     emptySearch: "No matches.",
     pickCategory: "Pick a category.",
     emptyPreset: "Nothing in this group.",
