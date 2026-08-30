@@ -15,7 +15,22 @@ import {
   messageRequestsRecommendation,
   RECOMMEND_REQUEST_PATTERN,
 } from "./stateExtraction.ts";
+import { guestAllergenHonesty } from "../../allergens.ts";
 import {
+  detectAllergenContentQuestion,
+  detectIngredientQuestion,
+  detectPairingKind,
+  detectPayRequest,
+  detectPortionQuestion,
+  detectWaitTimeQuestion,
+  resolveMentionedDishes,
+  siblingSkus,
+  waitEstimateForCategory,
+  waitEstimateOverview,
+} from "./pairing.ts";
+import {
+  allergenDeclared,
+  allergenUnknown,
   allergyCaution,
   billRequested,
   buildVoiceContext,
@@ -31,8 +46,11 @@ import {
   smallTalk,
   turnSeed,
   unknownRedirect,
+  waitTimeForGroup,
+  waitTimeOverview,
   waiterCalled,
   whichItem,
+  whichNamedItems,
   whichVariant,
   itemSoldOut,
   type VoiceContext,
@@ -144,25 +162,256 @@ function successfulProducts(results: ProviderToolResult[]) {
   return [];
 }
 
+function detailsProduct(results: ProviderToolResult[]) {
+  for (const item of results) {
+    if (item.result.ok && item.result.toolName === "get_product_details") {
+      return item.result.data.product;
+    }
+  }
+  return null;
+}
+
+function isAddIntent(message: string): boolean {
+  return /\b(pridek|add|imsiu|take)\b|добав|полож/u.test(normalize(message));
+}
+
+function shortDishName(name: string): string {
+  return name.split(/\s+[–—-]\s+/u)[0]?.trim() || name;
+}
+
+function addCall(productId: string, message: string): ProviderStep {
+  return {
+    kind: "tool_requests",
+    toolCalls: [
+      {
+        callId: "fallback_add",
+        toolName: "add_to_cart",
+        input: {
+          productId,
+          quantity: 1,
+          modifiers: [],
+          customerNote:
+            message.match(
+              /(?:pastaba|note|примечание)\s*:\s*([^.!?\n]{1,180})/iu
+            )?.[1]?.trim() ?? null,
+        },
+      },
+    ],
+  };
+}
+
+function allergenAnswer(
+  request: AIProviderStepRequest,
+  product: {
+    productId: string;
+    name: string;
+    ingredients: string[];
+    allergenStatus: {
+      certainty: string;
+      declaredAllergens: string[];
+    };
+  }
+): ProviderStep {
+  const voice = voiceFor(request);
+  const declared = product.allergenStatus.declaredAllergens;
+  const unknown =
+    product.allergenStatus.certainty === "unknown" || declared.length === 0;
+  const guest = request.context.state.allergies
+    .map((item) => item.allergen)
+    .filter((item) => item !== "other");
+  guestAllergenHonesty(declared, guest);
+  const claims: Array<{
+    claimType: "allergen" | "ingredient";
+    productId: string;
+    proposedValue: string;
+    provenance: "official_menu";
+  }> = [];
+  if (!unknown) {
+    for (const allergen of declared) {
+      claims.push({
+        claimType: "allergen",
+        productId: product.productId,
+        proposedValue: allergen,
+        provenance: "official_menu",
+      });
+    }
+  }
+  if (detectIngredientQuestion(request.context.customerMessage)) {
+    for (const ingredient of product.ingredients) {
+      claims.push({
+        claimType: "ingredient",
+        productId: product.productId,
+        proposedValue: ingredient,
+        provenance: "official_menu",
+      });
+    }
+  }
+  return {
+    kind: "final",
+    message: unknown ? allergenUnknown(voice) : allergenDeclared(voice),
+    referencedProductIds: [product.productId],
+    claims,
+    stateUpdate: { stage: "clarifying" },
+  };
+}
+
 function resultStep(
   request: AIProviderStepRequest,
   results: ProviderToolResult[]
 ): ProviderStep {
   const voice = voiceFor(request);
   const copy = copyFor(voice);
+  const message = request.context.customerMessage;
+  const details = detailsProduct(results);
+  if (details) {
+    if (details.orderability.status === "unavailable") {
+      return {
+        kind: "final",
+        message: copy.soldOut,
+        referencedProductIds: [details.productId],
+        stateUpdate: { stage: "recommending" },
+      };
+    }
+    if (isAddIntent(message)) {
+      if (details.orderability.status === "requires_variant") {
+        return {
+          kind: "clarification",
+          message: copy.clarifyVariant,
+          unresolvedQuestion: {
+            kind: "product_reference",
+            promptKey: "required_variant",
+            relatedProductIds: [details.productId],
+          },
+          ambiguity: null,
+          stateUpdate: { stage: "clarifying" },
+        };
+      }
+      return addCall(details.productId, message);
+    }
+    if (
+      detectAllergenContentQuestion(message) ||
+      detectIngredientQuestion(message) ||
+      request.context.state.allergies.length > 0
+    ) {
+      return allergenAnswer(request, details);
+    }
+    if (detectPortionQuestion(message)) {
+      const siblings = siblingSkus(details.productId);
+      if (siblings.length > 1) {
+        return {
+          kind: "clarification",
+          message: whichNamedItems(
+            voice,
+            siblings.map((item) => item.name)
+          ),
+          unresolvedQuestion: {
+            kind: "product_reference",
+            promptKey: "required_variant",
+            relatedProductIds: siblings.map((item) => item.productId),
+          },
+          ambiguity: null,
+          stateUpdate: { stage: "clarifying" },
+        };
+      }
+    }
+    if (detectWaitTimeQuestion(message)) {
+      const estimate = waitEstimateForCategory(details.category);
+      return {
+        kind: "final",
+        message: waitTimeForGroup(voice, estimate.group, estimate.minutes),
+        referencedProductIds: [details.productId],
+        stateUpdate: { stage: "recommending" },
+      };
+    }
+    const ingredientClaims = details.ingredients.map((ingredient) => ({
+      claimType: "ingredient" as const,
+      productId: details.productId,
+      proposedValue: ingredient,
+      provenance: "official_menu" as const,
+    }));
+    return {
+      kind: "final",
+      message: recommendIntro(voice),
+      referencedProductIds: [details.productId],
+      claims: [
+        {
+          claimType: "product_price" as const,
+          productId: details.productId,
+          proposedValue: Math.round(details.officialUnitPrice * 100),
+          provenance: "official_menu" as const,
+        },
+        ...ingredientClaims,
+      ],
+      stateUpdate: { stage: "recommending" },
+    };
+  }
   const products = successfulProducts(results);
   if (products.length > 0) {
+    if (isAddIntent(message)) {
+      const available = products.filter(
+        (product) => product.orderability.status !== "unavailable"
+      );
+      if (available.length === 1) {
+        const only = available[0];
+        if (only.orderability.status === "requires_variant") {
+          return {
+            kind: "clarification",
+            message: copy.clarifyVariant,
+            unresolvedQuestion: {
+              kind: "product_reference",
+              promptKey: "required_variant",
+              relatedProductIds: [only.productId],
+            },
+            ambiguity: null,
+            stateUpdate: { stage: "clarifying" },
+          };
+        }
+        return addCall(only.productId, message);
+      }
+      if (available.length > 1) {
+        return {
+          kind: "clarification",
+          message: whichNamedItems(
+            voice,
+            available.map((product) => shortDishName(product.name))
+          ),
+          unresolvedQuestion: {
+            kind: "product_reference",
+            promptKey: "missing_reference",
+            relatedProductIds: available.map((product) => product.productId),
+          },
+          ambiguity: null,
+          stateUpdate: { stage: "clarifying" },
+        };
+      }
+    }
     // The tool returns a candidate pool in menu order. Always taking its head
     // made every guest hear the same three dishes, so rotate a window instead.
+    const available = products.filter(
+      (product) => product.orderability.status !== "unavailable"
+    );
     const wanted = Math.min(
       desiredRecommendationCount(request.context.customerMessage),
-      products.length
+      available.length
     );
     const offset =
-      products.length > wanted
-        ? rotationOffset(voice, products.length - wanted + 1)
+      available.length > wanted
+        ? rotationOffset(voice, available.length - wanted + 1)
         : 0;
-    const shown = products.slice(offset, offset + wanted);
+    const shown = available.slice(offset, offset + wanted);
+    if (shown.length === 0) {
+      return {
+        kind: "clarification",
+        message: copy.noResults,
+        unresolvedQuestion: {
+          kind: "other",
+          promptKey: "no_grounded_match",
+          relatedProductIds: [],
+        },
+        ambiguity: null,
+        stateUpdate: { stage: "clarifying" },
+      };
+    }
     return {
       kind: "final",
       message: recommendIntro(voice),
@@ -303,7 +552,7 @@ export class DeterministicFallbackProvider implements AIProvider {
     const copy = copyFor(voice);
     const message = normalize(context.customerMessage);
     const categoryRequest = recommendationCategory(request);
-    if (/\b(saskait\w*|bill)\b|сч[её]т/u.test(message)) {
+    if (detectPayRequest(context.customerMessage)) {
       return Promise.resolve({
         kind: "tool_requests",
         toolCalls: [
@@ -407,13 +656,44 @@ export class DeterministicFallbackProvider implements AIProvider {
         ],
       } satisfies ProviderStep);
     }
-    const foodSafetyOrSelection =
-      /\b(valgyti|patiekal|maist|eat|food|dish|safe|saug\w*|recommend|pasiul\w*|noriu)\b|ед|блюд|безопас|рекоменд|хочу/u.test(
-        message
-      );
+    const namedDishes = resolveMentionedDishes(context.customerMessage);
+    const allergenAsk =
+      detectAllergenContentQuestion(context.customerMessage) ||
+      detectIngredientQuestion(context.customerMessage);
+    if (allergenAsk && namedDishes.length > 0) {
+      if (namedDishes.length > 1) {
+        return Promise.resolve({
+          kind: "clarification",
+          message: whichNamedItems(
+            voice,
+            namedDishes.map((dish) => shortDishName(dish.name))
+          ),
+          unresolvedQuestion: {
+            kind: "product_reference",
+            promptKey: "missing_reference",
+            relatedProductIds: namedDishes.map((dish) => dish.productId),
+          },
+          ambiguity: null,
+          stateUpdate: { stage: "clarifying" },
+        } satisfies ProviderStep);
+      }
+      return Promise.resolve({
+        kind: "tool_requests",
+        toolCalls: [
+          {
+            callId: "fallback_details",
+            toolName: "get_product_details",
+            input: { productId: namedDishes[0].productId },
+          },
+        ],
+      } satisfies ProviderStep);
+    }
     if (
-      (context.state.allergies.length > 0 && foodSafetyOrSelection) ||
-      /\b(alerg\w*|allerg\w*)\b|аллерг/u.test(message)
+      /\b(alerg\w*|allerg\w*)\b|аллерг/u.test(message) &&
+      namedDishes.length === 0 &&
+      !messageRequestsDrinks(context.customerMessage) &&
+      !messageRequestsRecommendation(context.customerMessage) &&
+      detectPairingKind(context.customerMessage) === null
     ) {
       return Promise.resolve({
         kind: "staff_escalation",
@@ -490,6 +770,35 @@ export class DeterministicFallbackProvider implements AIProvider {
       } satisfies ProviderStep);
     }
     if (add || same) {
+      const named = namedDishes.filter((dish) => !dish.soldOut);
+      if (named.length === 1) {
+        return Promise.resolve({
+          kind: "tool_requests",
+          toolCalls: [
+            {
+              callId: "fallback_details",
+              toolName: "get_product_details",
+              input: { productId: named[0].productId },
+            },
+          ],
+        } satisfies ProviderStep);
+      }
+      if (named.length > 1) {
+        return Promise.resolve({
+          kind: "clarification",
+          message: whichNamedItems(
+            voice,
+            named.map((dish) => shortDishName(dish.name))
+          ),
+          unresolvedQuestion: {
+            kind: "product_reference",
+            promptKey: "missing_reference",
+            relatedProductIds: named.map((dish) => dish.productId),
+          },
+          ambiguity: null,
+          stateUpdate: { stage: "clarifying" },
+        } satisfies ProviderStep);
+      }
       return Promise.resolve({
         kind: "clarification",
         message: copy.clarifyReference,
@@ -503,11 +812,49 @@ export class DeterministicFallbackProvider implements AIProvider {
       } satisfies ProviderStep);
     }
 
+    if (detectWaitTimeQuestion(context.customerMessage)) {
+      const dish = namedDishes[0];
+      if (dish) {
+        const estimate = waitEstimateForCategory(dish.category);
+        return Promise.resolve({
+          kind: "final",
+          message: waitTimeForGroup(voice, estimate.group, estimate.minutes),
+          referencedProductIds: [dish.productId],
+          stateUpdate: { stage: "recommending" },
+        } satisfies ProviderStep);
+      }
+      return Promise.resolve({
+        kind: "final",
+        message: waitTimeOverview(voice, waitEstimateOverview()),
+        referencedProductIds: [],
+        stateUpdate: { stage: "discovering_preferences" },
+      } satisfies ProviderStep);
+    }
+    if (detectPortionQuestion(context.customerMessage) && namedDishes.length > 0) {
+      const siblings = siblingSkus(namedDishes[0].productId);
+      const options = siblings.length > 1 ? siblings : namedDishes;
+      return Promise.resolve({
+        kind: "clarification",
+        message: whichNamedItems(
+          voice,
+          options.map((dish) => dish.name)
+        ),
+        unresolvedQuestion: {
+          kind: "product_reference",
+          promptKey: "required_variant",
+          relatedProductIds: options.map((dish) => dish.productId),
+        },
+        ambiguity: null,
+        stateUpdate: { stage: "clarifying" },
+      } satisfies ProviderStep);
+    }
+
     if (
       (/\b(labas|sveiki|hello|hi|hey)\b/u.test(message) ||
         /привет|здравств/u.test(message)) &&
       !RECOMMEND_REQUEST_PATTERN.test(message) &&
-      !messageRequestsDrinks(context.customerMessage)
+      !messageRequestsDrinks(context.customerMessage) &&
+      detectPairingKind(context.customerMessage) === null
     ) {
       return Promise.resolve({
         kind: "final",
@@ -523,7 +870,8 @@ export class DeterministicFallbackProvider implements AIProvider {
         (Boolean(categoryRequest.category) ||
           context.state.latestReferencedProductIds.length > 0)) ||
       messageRequestsRecommendation(context.customerMessage) ||
-      messageRequestsDrinks(context.customerMessage);
+      messageRequestsDrinks(context.customerMessage) ||
+      detectPairingKind(context.customerMessage) !== null;
 
     if (recommendationRequested) {
       return Promise.resolve({

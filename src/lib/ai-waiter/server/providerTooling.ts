@@ -225,11 +225,11 @@ export interface ProviderToolDefinition {
 
 const descriptions: Record<ToolName, string> = {
   search_menu:
-    "Search the official menu using current customer wording. Returns capped official summaries.",
+    "Search the official menu using current customer wording. Use this to resolve a named dish before pairing, answering ingredients, allergens, wait times, or portions. Returns capped official summaries. Never invent items.",
   get_product_details:
-    "Fetch details only for a product already grounded in the current turn.",
+    "Fetch official details (ingredients, declared allergens, portion/SKU, availability) for a catalog product. Use before answering what is in a dish, allergens, sizes, or sold-out status.",
   recommend_products:
-    "Retrieve conservative official candidates using stored budget, dietary requirements, and allergies.",
+    "Recommend 1-3 available official menu items. Use for pairing drinks-with-food, food-with-drinks, sides, and what goes with X, as well as general suggestions. Respect stored budget, dietary requirements, and allergies. Sold-out items are excluded. Never invent dishes.",
   add_to_cart:
     "Propose adding exactly one explicitly requested grounded product. The server independently authorizes intent, target, quantity, price, revision, and idempotency.",
   update_cart_item:
@@ -242,7 +242,7 @@ const descriptions: Record<ToolName, string> = {
   request_waiter:
     "Propose a waiter request only after explicit first-person customer intent and verified table context.",
   request_bill:
-    "Propose a bill request only after explicit first-person customer intent and verified table context.",
+    "Call a waiter to settle the bill at the table. Use when the guest asks to pay or for the bill. There is no in-app guest pay.",
 };
 
 export const PROVIDER_TOOL_DEFINITIONS: readonly ProviderToolDefinition[] =

@@ -453,6 +453,44 @@ export function allergyCaution(ctx: VoiceContext): string {
   return pick(allergyPools, ctx, "allergy");
 }
 
+const allergenDeclaredPools: LangPools = {
+  lt: [
+    "Katalogas nurodo šiuos alergenus, bet įrašas nepilnas — saugumo negarantuoju. Pakviesti kolegą?",
+    "Štai ką turime pažymėta. Sąrašas nepatikrintas, todėl geriau pasitikslinti su kolega. Pakviesti?",
+  ],
+  en: [
+    "The catalog lists these allergens, but the record is incomplete — I can't guarantee it's safe. Shall I call a colleague?",
+    "Here's what we have on file. It's unverified, so better to check with a colleague. Shall I call one?",
+  ],
+  ru: [
+    "В каталоге указаны эти аллергены, но запись неполная — безопасность не гарантирую. Позвать коллегу?",
+    "Вот что отмечено. Список не проверен, лучше уточнить у коллеги. Позвать?",
+  ],
+};
+
+const allergenUnknownPools: LangPools = {
+  lt: [
+    "Kataloge šito patiekalo alergenų nėra — tiksliai nežinau. Pakviesti kolegą patikrinti?",
+    "Įrašo apie alergenus nėra, todėl negaliu patvirtinti. Norite, kad pakviesčiau darbuotoją?",
+  ],
+  en: [
+    "There's no allergen record for that dish — I don't know for sure. Shall I get a colleague to check?",
+    "No allergen entry on file, so I can't confirm. Want me to call a staff member?",
+  ],
+  ru: [
+    "В каталоге аллергенов к этому блюду нет — точно не знаю. Позвать коллегу проверить?",
+    "Записи об аллергенах нет, подтвердить не могу. Позвать сотрудника?",
+  ],
+};
+
+export function allergenDeclared(ctx: VoiceContext): string {
+  return pick(allergenDeclaredPools, ctx, "allergen-declared");
+}
+
+export function allergenUnknown(ctx: VoiceContext): string {
+  return pick(allergenUnknownPools, ctx, "allergen-unknown");
+}
+
 export function certificationCaution(ctx: VoiceContext): string {
   return pick(certificationPools, ctx, "certification");
 }
@@ -603,24 +641,98 @@ export function smallTalk(kind: SmallTalkKind, ctx: VoiceContext): string {
   return pick(smallTalkPools[kind], ctx, `smalltalk-${kind}`);
 }
 
-/** Humble menu offer — never claim inability and capability in one sentence. */
+/** Humble menu offer — never claim inability on restaurant topics. */
 const unknownPools: LangPools = {
   lt: [
     "Galiu pasiūlyti iš meniu — ko norėtumėte, valgio ar gėrimo?",
-    "Pasakykite, ko ieškote — parinksiu iš meniu.",
-    "Kuo galiu padėti prie stalo: valgiu ar gėrimu?",
+    "Pasakykite, ko ieškote prie stalo — parinksiu iš meniu.",
+    "Kuo galiu padėti: valgiu, gėrimu ar kuo nors prie stalo?",
+    "Klauskite meniu, porcijų ar kas tinka prie patiekalo — parinksiu.",
   ],
   en: [
     "I can suggest something from the menu — food or a drink?",
-    "Tell me what you're after and I'll pick from the menu.",
-    "Food or drink — what would you like me to suggest?",
+    "Tell me what you need at the table and I'll pick from the menu.",
+    "Food, a drink, or something else for the table — what can I help with?",
+    "Ask about the menu, portions, or what goes with a dish — I'll find it.",
   ],
   ru: [
     "Могу предложить из меню — еду или напиток?",
-    "Скажите, что ищете — подберу из меню.",
-    "Чем помочь за столом — едой или напитком?",
+    "Скажите, что нужно за столом — подберу из меню.",
+    "Еда, напиток или что-то к столу — чем помочь?",
+    "Спросите про меню, порции или что подойдёт к блюду — подберу.",
   ],
 };
+
+export function whichNamedItems(ctx: VoiceContext, names: string[]): string {
+  const shown = names.map((name) => name.trim()).filter(Boolean).slice(0, 3);
+  if (shown.length < 2) return whichItem(ctx);
+  if (ctx.language === "lt") {
+    if (shown.length === 2) return `${shown[0]} ar ${shown[1]}?`;
+    return `Kurį: ${shown[0]}, ${shown[1]} ar ${shown[2]}?`;
+  }
+  if (ctx.language === "en") {
+    if (shown.length === 2) return `The ${shown[0]} or the ${shown[1]}?`;
+    return `Which one: ${shown[0]}, ${shown[1]}, or ${shown[2]}?`;
+  }
+  if (shown.length === 2) return `${shown[0]} или ${shown[1]}?`;
+  return `Какое: ${shown[0]}, ${shown[1]} или ${shown[2]}?`;
+}
+
+const waitGroupLabel: Record<SupportedLanguage, Record<string, string>> = {
+  lt: {
+    starters: "užkandžiai ir sriubos",
+    mains: "pagrindiniai",
+    kids: "vaikiški",
+    drinks: "gėrimai",
+    desserts: "desertai",
+  },
+  en: {
+    starters: "starters and soups",
+    mains: "mains",
+    kids: "kids' dishes",
+    drinks: "drinks",
+    desserts: "desserts",
+  },
+  ru: {
+    starters: "закуски и супы",
+    mains: "основные блюда",
+    kids: "детские",
+    drinks: "напитки",
+    desserts: "десерты",
+  },
+};
+
+export function waitTimeForGroup(
+  ctx: VoiceContext,
+  group: string,
+  minutes: number
+): string {
+  const label = waitGroupLabel[ctx.language][group] ?? group;
+  if (ctx.language === "lt") {
+    return `${label[0].toUpperCase()}${label.slice(1)} paprastai apie ${minutes} min. — tai ne tikslus virtuvės laikas.`;
+  }
+  if (ctx.language === "en") {
+    return `${label[0].toUpperCase()}${label.slice(1)} are usually around ${minutes} min — not an exact kitchen time.`;
+  }
+  return `${label[0].toUpperCase()}${label.slice(1)} обычно около ${minutes} мин. — это не точное время кухни.`;
+}
+
+export function waitTimeOverview(
+  ctx: VoiceContext,
+  groups: ReadonlyArray<{ group: string; minutes: number }>
+): string {
+  const parts = groups.map((item) => {
+    const label = waitGroupLabel[ctx.language][item.group] ?? item.group;
+    return `${label} ~${item.minutes} min`;
+  });
+  if (ctx.language === "lt") {
+    return `Paprastai: ${parts.join(", ")}. Tai apytiksliai, ne tikslus virtuvės laikas.`;
+  }
+  if (ctx.language === "en") {
+    return `Usually: ${parts.join(", ")}. Approximate — not an exact kitchen time.`;
+  }
+  return `Обычно: ${parts.join(", ")}. Примерно, не точное время кухни.`;
+}
 
 export function unknownRedirect(ctx: VoiceContext): string {
   return pick(unknownPools, ctx, "unknown");

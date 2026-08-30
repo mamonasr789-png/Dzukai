@@ -1,11 +1,19 @@
 import "server-only";
 
-import { products } from "../../data.ts";
-import { foodGroupForCategory } from "../../foodGroups.ts";
 import type {
   ConversationState,
   SupportedLanguage,
 } from "../schemas.ts";
+import {
+  detectPairingKind,
+  detectPayRequest,
+  detectWaitTimeQuestion,
+  detectPortionQuestion,
+  detectIngredientQuestion,
+  detectAllergenContentQuestion,
+  mentionsCatalogDish,
+  pairingCategoryForMessage,
+} from "./pairing.ts";
 import {
   ConversationStateDeltaSchema,
   type ConversationStateDelta,
@@ -109,39 +117,10 @@ const PAIRING_PATTERN =
 const MENU_HELP_PATTERN =
   /\b(valgyti|valgyt|patiekal|maist|meniu|menu|eat|food|dish|meal|sriub\w*|soups?|gert\w*|atsigert\w*|gerim\w*|drinks?|beverages?|pasiul\w*|rekomend\w*|recommend|noriu|want|kazko|something)\b|ед|блюд|меню|суп|напит|выпит|рекоменд|хочу/u;
 
-function messageMentionsFoodDish(normalizedMessage: string): boolean {
-  const words = normalizedMessage
-    .split(/[^a-z0-9]+/u)
-    .filter((word) => word.length >= 5);
-  if (words.length === 0) return false;
-  for (const product of products) {
-    if (foodGroupForCategory(product.category) === "drinks") continue;
-    const tokens = normalize(product.name)
-      .split(/[^a-z0-9]+/u)
-      .filter((token) => token.length >= 5);
-    for (const token of tokens) {
-      const stem = token.slice(0, Math.min(6, token.length));
-      if (
-        words.some(
-          (word) =>
-            word.startsWith(stem) || stem.startsWith(word.slice(0, stem.length))
-        )
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 export function messageRequestsDrinks(message: string): boolean {
   const normalized = normalize(message);
   if (DRINK_REQUEST_PATTERN.test(normalized)) return true;
-  return (
-    PAIRING_PATTERN.test(normalized) &&
-    messageMentionsFoodDish(normalized) &&
-    !FOOD_EAT_PATTERN.test(normalized)
-  );
+  return detectPairingKind(message) === "drinks_for_food";
 }
 
 export function messageRequestsRecommendation(message: string): boolean {
@@ -153,7 +132,12 @@ export function messageLooksLikeMenuHelp(message: string): boolean {
   return (
     MENU_HELP_PATTERN.test(normalized) ||
     messageRequestsDrinks(message) ||
-    messageMentionsFoodDish(normalized)
+    detectPairingKind(message) !== null ||
+    detectWaitTimeQuestion(message) ||
+    detectPortionQuestion(message) ||
+    detectIngredientQuestion(message) ||
+    detectAllergenContentQuestion(message) ||
+    mentionsCatalogDish(message)
   );
 }
 
@@ -180,7 +164,11 @@ export function menuCategoryForMessage(message: string): string | null {
         category !== "gerimai" &&
         pattern.test(normalized)
     )?.category;
-    return specific ?? "gerimai";
+    return specific ?? pairingCategoryForMessage(message) ?? "gerimai";
+  }
+  const pairingKind = detectPairingKind(message);
+  if (pairingKind) {
+    return pairingCategoryForMessage(message);
   }
   return (
     menuCategoryPatterns.find(({ pattern }) => pattern.test(normalized))
@@ -537,15 +525,21 @@ export function extractTurnState(
   if (/\b(pasalink|remove)\b|удал|убер/u.test(normalized)) {
     intent = "remove_from_cart";
   }
-  if (/\b(saskait\w*|bill)\b|сч[её]т/u.test(normalized)) {
+  if (detectPayRequest(message)) {
     intent = "request_bill";
   }
   if (/\b(padavej\w*|waiter)\b|официант/u.test(normalized)) {
     intent = "request_waiter";
   }
   if (allergyMentioned && !thirdPartyAllergy && !negatedAllergy) {
-    intent = "allergy";
-    stage = "clarifying";
+    const alsoOrdering =
+      intent === "recommendation" ||
+      intent === "add_to_cart" ||
+      detectPairingKind(message) !== null;
+    if (!alsoOrdering) {
+      intent = "allergy";
+      stage = "clarifying";
+    }
   }
   if (stage && !unresolvedAllergy) {
     operations.push({ kind: "set_stage", stage });

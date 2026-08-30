@@ -17,6 +17,7 @@ import {
   messageLooksLikeMenuHelp,
   messageUsesPriorReference,
 } from "./stateExtraction.ts";
+import { resolveMentionedDishes } from "./pairing.ts";
 import { WAITER_POLICY_VERSION } from "./waiterPolicy.ts";
 import { summarizeCart } from "./aiProvider.ts";
 
@@ -77,6 +78,18 @@ async function relevantProducts(
       if (!product) continue;
       byId.set(product.productId, product);
       provenance.set(product.productId, "explicit_prior_reference");
+    }
+  }
+
+  for (const mentioned of resolveMentionedDishes(message)) {
+    const product = await menuRepository.getProductDetails(
+      mentioned.productId,
+      state.language
+    );
+    if (!product) continue;
+    byId.set(product.productId, product);
+    if (!provenance.has(product.productId)) {
+      provenance.set(product.productId, "current_query");
     }
   }
 

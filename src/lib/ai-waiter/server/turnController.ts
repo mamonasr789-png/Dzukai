@@ -57,6 +57,10 @@ import {
   extractTurnState,
   messageUsesPriorReference,
 } from "./stateExtraction.ts";
+import {
+  detectAllergenContentQuestion,
+  detectIngredientQuestion,
+} from "./pairing.ts";
 import type { SafeToolRegistry } from "./toolRegistry.ts";
 import {
   READ_ONLY_TOOLS,
@@ -324,7 +328,9 @@ export class WaiterTurnController {
     }
     if (
       state.allergies.length > 0 &&
-      (isFoodSafetyQuestion(command.message) || extracted.intent === "allergy")
+      (isFoodSafetyQuestion(command.message) || extracted.intent === "allergy") &&
+      !detectAllergenContentQuestion(command.message) &&
+      !detectIngredientQuestion(command.message)
     ) {
       return this.controlledResult({
         command,
@@ -887,10 +893,15 @@ export class WaiterTurnController {
     }
 
     let message = sanitizeTurnText(command.step.message);
+    const drafted = message
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
     if (
       command.state.allergies.length > 0 &&
-      (isFoodSafetyQuestion(command.command.message) ||
-        /\b(safe|saug\w*)\b/iu.test(message))
+      /\b(visiskai saug\w*|saugu jums|saugu valgyti|completely safe|safe for you|safe to eat|allergen[- ]free|be alergenu)\b/u.test(
+        drafted
+      )
     ) {
       message = this.responseRenderer.allergySafety(
         this.voiceFor(command.state, command.command.message)

@@ -21,7 +21,13 @@ import {
   resetDevelopmentRuntime,
 } from "../server/runtime.ts";
 import { InMemoryStaffTaskAdapter } from "../server/staffTaskPort.ts";
+import { readFile } from "node:fs/promises";
 import { foodGroupForCategory } from "../../foodGroups.ts";
+import {
+  filterPairingCandidates,
+  pairingCategoryForMessage,
+  resolveMentionedDishes,
+} from "../server/pairing.ts";
 import {
   menuCategoryForMessage,
   messageRequestsAnotherRecommendation,
@@ -239,6 +245,201 @@ test("informal LT drink pairing recommends real drinks instead of the unknown-to
       assert.ok(reference.referenceSetId, reference.productId);
     }
   }
+});
+
+test("pairing resolves any catalog dish, not only saltibarsciai", () => {
+  assert.equal(
+    pairingCategoryForMessage("ka gerti prie keptos duonos?"),
+    "alus"
+  );
+  assert.equal(
+    pairingCategoryForMessage("ka gerti prie didzkukuliu?"),
+    "alus"
+  );
+  const bread = resolveMentionedDishes("keptos duonos");
+  assert.ok(
+    bread.some((dish) => dish.productId.startsWith("pa")),
+    JSON.stringify(bread)
+  );
+  const dumplings = resolveMentionedDishes("didzkukuliu");
+  assert.ok(
+    dumplings.some((dish) => dish.category === "bulviniai"),
+    JSON.stringify(dumplings)
+  );
+});
+
+test("sold-out items are excluded from pairing candidates", () => {
+  const filtered = filterPairingCandidates([
+    { productId: "gg6", orderability: { status: "orderable" } },
+    { productId: "al1", soldOut: true, orderability: { status: "unavailable" } },
+    { productId: "lim1", orderability: { status: "orderable" } },
+    { productId: "kav1", orderability: { status: "unavailable" } },
+  ]);
+  assert.deepEqual(
+    filtered.map((item) => item.productId),
+    ["gg6", "lim1"]
+  );
+});
+
+test("drink pairing works for kepta duona and didzkukuliai, not only saltibarsciai", async () => {
+  for (const [message, clientTurnId, expectedCategory] of [
+    ["ka gerti prie keptos duonos?", "turn_pair_bread", "alus"],
+    ["ka gerti prie didzkukuliu?", "turn_pair_potato", "alus"],
+    ["what to drink with kepta duona", "turn_pair_bread_en", "alus"],
+  ] as const) {
+    const harness = createHarness();
+    const session = await createSession(harness, "lt", true);
+    const result = await harness.controller.handleWaiterTurn(
+      request(session.sessionId, message, clientTurnId)
+    );
+    assert.equal(result.ok, true, message);
+    if (!result.ok) return;
+    assert.ok(
+      result.data.references.length >= 1 && result.data.references.length <= 3,
+      `${message} refs=${result.data.references.length}`
+    );
+    assert.doesNotMatch(
+      result.data.message,
+      /nepadėsiu|can't help with that|su tuo nepadėsiu/iu,
+      result.data.message
+    );
+    for (const reference of result.data.references) {
+      const product = await harness.menuRepository.getProductDetails(
+        reference.productId
+      );
+      assert.ok(product, reference.productId);
+      assert.equal(
+        foodGroupForCategory(product.category),
+        "drinks",
+        product.category
+      );
+      if (expectedCategory === "alus") {
+        assert.ok(
+          ["alus", "gerimai", "limonadai", "sidras", "nealko-alus"].includes(
+            product.category
+          ),
+          product.category
+        );
+      }
+    }
+  }
+});
+
+test("food with beer never gets a cannot-help reply", async () => {
+  const harness = createHarness();
+  const session = await createSession(harness, "lt", true);
+  const result = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "Ka valgyti prie alaus?", "turn_pair_snacks")
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.doesNotMatch(
+    result.data.message,
+    /nepadėsiu|can't help with that|I can't help/iu,
+    result.data.message
+  );
+  assert.ok(result.data.references.length >= 1);
+  for (const reference of result.data.references) {
+    const product = await harness.menuRepository.getProductDetails(
+      reference.productId
+    );
+    assert.equal(product?.category, "prie-alaus");
+  }
+});
+
+test("unknown catalog dish still gets real drinks, never invented names", async () => {
+  const harness = createHarness();
+  const session = await createSession(harness, "lt", true);
+  const result = await harness.controller.handleWaiterTurn(
+    request(
+      session.sessionId,
+      "ka gerti prie cepelinu?",
+      "turn_pair_unknown_dish"
+    )
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.doesNotMatch(result.data.message, /nepadėsiu|can't help with that/iu);
+  assert.ok(result.data.references.length >= 1);
+  for (const reference of result.data.references) {
+    const product = await harness.menuRepository.getProductDetails(
+      reference.productId
+    );
+    assert.ok(product);
+    assert.doesNotMatch(product.name, /cepelin/iu);
+    assert.equal(foodGroupForCategory(product.category), "drinks");
+  }
+});
+
+test("allergen question answers from catalog instead of escalating with no info", async () => {
+  const harness = createHarness();
+  const session = await createSession(harness);
+  const result = await harness.controller.handleWaiterTurn(
+    request(
+      session.sessionId,
+      "Ar saltibarsciai turi pieno?",
+      "turn_allergen_honesty"
+    )
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.doesNotMatch(result.data.message, /saugu valgyti|safe to eat|be alergen/iu);
+  assert.match(
+    result.data.message,
+    /nepiln|nepatikr|negarant|koleg|unknown|incomplete|staff|коллег/iu
+  );
+  assert.ok(
+    result.data.references.some((item) => item.productId === "sr1") ||
+      /Pienas|pieno|Kiaušin|kiausin/iu.test(result.data.message),
+    result.data.message
+  );
+});
+
+test("unknown allergen record is said unknown and offers staff", async () => {
+  const harness = createHarness();
+  const session = await createSession(harness);
+  const result = await harness.controller.handleWaiterTurn(
+    request(
+      session.sessionId,
+      "Ar kopustiene turi alergenu?",
+      "turn_allergen_unknown"
+    )
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.match(
+    result.data.message,
+    /nežinau|nėra|unknown|не знаю|koleg|staff|коллег/iu
+  );
+  assert.doesNotMatch(result.data.message, /saugu valgyti|be alergenų/iu);
+});
+
+test("asking to pay calls the waiter for the bill, not in-app pay", async () => {
+  const harness = createHarness();
+  const session = await createSession(harness, "lt", true);
+  const result = await harness.controller.handleWaiterTurn(
+    request(session.sessionId, "Noriu sumoketi", "turn_pay_waiter")
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.match(
+    result.data.message,
+    /sąskait|saskait|bill|счёт|счет/iu
+  );
+  assert.doesNotMatch(
+    result.data.message,
+    /stripe|card in the app|mokėti programėlėje/iu
+  );
+});
+
+test("guest pay route stays disabled", async () => {
+  const source = await readFile(
+    new URL("../../../app/api/table/pay/route.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(source, /guest_pay_disabled/);
+  assert.match(source, /status:\s*403/);
+  assert.doesNotMatch(source, /processPayment/);
 });
 
 test("a refused category is never used as the category to recommend", () => {

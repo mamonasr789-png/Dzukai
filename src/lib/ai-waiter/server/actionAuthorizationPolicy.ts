@@ -49,7 +49,7 @@ function actionTypesIn(message: string): ActionType[] {
   if (/\b(padavej\w*|waiter)\b|официант/u.test(value)) {
     types.push("request_waiter");
   }
-  if (/\b(saskait\w*|bill|check please)\b|сч[её]т/u.test(value)) {
+  if (/\b(saskait\w*|bill|check please|moket\w*|sumoket\w*|apmok\w*|pay(?:ment|ing)?)\b|сч[её]т|оплат/u.test(value)) {
     types.push("request_bill");
   }
   return [...new Set(types)];
