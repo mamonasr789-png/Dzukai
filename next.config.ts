@@ -1,8 +1,12 @@
 import type { NextConfig } from "next";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const nextConfig: NextConfig = {
   turbopack: {
-    root: "/Users/rytis/Desktop/Dzukai",
+    // This config file's directory, not a machine-specific absolute path.
+    // A hardcoded /Users/rytis/... root breaks Vercel and any other checkout.
+    root: path.dirname(fileURLToPath(import.meta.url)),
   },
   images: {
     remotePatterns: [

@@ -1,13 +1,7 @@
-import { z } from "zod";
-import { getSyncStore } from "../../../../lib/server/syncStore";
+import { requireTableAccess } from "../../../../lib/server/auth/requireTableAccess";
+import { recordTableScanned } from "../../../../lib/server/taskService";
 
 export const runtime = "nodejs";
-
-const ScannedRequestSchema = z
-  .object({
-    tableNumber: z.string().trim().min(1).max(20),
-  })
-  .strict();
 
 /**
  * Fired once per browser per dining visit, right after proxy.ts's table gate
@@ -16,38 +10,21 @@ const ScannedRequestSchema = z
  * No real order yet, so this uses a synthetic orderId (same trick as
  * src/lib/ai-waiter/server/staffTaskPort.ts's `ai:${sessionId}`) so each scan
  * gets its own card in /waiter instead of colliding into one group.
+ *
+ * Table identity is the signed vaise_table_access cookie only. A JSON body
+ * tableNumber is ignored so this cannot spam waiter cards for arbitrary
+ * tables without a real QR scan.
  */
-export async function POST(request: Request): Promise<Response> {
-  const store = await getSyncStore();
-  if (!store) {
+export async function POST(): Promise<Response> {
+  const access = await requireTableAccess();
+  if (!access) {
+    return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await recordTableScanned(access.tableNumber);
+    return Response.json({ ok: true }, { headers: { "cache-control": "no-store" } });
+  } catch {
     return Response.json({ ok: false, error: "sync_not_configured" }, { status: 503 });
   }
-
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return Response.json({ ok: false, error: "invalid_json" }, { status: 400 });
-  }
-  const parsed = ScannedRequestSchema.safeParse(raw);
-  if (!parsed.success) {
-    return Response.json({ ok: false, error: "invalid_request" }, { status: 400 });
-  }
-
-  const { tableNumber } = parsed.data;
-  const now = new Date().toISOString();
-  const orderId = `scan:${tableNumber}:${Date.now()}`;
-  const task = {
-    id: orderId,
-    type: "table_scanned" as const,
-    status: "waiting" as const,
-    orderId,
-    tableNumber,
-    createdAt: now,
-    updatedAt: now,
-    triggeredBy: orderId,
-    items: [] as { productId: string; name: string; quantity: number }[],
-  };
-  await store.push("tasks", [{ id: task.id, data: JSON.stringify(task), updatedAt: task.updatedAt }]);
-  return Response.json({ ok: true }, { headers: { "cache-control": "no-store" } });
 }

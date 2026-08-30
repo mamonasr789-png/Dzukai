@@ -112,3 +112,26 @@ export async function completeTasksForOrders(orderIds: string[], staff?: StaffSt
     await pushTask({ ...t, status: "completed", updatedAt: now, ...(staff ? { completedBy: staff } : null) });
   }
 }
+
+/**
+ * Waiter heads-up that a guest just passed the QR gate for this table.
+ * Each call is a distinct card (synthetic scan:table:timestamp id) — not
+ * deduped — so two phones at the same table both show up. Identity must
+ * already have been taken from the signed table cookie; never from a body.
+ */
+export async function recordTableScanned(tableNumber: string): Promise<void> {
+  const now = new Date().toISOString();
+  const orderId = `scan:${tableNumber}:${Date.now()}`;
+  const task: WaiterTask = {
+    id: orderId,
+    type: "table_scanned",
+    status: "waiting",
+    orderId,
+    tableNumber,
+    createdAt: now,
+    updatedAt: now,
+    triggeredBy: orderId,
+    items: [],
+  };
+  await pushTask(task);
+}

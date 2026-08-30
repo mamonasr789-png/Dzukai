@@ -347,6 +347,30 @@ async function main() {
     expect((await orderService.listOrders()).length).toBe(2);
   });
 
+  describe("recordTableScanned", () => {});
+  await itAsync("creates a table_scanned waiter task for the cookie table, never a body claim", async () => {
+    freshStore();
+    const cookieTable = "5";
+    const bodyClaim = "999";
+    // Route passes requireTableAccess().tableNumber, not JSON body.tableNumber.
+    await taskService.recordTableScanned(cookieTable);
+    const tasks = await taskService.listTasks();
+    expect(tasks.length).toBe(1);
+    expect(tasks[0].type).toBe("table_scanned");
+    expect(tasks[0].tableNumber).toBe(cookieTable);
+    expect(tasks[0].tableNumber).not.toBe(bodyClaim);
+  });
+
+  await itAsync("two scans of the same table produce two distinct waiter cards", async () => {
+    freshStore();
+    await taskService.recordTableScanned("5");
+    await new Promise((r) => setTimeout(r, 2));
+    await taskService.recordTableScanned("5");
+    const tasks = (await taskService.listTasks()).filter((t) => t.type === "table_scanned");
+    expect(tasks.length).toBe(2);
+    expect(tasks[0].id).not.toBe(tasks[1].id);
+  });
+
   describe("requestBill / callWaiter", () => {});
   await itAsync("bill request transitions the session and creates exactly one task even if called twice", async () => {
     freshStore();
