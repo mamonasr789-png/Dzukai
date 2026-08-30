@@ -281,7 +281,6 @@ async function main() {
     expect((await orderService.listOrders()).length).toBe(1);
   });
 
-  describe("requestBill / callWaiter", () => {});
   describe("session close after waiter settle", () => {});
   await itAsync("waiter settle closes the session", async () => {
     freshStore();
@@ -348,6 +347,7 @@ async function main() {
     expect((await orderService.listOrders()).length).toBe(2);
   });
 
+  describe("requestBill / callWaiter", () => {});
   await itAsync("bill request transitions the session and creates exactly one task even if called twice", async () => {
     freshStore();
     await orderService.submitOrder({ tableNumber: "5", items: items(), total: 10 });

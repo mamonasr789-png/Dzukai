@@ -14,10 +14,13 @@ import {
   type OrderStatus,
   type TableSession,
   STATUS_ORDER,
+  ACTIVE_ORDER_STATUSES,
   guestTimelineIndex,
+  isSettledSessionStatus,
   orderPreparedBy,
   orderDeliveredBy,
 } from "@/lib/orderTypes";
+import { SessionEndedScreen } from "@/components/SessionEndedGate";
 import { useTableSession, useTableOrder } from "@/lib/hooks/useTableOrders";
 import { useLanguage, type Lang } from "@/lib/store";
 import {
@@ -114,9 +117,15 @@ function OrderContent() {
 
   // Once a session has been seen, its disappearance (no id pinned) means the
   // whole visit is over — show the thank-you screen instead of "no order".
+  // Same screen if the waiter already settled and nothing is left to track.
   const hadSessionRef = useRef(false);
   if (session) hadSessionRef.current = true;
-  const sessionEnded = hadSessionRef.current && !session && !id && !sessionLoading;
+  const sessionSettled = !!session && isSettledSessionStatus(session.status);
+  const hasTrackableFood = sessionOrders.some((o) => ACTIVE_ORDER_STATUSES.includes(o.status));
+  const sessionEnded =
+    !id &&
+    !sessionLoading &&
+    ((hadSessionRef.current && !session) || (sessionSettled && !hasTrackableFood));
 
   // Re-fetch the pinned order immediately on id change (session → specific
   // order view and back) instead of waiting for the next poll tick.
@@ -194,7 +203,7 @@ function OrderContent() {
 
   // ── Early returns ─────────────────────────────────────────────────────────
 
-  if (sessionEnded) return <SessionEndedView lang={lang} />;
+  if (sessionEnded) return <SessionEndedScreen />;
 
   if (order === undefined) {
     return (
@@ -851,37 +860,19 @@ function SessionView({
 
       {/* Actions */}
       <div className="px-4 mt-6 flex flex-col gap-2.5">
+        {session.status !== "PAID" && session.status !== "CLOSED" && (
         <Link href="/menu">
           <Button variant="outline" className="w-full rounded-2xl h-12 font-semibold">
             {copy.order_more}
           </Button>
         </Link>
+        )}
         <Link href="/cart">
           <Button variant="ghost" className="w-full rounded-2xl h-12 font-semibold text-muted-foreground">
             {copy.back}
           </Button>
         </Link>
       </div>
-    </div>
-  );
-}
-
-// ── Session ended (waiter paid) ───────────────────────────────────────────────
-
-function SessionEndedView({ lang }: { lang: Lang }) {
-  const copy = useT(lang);
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
-      <div className="w-20 h-20 rounded-full bg-emerald-500/10 flex items-center justify-center mb-5">
-        <CheckCircle2 size={40} className="text-emerald-500" />
-      </div>
-      <h2 className="font-black text-2xl mb-2">{copy.session_ended_title}</h2>
-      <p className="text-muted-foreground text-sm mb-8">
-        {copy.session_ended_sub}
-      </p>
-      <Link href="/menu">
-        <Button className="rounded-full px-8 h-12 font-bold">{copy.back_to_menu}</Button>
-      </Link>
     </div>
   );
 }

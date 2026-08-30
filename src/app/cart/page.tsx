@@ -78,6 +78,8 @@ export default function CartPage() {
       });
       clearCart();
       router.push(`/order?id=${order.id}`);
+    } catch {
+      // session_closed (waiter settled mid-submit) — gate/poll will bounce.
     } finally {
       setSubmitting(false);
     }
@@ -273,11 +275,13 @@ function ActiveSessionState({ session }: { session: TableSession }) {
           </Button>
         </Link>
 
+        {!isPaid && (
         <Link href="/menu" className="w-full">
           <Button variant="outline" className="w-full rounded-2xl h-12 font-bold">
             {tr.order_more}
           </Button>
         </Link>
+        )}
 
         <button
           onClick={handleCallWaiter}

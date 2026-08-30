@@ -304,6 +304,7 @@ export const t = {
     back: "Grįžti",
     session_ended_title: "Sesija užbaigta. Ačiū!",
     session_ended_sub: "Sąskaita apmokėta. Labai džiaugiamės jus matę!",
+    session_ended_rescan: "Norėdami užsisakyti iš naujo, nuskenuokite stalo QR kodą.",
     // Home
     recommended: "Rekomenduojame",
     beer_label: "Savos daryklos alus",
@@ -426,6 +427,7 @@ export const t = {
     back: "Back",
     session_ended_title: "Session completed. Thank you!",
     session_ended_sub: "Your bill has been paid. We were delighted to serve you!",
+    session_ended_rescan: "To order again, scan the QR code at your table.",
     recommended: "Recommended",
     beer_label: "Our brewery",
     beer_title: "6 types of\nCraft beer 🍺",
@@ -546,6 +548,7 @@ export const t = {
     back: "Назад",
     session_ended_title: "Сессия завершена. Спасибо!",
     session_ended_sub: "Счёт оплачен. Мы были рады вас видеть!",
+    session_ended_rescan: "Чтобы заказать снова, отсканируйте QR-код на столе.",
     recommended: "Рекомендуем",
     beer_label: "Наша пивоварня",
     beer_title: "6 видов\nКрафтового пива 🍺",

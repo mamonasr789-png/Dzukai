@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import SessionEndedGate from "@/components/SessionEndedGate";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -15,6 +16,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <main className="max-w-lg mx-auto min-h-screen pb-24">{children}</main>
+    <main className="max-w-lg mx-auto min-h-screen pb-24">
+      <SessionEndedGate>{children}</SessionEndedGate>
+    </main>
   );
 }
